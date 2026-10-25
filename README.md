@@ -7,6 +7,8 @@ LG U+ 유동/서비스인구 데이터를 기반으로 워케이션 지역·시�
 
 - 모바일 앱: [workation-mobile](https://github.com/TEAM-SKPJC/workation-mobile) (Flutter)
 - 웹: [workation-web](https://github.com/TEAM-SKPJC/workation-web) (React + Tailwind)
+- 팀 문서: [workation-docs](https://github.com/TEAM-SKPJC/workation-docs) (명세서 · 디자인 원칙 · [협업 규칙](https://github.com/TEAM-SKPJC/workation-docs/blob/main/협업/협업-규칙.md))
+- 디자인: [Figma 기업연계캡스톤](https://www.figma.com/design/QulBXJPP2qYhRhh8lGzT66)
 
 ## 시작하기
 
