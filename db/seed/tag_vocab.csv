@@ -1,0 +1,166 @@
+target_kind,target_key,direction,phrase
+tag,coast,1,바닷가
+tag,coast,1,바다 근처
+tag,coast,1,해안가
+tag,coast,1,바다가 보이는
+tag,coast,1,오션뷰
+tag,coast,1,파도 소리
+tag,coast,1,바다 산책
+tag,coast,1,해변 마을
+tag,coast,1,바닷바람
+tag,coast,1,항구 마을
+tag,beach,1,해수욕장
+tag,beach,1,해변
+tag,beach,1,모래사장
+tag,beach,1,물놀이
+tag,beach,1,수영할 수 있는 바다
+tag,beach,1,비치
+tag,beach,1,해수욕
+tag,beach,1,백사장
+tag,island,1,섬
+tag,island,1,섬마을
+tag,island,1,배 타고 가는 곳
+tag,island,1,외딴 섬
+tag,island,1,섬 여행
+tag,island,1,부속 섬
+tag,surf,1,서핑
+tag,surf,1,서핑하기 좋은
+tag,surf,1,파도 타기
+tag,surf,1,서핑 스쿨
+tag,surf,1,윈드서핑
+tag,surf,1,해양 레저
+tag,surf,1,서퍼
+tag,surf,1,패들보드
+tag,cafe,1,카페
+tag,cafe,1,카페 많은
+tag,cafe,1,커피
+tag,cafe,1,카페에서 작업
+tag,cafe,1,노트북 들고 카페
+tag,cafe,1,카공
+tag,cafe,1,감성 카페
+tag,cafe,1,브런치
+tag,cafe,1,디저트 카페
+tag,cafe,1,카페 거리
+tag,food,1,맛집
+tag,food,1,음식점 많은
+tag,food,1,먹거리
+tag,food,1,식당
+tag,food,1,맛있는 음식
+tag,food,1,밥집
+tag,food,1,외식
+tag,food,1,맛집 골목
+tag,food,1,현지 음식
+tag,food,1,식도락
+tag,library,1,도서관
+tag,library,1,조용히 공부할 곳
+tag,library,1,책 읽기
+tag,library,1,열람실
+tag,library,1,작업 공간
+tag,library,1,노트북 작업
+tag,library,1,무료 작업 공간
+tag,library,1,독서
+tag,long_stay,1,장기 숙소
+tag,long_stay,1,한 달 살기
+tag,long_stay,1,레지던스
+tag,long_stay,1,게스트하우스
+tag,long_stay,1,콘도
+tag,long_stay,1,오래 머물 숙소
+tag,long_stay,1,주 단위 숙박
+tag,long_stay,1,장기 체류
+tag,long_stay,1,취사 가능한 숙소
+tag,park,1,공원
+tag,park,1,산책
+tag,park,1,산책로
+tag,park,1,녹지
+tag,park,1,조깅
+tag,park,1,잔디밭
+tag,park,1,근린공원
+tag,park,1,쉬어 갈 곳
+tag,market,1,시장
+tag,market,1,전통시장
+tag,market,1,재래시장
+tag,market,1,오일장
+tag,market,1,장 보기
+tag,market,1,야시장
+tag,market,1,시장 구경
+tag,market,1,로컬 시장
+tag,resort,1,리조트
+tag,resort,1,휴양
+tag,resort,1,호캉스
+tag,resort,1,리조트 단지
+tag,resort,1,휴양지
+tag,resort,1,풀빌라
+tag,resort,1,쉬러 가는 곳
+tag,resort,1,힐링 리조트
+tag,city,1,도심
+tag,city,1,도시
+tag,city,1,시내
+tag,city,1,번화가
+tag,city,1,편의시설 많은
+tag,city,1,교통 편한
+tag,city,1,도시 생활
+tag,city,1,중심가
+tag,city,1,인프라 좋은
+tag,mountain,1,산
+tag,mountain,1,등산
+tag,mountain,1,숲
+tag,mountain,1,계곡
+tag,mountain,1,산속
+tag,mountain,1,자연휴양림
+tag,mountain,1,오름
+tag,mountain,1,트레킹
+tag,mountain,1,숲속 마을
+tag,mountain,1,폭포
+metric,quiet,1,조용한
+metric,quiet,1,한적한
+metric,quiet,1,사람 없는
+metric,quiet,1,사람이 적은
+metric,quiet,1,붐비지 않는 동네
+metric,quiet,1,관광객 없는
+metric,quiet,1,고요한
+metric,quiet,1,차분한
+metric,quiet,1,시골 같은
+metric,quiet,1,조용히 일할 수 있는
+metric,quiet,-1,북적이는
+metric,quiet,-1,사람 많은
+metric,quiet,-1,관광지 한복판
+metric,quiet,-1,유동인구 많은
+metric,quiet,-1,복잡한
+metric,quiet,-1,붐비는 동네
+metric,ease,1,성수기 피해서
+metric,ease,1,비수기
+metric,ease,1,한산한 시기
+metric,ease,1,붐비지 않는 달
+metric,ease,1,관광객 적은 때
+metric,ease,1,여유로운 시기
+metric,ease,1,덜 붐비는 계절
+metric,ease,1,여행객 적은 달
+metric,peer,1,또래 많은
+metric,peer,1,젊은 사람 많은
+metric,peer,1,20대 30대
+metric,peer,1,청년
+metric,peer,1,젊은 분위기
+metric,peer,1,MZ
+metric,peer,1,또래 워케이셔너
+metric,peer,1,비슷한 나이대
+metric,evening,1,저녁에 활기찬
+metric,evening,1,밤에 놀 곳
+metric,evening,1,저녁 산책하기 좋은
+metric,evening,1,퇴근 후 즐길 거리
+metric,evening,1,밤거리
+metric,evening,1,야경
+metric,evening,1,저녁 분위기
+metric,evening,1,핫플
+metric,evening,-1,저녁에 조용한
+metric,evening,-1,밤이 고요한
+metric,evening,-1,일찍 잠드는 동네
+metric,evening,-1,밤에 한적한
+metric,overnight,1,숙박하는 사람 많은
+metric,overnight,1,머물다 가는 곳
+metric,overnight,1,자고 가는 여행지
+metric,overnight,1,체류형 여행지
+metric,overnight,1,며칠 묵기 좋은
+metric,overnight,1,숙박 여행
+tag,resort,1,호텔
+tag,resort,1,수영장 있는 숙소
+tag,resort,1,고급 숙소

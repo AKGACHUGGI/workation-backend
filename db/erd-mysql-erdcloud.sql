@@ -188,6 +188,29 @@ CREATE TABLE dong_feature (
   CONSTRAINT fk_dong_feature_dong_id FOREIGN KEY (dong_id) REFERENCES dong (dong_id)
 ) COMMENT = '행정동 × 월 특징 벡터 (pgvector). 비슷한 동네 찾기용. db/04_dong_feature.sql 이 metric · dong_hourly 에서 계산';
 
+CREATE TABLE tag_vocab (
+  vocab_id               INT            NOT NULL AUTO_INCREMENT COMMENT '',
+  target_kind            VARCHAR(6)     NOT NULL COMMENT 'tag = dong.tags 코드, metric = metric_def.metric_key',
+  target_key             VARCHAR(20)    NOT NULL COMMENT '',
+  direction              SMALLINT       NOT NULL DEFAULT 1 COMMENT '지표 방향. 1 = 점수 높은 곳, -1 = 점수 낮은 곳. 태그는 항상 1',
+  phrase                 VARCHAR(50)    NOT NULL COMMENT '',
+  embedding              TEXT           NULL COMMENT 'PostgreSQL 은 vector(1024)',
+  model                  VARCHAR(40)    NULL COMMENT '임베딩 모델 이름 (예: clova-embedding-v2)',
+  updated_at             DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '',
+  PRIMARY KEY (vocab_id),
+  UNIQUE (target_kind, target_key, direction, phrase)
+) COMMENT = '자연어 표현 사전. 사용자 질문 조각을 임베딩해 가장 가까운 표현의 조건(태그·지표)으로 바꾼다. 원본은 db/seed/tag_vocab.csv';
+
+CREATE TABLE dong_doc (
+  dong_id                SMALLINT       NOT NULL COMMENT '',
+  body                   TEXT           NOT NULL COMMENT '지표 등급·태그·붐비는 시간·조용한 달로 만든 문장. db/05_dong_doc.sql 이 생성',
+  embedding              TEXT           NULL COMMENT 'body 의 임베딩. PostgreSQL 은 vector(1024)',
+  model                  VARCHAR(40)    NULL COMMENT '',
+  updated_at             DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '',
+  PRIMARY KEY (dong_id),
+  CONSTRAINT fk_dong_doc_dong_id FOREIGN KEY (dong_id) REFERENCES dong (dong_id)
+) COMMENT = '행정동 소개문 (연간 기준 203곳). 모호한 질문의 보조 검색과 LLM 답변 근거';
+
 CREATE TABLE region_link (
   link_id                INT AUTO_INCREMENT NOT NULL COMMENT '',
   region_id              SMALLINT       NOT NULL COMMENT '',

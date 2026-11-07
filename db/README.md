@@ -11,6 +11,9 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
 | `02_postgis.sql` | 읍면동 경계 폴리곤 컬럼 `dong.geom` + GIST 인덱스 (PostGIS 확장). 2026-11-07 적용 |
 | `03_metrics.sql` | 지표 산출. `metric_def` 시드 8행 + `metric` + `dong_hourly` 를 DB 안에서 계산. 재실행 안전 |
 | `04_dong_feature.sql` | 동네 특징 벡터 `dong_feature` 계산 (pgvector). 지표 점수 4개 + 24시간 곡선 48칸. 재실행 안전 |
+| `05_dong_doc.sql` | 동네 소개문 `dong_doc.body` 생성 (연간 지표 등급 · 태그 · 붐비는 시간 · 한산한 달). 바뀐 문장만 임베딩을 비운다. 재실행 안전 |
+| `seed/tag_vocab.csv` | 자연어 표현 사전 원본 (표현 → 태그·지표). 팀이 표현을 더하면 `build_embeddings.py vocab` 다시 실행 |
+| `tools/build_embeddings.py` | CLOVA Studio 임베딩 v2(1024차원)로 `tag_vocab` · `dong_doc` 의 embedding 채우는 SQL 생성. `CLOVA_API_KEY` 필요 |
 | `tools/build_coast_sql.py` | OSM 해안선 → `dong.coast_dist_km` 와 `coast` 태그(1 km 이내), `region.tags` 의 coast 갱신 SQL 생성 |
 | `tools/build_poi_tags_sql.py` | 관광공사 TourAPI 장소 → 장소 태그(beach · island · surf · cafe · food · library · long_stay · park · market · resort) 갱신 SQL 생성. `TOURAPI_KEY` 필요 |
 | `tools/build_tags_sql.py` | 태그 입력 시트(xlsx) → `city` · `mountain` 태그 갱신 SQL 생성. 시군구 태그는 행정동 태그의 합집합 |
@@ -41,6 +44,7 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
 | `03_metrics.sql` | `metric_def` 시드, `metric`, `dong_hourly` 산출 | 2026-11-07 |
 | `migrations/20261107_metric-formulas-django.sql` | 주석만: 저녁 활기·숙박 성향 식 확정, Django·Cloudflare 표기 | 2026-11-07 |
 | `migrations/20261107_dong-tags-coast.sql` + `build_coast_sql.py apply … 1` · `build_poi_tags_sql.py apply` 출력 | `dong.tags`, `dong.coast_dist_km` 추가, 해안 거리와 자동 태그 적재 | 2026-11-07 |
+| `migrations/20261107_text-embedding.sql` + `05_dong_doc.sql` + `build_embeddings.py` 출력 | `tag_vocab` · `dong_doc` 추가, 표현 165개 · 소개문 203개 임베딩 | 2026-11-07 |
 | `migrations/20261107_pgvector-dong-feature.sql` + `04_dong_feature.sql` | pgvector 확장, `dong_feature` 테이블 추가와 특징 벡터 2,639행 적재 | 2026-11-07 |
 
 ## 지표 (명세 v0.3 변경안 3장)
@@ -79,6 +83,16 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
    WHERE f.month = :m AND f.dong_id <> :id
    ORDER BY f.metric_vec <-> me.metric_vec LIMIT 5;   -- 하루 리듬까지 보려면 curve_vec <=> (코사인 거리) 를 더한다
   ```
+- 자연어 검색 임베딩 (2026-11-07, CLOVA Studio 임베딩 v2, 1024차원): 질문을 LLM 이 조각("파도 소리 들리는", "조용한")으로 나누고, 조각마다 `tag_vocab` 에서 가장 가까운 표현의 조건을 고른다. 문장 통째로 비교하면 조건 하나만 잡혀서 조각 단위로 한다.
+  - 평가 (사전에 없는 표현 25개): 1위 정답 24/25. 틀린 1개는 "해변에서 노을" → coast (기대 beach, 차이 0.01). 정답의 1위 유사도 최소 0.73, 무관한 문장("오늘 날씨 어때" 등)의 최고 0.62 → **0.68 미만이면 조건으로 쓰지 않는다**.
+  - `dong_doc` 은 조건으로 못 잡은 모호한 질문의 보조 검색과 답변 근거용이다. 유사도가 0.5~0.6 으로 촘촘해 순위 결정에는 쓰지 않는다.
+  - 질문 조각 매칭 예:
+    ```sql
+    SET search_path = public, extensions;
+    SELECT target_kind, target_key, direction, phrase, 1 - (embedding <=> :q) AS sim
+      FROM tag_vocab ORDER BY embedding <=> :q LIMIT 3;   -- :q = 조각의 임베딩 (같은 모델)
+    ```
+  - CLOVA Studio 기본 한도는 분당 60회다. 서비스에서는 질문 조각 임베딩을 Redis 에 캐시한다.
 - 보류: `app_user.provider` 의 `apple` 제거와 알림 설정 컬럼 3개는 모바일 Apple 로그인 결정(workation-mobile #2) 뒤에.
 
 ## v0.2 → v0.3 변경
@@ -129,6 +143,7 @@ erDiagram
   dong ||--o{ dong_year_summary : ""
   dong ||--o{ dong_hourly : ""
   dong ||--o{ dong_feature : ""
+  dong ||--o| dong_doc : ""
   metric_def ||--o{ metric : ""
   metric_def ||--o{ metric_vote : ""
   region ||..o{ metric : "unit_id"
@@ -276,6 +291,19 @@ erDiagram
     vector metric_vec "quiet peer evening local_life, 0~1"
     vector curve_vec "주중 24 + 주말 24, 0~1"
   }
+  dong_doc {
+    smallint dong_id PK,FK
+    text body "소개문"
+    vector embedding "1024"
+  }
+  tag_vocab {
+    serial vocab_id PK
+    varchar target_kind "tag metric"
+    varchar target_key
+    smallint direction "1 -1"
+    varchar phrase
+    vector embedding "1024"
+  }
   region_link {
     serial link_id PK
     smallint region_id FK
@@ -388,6 +416,7 @@ erDiagram
 7. `03_metrics.sql` 전체 실행. 원천 4테이블을 다시 적재했으면 이 파일도 다시 실행한다.
 8. 태그를 이 순서로: `tools/build_coast_sql.py apply <출력> 1`(해안) → `tools/build_poi_tags_sql.py apply <출력>`(장소) → `tools/build_tags_sql.py <시트> <출력>`(도시·산간). 각 출력 SQL 실행.
 9. Database → Extensions 에서 vector 를 켜거나 `migrations/20261107_pgvector-dong-feature.sql` 실행, 이어서 `04_dong_feature.sql` 실행. 지표를 다시 계산하면 이 파일도 다시 실행한다.
+10. `migrations/20261107_text-embedding.sql` 실행 → `build_embeddings.py vocab db/seed/tag_vocab.csv <접두어>` 출력 실행 → `05_dong_doc.sql` 실행 → `SELECT dong_id, body FROM dong_doc WHERE embedding IS NULL` 을 CSV 로 받아 `build_embeddings.py doc <csv> <접두어>` 출력 실행. 지표나 태그가 바뀌면 `05_dong_doc.sql` 부터 다시.
 
 ## 스키마 변경 규칙
 
