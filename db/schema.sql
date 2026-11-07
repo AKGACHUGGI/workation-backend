@@ -1,9 +1,12 @@
 -- 워케이션맵 ERD v0.3 (PostgreSQL 15+ / Supabase)
--- 2026-11-06 · 팀 아카츠키 · 최종 갱신 2026-11-07 (migrations/20261107_metric-v0.3.sql 반영)
+-- 2026-11-06 · 팀 아카츠키 · 최종 갱신 2026-11-07 (migrations/20261107_metric-v0.3.sql,
+--   20261107_metric-formulas-django.sql 반영)
 --
 -- 지표 개편 (2026-11-07, 명세 v0.3 변경안 · migrations/20261107_metric-v0.3.sql)
 --   - metric_def 키: ease·quiet·peer·overnight·evening + 보조 weekend_gap·peak_share·local_life.
---     종합 value 는 프리셋별로 달라 저장하지 않고 FastAPI 가 요청 시 계산.
+--     종합 value 는 프리셋별로 달라 저장하지 않고 백엔드(Django)가 요청 시 계산.
+--   - 식 확정 (migrations/20261107_metric-formulas-django.sql): evening = 저녁 보행 ÷ 저녁 체류,
+--     overnight = 숙박 계수(동 고정효과 회귀 β, 연간만). 산출 SQL 은 db/03_metrics.sql.
 --   - dong.is_excluded / excluded_reason 추가 (수동면 집계 제외 → 행정동 203곳 백분위).
 --   - dong_hourly.index_100 원천 = 보행인구(population_hourly.walk_avg).
 --
@@ -14,14 +17,14 @@
 --     population_hourly / population_demographic 으로 교체.
 --   - 전처리 요약 테이블 dong_month_summary / dong_year_summary 추가 (추천 점수 재료).
 --   - 전주시는 U+ 데이터에 구(완산·덕진) 구분이 없어 시 단위 1개로 둔다 → region 12개.
---   - 모든 테이블 RLS 활성화. 프론트는 Supabase 를 직접 호출하지 않고 Spring 이 service role
+--   - 모든 테이블 RLS 활성화. 프론트는 Supabase 를 직접 호출하지 않고 백엔드(Django)가 service role
 --     또는 DB 커넥션으로만 접근하므로 anon/authenticated 정책은 만들지 않는다.
 --
 -- 영역
 --   [마스터]    region, dong
 --   [정제 데이터] population_hourly(D1), population_demographic(D2),
 --                dong_month_summary, dong_year_summary          ← workation-data 가 적재
---   [산출]      metric_def, metric, dong_hourly, region_link    ← 백엔드(FastAPI) 가 계산
+--   [산출]      metric_def, metric, dong_hourly, region_link    ← db/03_metrics.sql 이 계산 (종합 value 는 Django)
 --   [사용자]    app_user, favorite
 --   [콘텐츠]    photo, tip, tip_reaction, tip_reply, report, metric_vote
 --   [추가 제안] share_card(F-16), nl_search_log(F-09)
@@ -279,11 +282,11 @@ CREATE TABLE metric (
   CHECK (score BETWEEN 0 AND 100),
   CHECK (grade IN ('S', 'A', 'B', 'C'))
 );
-COMMENT ON TABLE  metric            IS '지표 산출값 (시군구·읍면동 × 월 × 지표). 종합 value 는 프리셋(quiet·lively·custom) 가중 평균이라 저장하지 않고 FastAPI 가 요청 시 계산';
-COMMENT ON COLUMN metric.scope      IS 'region, dong. 동네 성격 그룹(quiet·peer·evening)은 dong 원본 + region 집계 둘 다, 시기·체류 그룹(ease·overnight)은 region 만';
+COMMENT ON TABLE  metric            IS '지표 산출값 (시군구·읍면동 × 월 × 지표). 종합 value 는 프리셋(quiet·lively·custom) 가중 평균이라 저장하지 않고 백엔드(Django)가 요청 시 계산';
+COMMENT ON COLUMN metric.scope      IS 'region, dong. 동네 성격 그룹(quiet·peer·evening)은 dong 원본 + region 집계(분자 합 ÷ 분모 합) 둘 다, 시기·체류 그룹(ease·overnight)은 region 만. overnight 은 연간(month 0)만';
 COMMENT ON COLUMN metric.unit_id    IS 'region_id 또는 dong_id (논리 참조)';
 COMMENT ON COLUMN metric.month      IS '1~12, 0 = 연간';
-COMMENT ON COLUMN metric.raw_value  IS '원값 (카드 보조 표기). ease=월 혼잡 지수, quiet=낮 유입 지수, peer=20~40대 비율, overnight=숙박 계수, evening=저녁 보행÷낮 체류';
+COMMENT ON COLUMN metric.raw_value  IS '원값 (카드 보조 표기). ease=월 혼잡 지수, quiet=낮 유입 지수, peer=20~40대 비율, overnight=숙박 계수(동 고정효과 회귀 β), evening=저녁 보행÷저녁 체류';
 COMMENT ON COLUMN metric.score      IS '백분위 점수 0~100. 같은 scope(시군구 12 / 행정동 203)·같은 달 안에서, 높을수록 좋음';
 COMMENT ON COLUMN metric.grade      IS 'S(상위 25%), A(25~50%), B(50~75%), C(하위 25%). 경계는 실데이터 보고 조정';
 
@@ -361,11 +364,11 @@ CREATE TABLE photo (
   CHECK (source IN ('user', 'tourapi', 'team')),
   CHECK (status IN ('pending', 'approved', 'hidden'))
 );
-COMMENT ON TABLE  photo             IS '지역·동네 × 월 사진 (파일은 Supabase Storage)';
+COMMENT ON TABLE  photo             IS '지역·동네 × 월 사진 (파일은 Cloudflare)';
 COMMENT ON COLUMN photo.scope       IS 'region, dong';
 COMMENT ON COLUMN photo.unit_id     IS 'region_id 또는 dong_id (논리 참조)';
 COMMENT ON COLUMN photo.month       IS '1~12 (촬영월, NULL = 월 무관)';
-COMMENT ON COLUMN photo.url         IS 'Storage 공개 URL';
+COMMENT ON COLUMN photo.url         IS 'Cloudflare 공개 URL';
 COMMENT ON COLUMN photo.source      IS 'user, tourapi, team';
 COMMENT ON COLUMN photo.credit      IS '출처 크레딧';
 COMMENT ON COLUMN photo.user_id     IS 'source=user 일 때 업로더';
@@ -476,7 +479,7 @@ COMMENT ON COLUMN nl_search_log.parsed IS 'LLM 이 변환한 조건·가중치 J
 -- ───────────────────────── Supabase RLS ─────────────────────────
 -- 프론트는 Supabase 를 직접 호출하지 않는다. 모든 테이블에 RLS 를 켜고 정책을 두지 않으면
 -- anon/authenticated 키로는 PostgREST 를 통해 아무것도 읽고 쓸 수 없다.
--- Spring 은 DB 커넥션(postgres 롤) 또는 service_role 키로 접근하므로 RLS 를 우회한다.
+-- 백엔드(Django)는 DB 커넥션(postgres 롤) 또는 service_role 키로 접근하므로 RLS 를 우회한다.
 
 ALTER TABLE region                 ENABLE ROW LEVEL SECURITY;
 ALTER TABLE dong                   ENABLE ROW LEVEL SECURITY;
