@@ -792,9 +792,7 @@ def test_metric_filter_by_month(quiet):
 
 def test_metric_check_constraint_from_schema(quiet):
     with pytest.raises(IntegrityError):
-        Metric.objects.create(
-            scope=Scope.REGION, unit_id=1, month=10, metric_def=quiet, grade="X"
-        )
+        Metric.objects.create(scope=Scope.REGION, unit_id=1, month=10, metric_def=quiet, grade="X")
 ```
 
 - [ ] **Step 2: 실패 확인**
