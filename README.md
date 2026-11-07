@@ -14,6 +14,10 @@ LG U+ 유동/서비스인구 데이터를 기반으로 워케이션 지역·시�
 
 스택 확정 후 작성 예정.
 
+## DB 스키마
+
+`db/schema.sql` 이 기준입니다 (Supabase PostgreSQL, ERD v0.3). 테이블 설명·다이어그램·변경 규칙은 [db/README.md](db/README.md) 를 참고하세요.
+
 ## 환경 변수
 
 `.env` 파일은 커밋하지 않습니다. `.env.example`을 복사해 사용합니다.
