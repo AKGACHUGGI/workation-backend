@@ -324,6 +324,8 @@ COMMENT ON COLUMN region_link.kind IS 'support, stay, tour';
 
 -- 동네 특징 벡터 dong_feature(dong_id, month, metric_vec vector(4), curve_vec vector(48)) 는
 -- pgvector 확장 후 migrations/20261107_pgvector-dong-feature.sql 로 추가, 값은 04_dong_feature.sql
+-- 자연어 검색용 문장 임베딩 tag_vocab(표현 사전) · dong_doc(동네 소개문) 는 vector(1024) 라
+-- migrations/20261107_text-embedding.sql 로 추가, 값은 05_dong_doc.sql 과 tools/build_embeddings.py
 
 -- ───────────────────────── 사용자 ─────────────────────────
 
