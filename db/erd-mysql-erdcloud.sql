@@ -10,7 +10,7 @@ CREATE TABLE region (
   sigungu_name           VARCHAR(20)    NOT NULL COMMENT '시군구명 (전주시는 구 없이 시 단위)',
   sigungu_code           VARCHAR(5)     NULL COMMENT '행정표준 시군구 코드 5자리 (추후 매핑, NULL 허용)',
   area_km2               DECIMAL(8,2)   NULL COMMENT '면적 km²',
-  tags                   VARCHAR(100)   NULL COMMENT '속성 태그 {coast, mountain, city}',
+  tags                   VARCHAR(100)   NULL COMMENT '속성 태그. 소속 행정동 태그의 합집합 (dong.tags 와 같은 코드)',
   PRIMARY KEY (region_id),
   UNIQUE (sido_name, sigungu_name)
 ) COMMENT = '시군구 (12개). region_id 는 적재 스크립트가 시도·시군구 정렬 순으로 부여';
@@ -23,6 +23,8 @@ CREATE TABLE dong (
   area_km2               DECIMAL(8,3)   NULL COMMENT '면적 km²',
   is_excluded            TINYINT(1)     NOT NULL DEFAULT false COMMENT 'true 면 지표·등급·지도·백분위에서 제외하고 화면에 "집계 제외" 표기. 데이터 자체는 적재. 수동면(고성군)',
   excluded_reason        VARCHAR(100)   NULL COMMENT '제외 사유 (is_excluded=true 일 때). 예: 특수시설 패턴',
+  tags                   VARCHAR(100)   NOT NULL DEFAULT '' COMMENT '속성 태그. 자동: coast(해안선 1 km 이내), beach · island · surf · library · long_stay · park · market · resort(관광공사 장소 1곳 이상), cafe(카페 3곳 이상), food(음식점 10곳 이상). 팀 입력: city · mountain',
+  coast_dist_km          DECIMAL(7,3)   NULL COMMENT '경계에서 가장 가까운 해안선까지 거리(km, OSM natural=coastline). 0 = 해안에 닿음, NULL = 내륙(약 18 km 이상) 또는 경계 없음',
   PRIMARY KEY (dong_id),
   UNIQUE (region_id, dong_name),
   CONSTRAINT fk_dong_region_id FOREIGN KEY (region_id) REFERENCES region (region_id)
@@ -155,16 +157,16 @@ CREATE TABLE metric_def (
 ) COMMENT = '지표 정의 (핵심 5 + 보조 3). 종합 value 는 프리셋별로 달라 정의·저장하지 않는다';
 
 CREATE TABLE metric (
-  scope                  VARCHAR(6)     NOT NULL COMMENT 'region, dong. 동네 성격 그룹(quiet·peer·evening)은 dong 원본 + region 집계 둘 다, 시기·체류 그룹(ease·overnight)은 region 만',
+  scope                  VARCHAR(6)     NOT NULL COMMENT 'region, dong. 동네 성격 그룹(quiet·peer·evening)은 dong 원본 + region 집계(분자 합 ÷ 분모 합) 둘 다, 시기·체류 그룹(ease·overnight)은 region 만. overnight 은 연간(month 0)만',
   unit_id                SMALLINT       NOT NULL COMMENT 'region_id 또는 dong_id (논리 참조)',
   month                  SMALLINT       NOT NULL COMMENT '1~12, 0 = 연간',
   metric_key             VARCHAR(20)    NOT NULL COMMENT '',
-  raw_value              DOUBLE         NULL COMMENT '원값 (카드 보조 표기). ease=월 혼잡 지수, quiet=낮 유입 지수, peer=20~40대 비율, overnight=숙박 계수, evening=저녁 보행÷낮 체류',
+  raw_value              DOUBLE         NULL COMMENT '원값 (카드 보조 표기). ease=월 혼잡 지수, quiet=낮 유입 지수, peer=20~40대 비율, overnight=숙박 계수(동 고정효과 회귀 β), evening=저녁 보행÷저녁 체류',
   score                  SMALLINT       NULL COMMENT '백분위 점수 0~100. 같은 scope(시군구 12 / 행정동 203)·같은 달 안에서, 높을수록 좋음',
   grade                  CHAR(1)        NULL COMMENT 'S(상위 25%), A(25~50%), B(50~75%), C(하위 25%). 경계는 실데이터 보고 조정',
   PRIMARY KEY (scope, unit_id, month, metric_key),
   CONSTRAINT fk_metric_metric_key FOREIGN KEY (metric_key) REFERENCES metric_def (metric_key)
-) COMMENT = '지표 산출값 (시군구·읍면동 × 월 × 지표). 종합 value 는 프리셋(quiet·lively·custom) 가중 평균이라 저장하지 않고 FastAPI 가 요청 시 계산';
+) COMMENT = '지표 산출값 (시군구·읍면동 × 월 × 지표). 종합 value 는 프리셋(quiet·lively·custom) 가중 평균이라 저장하지 않고 백엔드(Django)가 요청 시 계산';
 
 CREATE TABLE dong_hourly (
   dong_id                SMALLINT       NOT NULL COMMENT '',
@@ -211,7 +213,7 @@ CREATE TABLE photo (
   scope                  VARCHAR(6)     NOT NULL COMMENT 'region, dong',
   unit_id                SMALLINT       NOT NULL COMMENT 'region_id 또는 dong_id (논리 참조)',
   month                  SMALLINT       NULL COMMENT '1~12 (촬영월, NULL = 월 무관)',
-  url                    TEXT           NOT NULL COMMENT 'Storage 공개 URL',
+  url                    TEXT           NOT NULL COMMENT 'Cloudflare 공개 URL',
   source                 VARCHAR(8)     NOT NULL COMMENT 'user, tourapi, team',
   credit                 VARCHAR(100)   NULL COMMENT '출처 크레딧',
   user_id                CHAR(36)       NULL COMMENT 'source=user 일 때 업로더',
@@ -220,7 +222,7 @@ CREATE TABLE photo (
   created_at             DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '',
   PRIMARY KEY (photo_id),
   CONSTRAINT fk_photo_user_id FOREIGN KEY (user_id) REFERENCES app_user (user_id)
-) COMMENT = '지역·동네 × 월 사진 (파일은 Supabase Storage)';
+) COMMENT = '지역·동네 × 월 사진 (파일은 Cloudflare)';
 
 CREATE TABLE tip (
   tip_id                 INT AUTO_INCREMENT NOT NULL COMMENT '',
