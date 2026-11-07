@@ -18,6 +18,7 @@ ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=["localhost", "127.0.0.
 INSTALLED_APPS = [
     "rest_framework",
     "core",
+    "regions",
 ]
 
 MIDDLEWARE = [
