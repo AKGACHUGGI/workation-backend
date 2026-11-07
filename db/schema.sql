@@ -1,6 +1,6 @@
 -- 워케이션맵 ERD v0.3 (PostgreSQL 15+ / Supabase)
 -- 2026-11-06 · 팀 아카츠키 · 최종 갱신 2026-11-07 (migrations/20261107_metric-v0.3.sql,
---   20261107_metric-formulas-django.sql 반영)
+--   20261107_metric-formulas-django.sql, 20261107_dong-tags-coast.sql 반영)
 --
 -- 지표 개편 (2026-11-07, 명세 v0.3 변경안 · migrations/20261107_metric-v0.3.sql)
 --   - metric_def 키: ease·quiet·peer·overnight·evening + 보조 weekend_gap·peak_share·local_life.
@@ -51,7 +51,7 @@ COMMENT ON COLUMN region.sido_name    IS '시도명 (강원특별자치도, 전�
 COMMENT ON COLUMN region.sigungu_name IS '시군구명 (전주시는 구 없이 시 단위)';
 COMMENT ON COLUMN region.sigungu_code IS '행정표준 시군구 코드 5자리 (추후 매핑, NULL 허용)';
 COMMENT ON COLUMN region.area_km2     IS '면적 km²';
-COMMENT ON COLUMN region.tags         IS '속성 태그 {coast, mountain, city}';
+COMMENT ON COLUMN region.tags         IS '속성 태그 {coast, mountain, city}. coast 는 소속 행정동 중 하나라도 coast 면 자동';
 
 CREATE TABLE dong (
   dong_id       SMALLINT     PRIMARY KEY,
@@ -61,6 +61,8 @@ CREATE TABLE dong (
   area_km2      NUMERIC(8,3),
   is_excluded   BOOLEAN      NOT NULL DEFAULT false,
   excluded_reason VARCHAR(100),
+  tags          TEXT[]       NOT NULL DEFAULT '{}',
+  coast_dist_km NUMERIC(7,3),
   UNIQUE (region_id, dong_name)
 );
 COMMENT ON TABLE  dong           IS '읍면동 (204개, 집계 대상 203개). dong_id = region_id*100 + 시군구 내 가나다 순번';
@@ -71,6 +73,8 @@ COMMENT ON COLUMN dong.adm_code  IS '행정동 코드 10자리 (U+ 미제공, �
 COMMENT ON COLUMN dong.area_km2  IS '면적 km²';
 COMMENT ON COLUMN dong.is_excluded     IS 'true 면 지표·등급·지도·백분위에서 제외하고 화면에 "집계 제외" 표기. 데이터 자체는 적재. 수동면(고성군)';
 COMMENT ON COLUMN dong.excluded_reason IS '제외 사유 (is_excluded=true 일 때). 예: 특수시설 패턴';
+COMMENT ON COLUMN dong.tags          IS '속성 태그 {coast, mountain, city}. coast 는 coast_dist_km ≤ 1 이면 자동, mountain · city 는 팀 입력';
+COMMENT ON COLUMN dong.coast_dist_km IS '경계에서 가장 가까운 해안선까지 거리(km, OSM natural=coastline). 0 = 해안에 닿음, NULL = 내륙(약 18 km 이상) 또는 경계 없음';
 -- 경계 폴리곤(geom) 은 PostGIS 활성화 후 02_postgis.sql 로 추가
 -- is_excluded 값은 migrations/20261107_metric-v0.3.sql 의 UPDATE 로 넣는다 (load_db.py 는 dong_id 만 upsert 하므로 재적재해도 유지)
 
