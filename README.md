@@ -12,7 +12,23 @@ LG U+ 유동/서비스인구 데이터를 기반으로 워케이션 지역·시�
 
 ## 시작하기
 
-스택 확정 후 작성 예정.
+Django 5.2 · Django REST Framework · Gunicorn. Python 패키지는 [uv](https://docs.astral.sh/uv/) 로 관리합니다.
+
+```bash
+uv sync                                   # Python 3.14 와 의존성 설치
+cp .env.example .env                      # Supabase 접속 정보는 데이터 담당에게 직접 받기 (이슈 #2)
+uv run python manage.py runserver
+curl localhost:8000/api/health            # {"status":"ok","db":"ok"}
+```
+
+테스트는 Supabase 가 아니라 로컬 Postgres 컨테이너에서 돕니다.
+
+```bash
+docker compose up -d --wait               # 테스트용 postgres:17 (5432 가 사용 중이면 TEST_DB_PORT=5433 을 앞에)
+uv run pytest
+```
+
+커밋 전 검사, 모델 규칙, 새 API 추가 방법은 [docs/개발-가이드.md](docs/개발-가이드.md) 를 참고하세요.
 
 ## DB 스키마
 
