@@ -10,6 +10,7 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
 | `schema.sql` | Supabase(PostgreSQL) 에 실행한 DDL. 컬럼 설명은 `COMMENT ON`, 전 테이블 RLS |
 | `02_postgis.sql` | 읍면동 경계 폴리곤 컬럼 `dong.geom` + GIST 인덱스 (PostGIS 확장). 2026-11-07 적용 |
 | `03_metrics.sql` | 지표 산출. `metric_def` 시드 8행 + `metric` + `dong_hourly` 를 DB 안에서 계산. 재실행 안전 |
+| `04_dong_feature.sql` | 동네 특징 벡터 `dong_feature` 계산 (pgvector). 지표 점수 4개 + 24시간 곡선 48칸. 재실행 안전 |
 | `tools/build_coast_sql.py` | OSM 해안선 → `dong.coast_dist_km` 와 `coast` 태그(1 km 이내), `region.tags` 의 coast 갱신 SQL 생성 |
 | `tools/build_poi_tags_sql.py` | 관광공사 TourAPI 장소 → 장소 태그(beach · island · surf · cafe · food · library · long_stay · park · market · resort) 갱신 SQL 생성. `TOURAPI_KEY` 필요 |
 | `tools/build_tags_sql.py` | 태그 입력 시트(xlsx) → `city` · `mountain` 태그 갱신 SQL 생성. 시군구 태그는 행정동 태그의 합집합 |
@@ -38,8 +39,9 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
 | `migrations/20261107_metric-v0.3.sql` | 지표 개편: `dong.is_excluded` 추가·수동면 표시, metric_def/metric/dong_hourly 주석 교체 | 2026-11-07 |
 | `02_postgis.sql` + `tools/build_boundary_sql.py` 출력 | PostGIS 확장, `dong.geom` 컬럼, 경계·행정동 코드·면적·시군구 코드 적재 | 2026-11-07 |
 | `03_metrics.sql` | `metric_def` 시드, `metric`, `dong_hourly` 산출 | 2026-11-07 |
-| `migrations/20261107_metric-formulas-django.sql` | 주석만: 저녁 활기·숙박 성향 식 확정, Django·Cloudflare 표기 | 머지 후 |
-| `migrations/20261107_dong-tags-coast.sql` + `build_coast_sql.py apply … 1` · `build_poi_tags_sql.py apply` 출력 | `dong.tags`, `dong.coast_dist_km` 추가, 해안 거리와 자동 태그 적재 | 머지 후 |
+| `migrations/20261107_metric-formulas-django.sql` | 주석만: 저녁 활기·숙박 성향 식 확정, Django·Cloudflare 표기 | 2026-11-07 |
+| `migrations/20261107_dong-tags-coast.sql` + `build_coast_sql.py apply … 1` · `build_poi_tags_sql.py apply` 출력 | `dong.tags`, `dong.coast_dist_km` 추가, 해안 거리와 자동 태그 적재 | 2026-11-07 |
+| `migrations/20261107_pgvector-dong-feature.sql` + `04_dong_feature.sql` | pgvector 확장, `dong_feature` 테이블 추가와 특징 벡터 2,639행 적재 | 머지 후 |
 
 ## 지표 (명세 v0.3 변경안 3장)
 
@@ -68,6 +70,15 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
   - 자동(관광공사 장소, 좌표가 동 경계 안): `park` 54 · `beach` 50 · `market` 49 · `long_stay` 45(콘도·레지던스·게스트하우스) · `food` 44(음식점 10곳 이상) · `cafe` 42(카페 3곳 이상) · `library` 21 · `resort` 20 · `island` 19 · `surf` 3. cafe · food 기준은 장소가 있는 동 가운데 상위 약 20%
   - 팀 입력(태그 시트): `city` · `mountain`. `city` 제안값은 "동이면서 인구밀도 1,000명/km² 이상"(81곳, 읍·면은 밀도 최대 724명이라 걸리지 않음), `mountain` 제안값은 산·오름·숲·계곡·폭포·자연휴양림 명소가 있는 동(60곳).
   - 시군구 태그는 행정동 태그의 합집합. 관광공사 데이터는 관광 정보로 등록된 장소만 있어 동네 도서관·카페 전부를 세지는 않는다. 스키장은 대상 12개 시군구에 없다.
+- 동네 특징 벡터 `dong_feature` (pgvector, 2026-11-07): 행정동 × 월(0 = 연간)마다 `metric_vec`(동네 조용함 · 또래 밀도 · 저녁 활기 점수 ÷ 100, 생활권 지수 원값) 과 `curve_vec`(24시간 곡선 주중 + 주말 48칸 ÷ 100). 2,639행이라 인덱스 없이 전체 비교한다. 비슷한 동네 찾기 예:
+  ```sql
+  SET search_path = public, extensions;
+  SELECT d.dong_name, round((f.metric_vec <-> me.metric_vec)::numeric, 3) AS dist
+    FROM dong_feature f JOIN dong d USING (dong_id),
+         (SELECT metric_vec FROM dong_feature WHERE dong_id = :id AND month = :m) me
+   WHERE f.month = :m AND f.dong_id <> :id
+   ORDER BY f.metric_vec <-> me.metric_vec LIMIT 5;   -- 하루 리듬까지 보려면 curve_vec <=> (코사인 거리) 를 더한다
+  ```
 - 보류: `app_user.provider` 의 `apple` 제거와 알림 설정 컬럼 3개는 모바일 Apple 로그인 결정(workation-mobile #2) 뒤에.
 
 ## v0.2 → v0.3 변경
@@ -117,6 +128,7 @@ erDiagram
   dong ||--o{ dong_month_summary : ""
   dong ||--o{ dong_year_summary : ""
   dong ||--o{ dong_hourly : ""
+  dong ||--o{ dong_feature : ""
   metric_def ||--o{ metric : ""
   metric_def ||--o{ metric_vote : ""
   region ||..o{ metric : "unit_id"
@@ -258,6 +270,12 @@ erDiagram
     smallint hour PK
     smallint index_100 "보행인구, 최대=100"
   }
+  dong_feature {
+    smallint dong_id PK,FK
+    smallint month PK "0 = 연간"
+    vector metric_vec "quiet peer evening local_life, 0~1"
+    vector curve_vec "주중 24 + 주말 24, 0~1"
+  }
   region_link {
     serial link_id PK
     smallint region_id FK
@@ -369,6 +387,7 @@ erDiagram
 6. Database → Extensions 에서 postgis 를 켠 뒤 `02_postgis.sql` 실행, 이어서 `tools/build_boundary_sql.py` 로 만든 경계 SQL 실행.
 7. `03_metrics.sql` 전체 실행. 원천 4테이블을 다시 적재했으면 이 파일도 다시 실행한다.
 8. 태그를 이 순서로: `tools/build_coast_sql.py apply <출력> 1`(해안) → `tools/build_poi_tags_sql.py apply <출력>`(장소) → `tools/build_tags_sql.py <시트> <출력>`(도시·산간). 각 출력 SQL 실행.
+9. Database → Extensions 에서 vector 를 켜거나 `migrations/20261107_pgvector-dong-feature.sql` 실행, 이어서 `04_dong_feature.sql` 실행. 지표를 다시 계산하면 이 파일도 다시 실행한다.
 
 ## 스키마 변경 규칙
 

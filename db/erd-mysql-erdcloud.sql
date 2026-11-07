@@ -178,6 +178,16 @@ CREATE TABLE dong_hourly (
   CONSTRAINT fk_dong_hourly_dong_id FOREIGN KEY (dong_id) REFERENCES dong (dong_id)
 ) COMMENT = '읍면동 24시간 붐빔 곡선. population_hourly.walk_avg(보행인구)를 월·요일그룹·시간대로 평균';
 
+CREATE TABLE dong_feature (
+  dong_id                SMALLINT       NOT NULL COMMENT '',
+  month                  SMALLINT       NOT NULL COMMENT '0 = 연간, 1~12',
+  metric_vec             TEXT           NOT NULL COMMENT '[동네 조용함 점수, 또래 밀도 점수, 저녁 활기 점수, 생활권 지수] 모두 0~1 (PostgreSQL 은 vector(4))',
+  curve_vec              TEXT           NOT NULL COMMENT '24시간 붐빔 곡선 [주중 0~23시, 주말 0~23시] index_100 ÷ 100 (PostgreSQL 은 vector(48))',
+  updated_at             DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '',
+  PRIMARY KEY (dong_id, month),
+  CONSTRAINT fk_dong_feature_dong_id FOREIGN KEY (dong_id) REFERENCES dong (dong_id)
+) COMMENT = '행정동 × 월 특징 벡터 (pgvector). 비슷한 동네 찾기용. db/04_dong_feature.sql 이 metric · dong_hourly 에서 계산';
+
 CREATE TABLE region_link (
   link_id                INT AUTO_INCREMENT NOT NULL COMMENT '',
   region_id              SMALLINT       NOT NULL COMMENT '',
