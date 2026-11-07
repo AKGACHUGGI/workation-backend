@@ -29,7 +29,7 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
 | 파일 | 내용 | Supabase 적용 |
 | --- | --- | --- |
 | `schema.sql` (v0.3 초판) | 20테이블 생성 + RLS | 2026-11-07 |
-| `migrations/20261107_metric-v0.3.sql` | 지표 개편: `dong.is_excluded` 추가·수동면 표시, metric_def/metric/dong_hourly 주석 교체 | **미적용** — 머지 후 실행하고 여기에 날짜 기입 |
+| `migrations/20261107_metric-v0.3.sql` | 지표 개편: `dong.is_excluded` 추가·수동면 표시, metric_def/metric/dong_hourly 주석 교체 | 2026-11-07 |
 
 ## 지표 (명세 v0.3 변경안 3장)
 

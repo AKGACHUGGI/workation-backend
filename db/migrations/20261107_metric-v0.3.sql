@@ -1,6 +1,6 @@
 -- 지표 개편 (명세 v0.3 변경안 5장) · 2026-11-07 · 데이터 담당
 -- 기준: db/schema.sql (ERD v0.3, PR #3) 가 적용된 DB 에 한 번 실행한다. 두 번 실행해도 안전.
--- 적용 기록: Supabase 미적용 (머지 후 SQL Editor 에서 실행하고 날짜를 적는다)
+-- 적용 기록: Supabase 2026-11-07 (SQL Editor, 수동면 1건·dong 204/203 확인)
 --
 -- 바뀌는 것
 --   1. dong        — 집계 제외 플래그 is_excluded + 사유 excluded_reason 추가, 수동면(고성군) 표시
