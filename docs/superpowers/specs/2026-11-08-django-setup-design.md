@@ -38,17 +38,22 @@
 
 ## 3. 스택과 버전
 
+팀 문서(협업 규칙, 시스템 아키텍처)에는 백엔드 버전이 정해져 있지 않다. 아래는 2026-11-08 PyPI · endoflife.date 조회 기준이다.
+
 | 항목 | 선택 | 이유 |
 | --- | --- | --- |
-| Python | 3.13 | 로컬 설치 버전, 최신 안정 |
-| 패키지 관리 | uv (`pyproject.toml` + `uv.lock`) | 빠르고 lock 파일로 재현 가능 |
-| Django | 5.2 LTS (`>=5.2,<6`) | `metric`·`dong_hourly`의 복합 기본키를 `CompositePrimaryKey`로 표현 (5.2부터 지원) |
-| DRF | 최신 3.x | 팀 결정 |
-| DB 드라이버 | `psycopg[binary]` 3 | Django 5.2 권장 |
-| WSGI | Gunicorn gthread 워커 | 아키텍처 문서 결정 (LLM 호출 중 다른 요청이 막히지 않게) |
-| 설정 읽기 | `django-environ` | `.env`와 환경변수를 같은 방식으로 읽음 |
-| 테스트 | pytest, pytest-django | |
-| 린트·포맷 | ruff | black·isort·flake8 대신 하나로 |
+| Python | 하한 `>=3.12`, Docker·CI는 **3.14** 고정 | 3.13은 2026-10-01에 버그 수정이 끝났다(보안만 2029-10). 3.14는 버그 수정 2027-10까지이고 Django 5.2가 지원하는 최고 버전이다(3.15는 미지원). 하한 3.12는 workation-data와 같다 |
+| 패키지 관리 | uv 0.13 (`pyproject.toml` + `uv.lock`) | 빠르고 lock 파일로 재현 가능. 로컬 Python도 uv가 설치 |
+| Django | 5.2 LTS (`>=5.2,<6`, 현재 5.2.19) | `metric`·`dong_hourly` 복합 기본키를 `CompositePrimaryKey`로 표현(5.2부터). 보안 지원 2028-04-30. 6.1(보안 2027-12)은 pytest-django 4.14·django-environ 0.14의 지원 목록에 아직 없다 |
+| DRF | 3.18 (`>=3.18,<4`) | 팀 결정. Django 5.2~6.1, Python 3.10~3.15 지원 |
+| DB 드라이버 | `psycopg[binary]` 3.3 | Django 5.2 권장, workation-data와 같은 드라이버 |
+| WSGI | Gunicorn 26 gthread 워커 | 아키텍처 문서 결정 (LLM 호출 중 다른 요청이 막히지 않게) |
+| 설정 읽기 | `django-environ` 0.14 | `.env`와 환경변수를 같은 방식으로 읽음. Django 5.2 지원 |
+| 테스트 | pytest 9.2, pytest-django 4.14 | pytest-django는 Django 5.2·6.0 지원 |
+| 린트·포맷 | ruff 0.17 | black·isort·flake8 대신 하나로. workation-data도 ruff |
+| 테스트 DB | `postgres:17` 이미지 | Supabase가 PostgreSQL 17 |
+
+정확한 버전은 `uv.lock`으로 고정한다. 하한만 `pyproject.toml`에 적는다.
 
 ## 4. 디렉터리 구조
 
@@ -127,7 +132,7 @@ DB_PASSWORD=
 
 ## 9. 린트·포맷
 
-- `pyproject.toml`의 `[tool.ruff]`: `line-length = 100`, `target-version = "py313"`, 규칙 `E, F, I, UP, B, DJ`. 마이그레이션 파일은 제외.
+- `pyproject.toml`의 `[tool.ruff]`: `line-length = 100`, `target-version = "py312"`, 규칙 `E, F, I, UP, B, DJ`. 마이그레이션 파일은 제외.
 - 커밋 전 명령: `uv run ruff check .`, `uv run ruff format --check .`, `uv run pytest`.
 
 ## 10. CI
@@ -135,12 +140,12 @@ DB_PASSWORD=
 `.github/workflows/backend-ci.yml`
 
 - 트리거: main으로 가는 PR, main push (다른 레포와 같음).
-- 단계: checkout → `astral-sh/setup-uv` (Python 3.13, 캐시) → `uv sync --frozen` → `ruff check` → `ruff format --check` → `pytest` (`postgres:17` 서비스 컨테이너, health check 대기).
+- 단계: checkout → `astral-sh/setup-uv` (Python 3.14, 캐시) → `uv sync --frozen` → `ruff check` → `ruff format --check` → `pytest` (`postgres:17` 서비스 컨테이너, health check 대기).
 - 비밀값 없음. CI는 Supabase에 붙지 않는다.
 
 ## 11. Docker
 
-- `Dockerfile`: `python:3.13-slim` 기반. uv로 `uv sync --frozen --no-dev` 설치, 비루트 사용자, `EXPOSE 8000`, `CMD gunicorn config.wsgi --worker-class gthread --workers 2 --threads 4 --bind 0.0.0.0:8000`. `collectstatic`은 하지 않는다 (API 전용).
+- `Dockerfile`: `python:3.14-slim` 기반. uv로 `uv sync --frozen --no-dev` 설치, 비루트 사용자, `EXPOSE 8000`, `CMD gunicorn config.wsgi --worker-class gthread --workers 2 --threads 4 --bind 0.0.0.0:8000`. `collectstatic`은 하지 않는다 (API 전용).
 - `.dockerignore`: `.git`, `.venv`, `.env`, `db/`, `docs/`, `tests/`, 캐시 폴더.
 - `compose.yaml`: 테스트용 `postgres:17` 서비스 하나 (포트 5432, `postgres/postgres`). 앱·Traefik·Redis는 배포 세팅 때 추가한다.
 
