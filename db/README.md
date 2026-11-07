@@ -44,7 +44,7 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
 | `03_metrics.sql` | `metric_def` 시드, `metric`, `dong_hourly` 산출 | 2026-11-07 |
 | `migrations/20261107_metric-formulas-django.sql` | 주석만: 저녁 활기·숙박 성향 식 확정, Django·Cloudflare 표기 | 2026-11-07 |
 | `migrations/20261107_dong-tags-coast.sql` + `build_coast_sql.py apply … 1` · `build_poi_tags_sql.py apply` 출력 | `dong.tags`, `dong.coast_dist_km` 추가, 해안 거리와 자동 태그 적재 | 2026-11-07 |
-| `migrations/20261107_text-embedding.sql` + `05_dong_doc.sql` + `build_embeddings.py` 출력 | `tag_vocab` · `dong_doc` 추가, 표현 162개 · 소개문 203개 임베딩 | 머지 후 |
+| `migrations/20261107_text-embedding.sql` + `05_dong_doc.sql` + `build_embeddings.py` 출력 | `tag_vocab` · `dong_doc` 추가, 표현 165개 · 소개문 203개 임베딩 | 2026-11-07 |
 | `migrations/20261107_pgvector-dong-feature.sql` + `04_dong_feature.sql` | pgvector 확장, `dong_feature` 테이블 추가와 특징 벡터 2,639행 적재 | 2026-11-07 |
 
 ## 지표 (명세 v0.3 변경안 3장)
