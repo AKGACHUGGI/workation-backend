@@ -10,7 +10,7 @@ CREATE TABLE region (
   sigungu_name           VARCHAR(20)    NOT NULL COMMENT '시군구명 (전주시는 구 없이 시 단위)',
   sigungu_code           VARCHAR(5)     NULL COMMENT '행정표준 시군구 코드 5자리 (추후 매핑, NULL 허용)',
   area_km2               DECIMAL(8,2)   NULL COMMENT '면적 km²',
-  tags                   VARCHAR(100)   NULL COMMENT '속성 태그 {coast, mountain, city}. coast 는 소속 행정동 중 하나라도 coast 면 자동',
+  tags                   VARCHAR(100)   NULL COMMENT '속성 태그. 소속 행정동 태그의 합집합 (dong.tags 와 같은 코드)',
   PRIMARY KEY (region_id),
   UNIQUE (sido_name, sigungu_name)
 ) COMMENT = '시군구 (12개). region_id 는 적재 스크립트가 시도·시군구 정렬 순으로 부여';
@@ -23,7 +23,7 @@ CREATE TABLE dong (
   area_km2               DECIMAL(8,3)   NULL COMMENT '면적 km²',
   is_excluded            TINYINT(1)     NOT NULL DEFAULT false COMMENT 'true 면 지표·등급·지도·백분위에서 제외하고 화면에 "집계 제외" 표기. 데이터 자체는 적재. 수동면(고성군)',
   excluded_reason        VARCHAR(100)   NULL COMMENT '제외 사유 (is_excluded=true 일 때). 예: 특수시설 패턴',
-  tags                   VARCHAR(100)   NOT NULL DEFAULT '' COMMENT '속성 태그 {coast, mountain, city}. coast 는 coast_dist_km ≤ 1 이면 자동, mountain · city 는 팀 입력',
+  tags                   VARCHAR(100)   NOT NULL DEFAULT '' COMMENT '속성 태그. 자동: coast(해안선 1 km 이내), beach · island · surf · library · long_stay · park · market · resort(관광공사 장소 1곳 이상), cafe(카페 3곳 이상), food(음식점 10곳 이상). 팀 입력: city · mountain',
   coast_dist_km          DECIMAL(7,3)   NULL COMMENT '경계에서 가장 가까운 해안선까지 거리(km, OSM natural=coastline). 0 = 해안에 닿음, NULL = 내륙(약 18 km 이상) 또는 경계 없음',
   PRIMARY KEY (dong_id),
   UNIQUE (region_id, dong_name),

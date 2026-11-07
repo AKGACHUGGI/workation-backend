@@ -51,7 +51,7 @@ COMMENT ON COLUMN region.sido_name    IS '시도명 (강원특별자치도, 전�
 COMMENT ON COLUMN region.sigungu_name IS '시군구명 (전주시는 구 없이 시 단위)';
 COMMENT ON COLUMN region.sigungu_code IS '행정표준 시군구 코드 5자리 (추후 매핑, NULL 허용)';
 COMMENT ON COLUMN region.area_km2     IS '면적 km²';
-COMMENT ON COLUMN region.tags         IS '속성 태그 {coast, mountain, city}. coast 는 소속 행정동 중 하나라도 coast 면 자동';
+COMMENT ON COLUMN region.tags         IS '속성 태그. 소속 행정동 태그의 합집합 (dong.tags 와 같은 코드)';
 
 CREATE TABLE dong (
   dong_id       SMALLINT     PRIMARY KEY,
@@ -73,7 +73,7 @@ COMMENT ON COLUMN dong.adm_code  IS '행정동 코드 10자리 (U+ 미제공, �
 COMMENT ON COLUMN dong.area_km2  IS '면적 km²';
 COMMENT ON COLUMN dong.is_excluded     IS 'true 면 지표·등급·지도·백분위에서 제외하고 화면에 "집계 제외" 표기. 데이터 자체는 적재. 수동면(고성군)';
 COMMENT ON COLUMN dong.excluded_reason IS '제외 사유 (is_excluded=true 일 때). 예: 특수시설 패턴';
-COMMENT ON COLUMN dong.tags          IS '속성 태그 {coast, mountain, city}. coast 는 coast_dist_km ≤ 1 이면 자동, mountain · city 는 팀 입력';
+COMMENT ON COLUMN dong.tags          IS '속성 태그. 자동: coast(해안선 1 km 이내), beach · island · surf · library · long_stay · park · market · resort(관광공사 장소 1곳 이상), cafe(카페 3곳 이상), food(음식점 10곳 이상). 팀 입력: city · mountain';
 COMMENT ON COLUMN dong.coast_dist_km IS '경계에서 가장 가까운 해안선까지 거리(km, OSM natural=coastline). 0 = 해안에 닿음, NULL = 내륙(약 18 km 이상) 또는 경계 없음';
 -- 경계 폴리곤(geom) 은 PostGIS 활성화 후 02_postgis.sql 로 추가
 -- is_excluded 값은 migrations/20261107_metric-v0.3.sql 의 UPDATE 로 넣는다 (load_db.py 는 dong_id 만 upsert 하므로 재적재해도 유지)
