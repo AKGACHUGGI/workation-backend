@@ -23,7 +23,7 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.3  # 이 액션은 v10 같은 메이저 태그를 두지 않는다
         with:
           enable-cache: true
       - name: 의존성 설치
