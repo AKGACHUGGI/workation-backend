@@ -10,6 +10,8 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
 | `schema.sql` | Supabase(PostgreSQL) 에 실행한 DDL. 컬럼 설명은 `COMMENT ON`, 전 테이블 RLS |
 | `02_postgis.sql` | 읍면동 경계 폴리곤 컬럼 `dong.geom` + GIST 인덱스 (PostGIS 확장). 2026-11-07 적용 |
 | `03_metrics.sql` | 지표 산출. `metric_def` 시드 8행 + `metric` + `dong_hourly` 를 DB 안에서 계산. 재실행 안전 |
+| `tools/build_coast_sql.py` | OSM 해안선 → `dong.coast_dist_km` 와 `coast` 태그(1 km 이내), `region.tags` 의 coast 갱신 SQL 생성 |
+| `tools/build_tags_sql.py` | 태그 입력 시트(xlsx) → `city` · `mountain` 태그 갱신 SQL 생성. 시군구 태그는 행정동 태그의 합집합 |
 | `tools/build_boundary_sql.py` | 행정동 경계(vuski/admdongkor ver20251231) → `dong.geom`·`adm_code`·`area_km2`, `region.sigungu_code` 갱신 SQL 생성 |
 | `erd-mysql-erdcloud.sql` | ERDCloud **가져오기 → SQL** 에 붙여넣는 MySQL 방언 (타입만 변환). 다이어그램 갱신용 |
 | `migrations/YYYYMMDD_설명.sql` | 적용된 DB 에 순서대로 실행하는 변경 파일. 아래 "적용 이력" 참고 |
@@ -36,6 +38,7 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
 | `02_postgis.sql` + `tools/build_boundary_sql.py` 출력 | PostGIS 확장, `dong.geom` 컬럼, 경계·행정동 코드·면적·시군구 코드 적재 | 2026-11-07 |
 | `03_metrics.sql` | `metric_def` 시드, `metric`, `dong_hourly` 산출 | 2026-11-07 |
 | `migrations/20261107_metric-formulas-django.sql` | 주석만: 저녁 활기·숙박 성향 식 확정, Django·Cloudflare 표기 | 머지 후 |
+| `migrations/20261107_dong-tags-coast.sql` + `tools/build_coast_sql.py apply … 1` 출력 | `dong.tags`, `dong.coast_dist_km` 추가, 해안 거리·coast 태그 적재 | 머지 후 |
 
 ## 지표 (명세 v0.3 변경안 3장)
 
@@ -59,6 +62,7 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
 - **식 확정 (2026-11-07)**: 저녁 활기는 같은 시간대끼리 나눠야 "저녁에 있는 사람 중 밖을 걷는 비율"이 되고, 낮 체류로 나누면 동네 조용함과 엮인다(스피어만 −0.54 → −0.37). 숙박 성향은 거주를 통제하지 않으면 학생 이동 같은 거주 변동이 섞인다(전주시 2.07 → 0.62). 거주 계수 γ 가 대부분 1 근처(0.80~1.10)라 모델이 정상 동작한다. 근거는 `03_metrics.sql` 주석.
 - `dong.is_excluded = true` 인 행정동(수동면)은 백분위 모집단·등급·지도에서 빼고 화면에 "집계 제외" 로 표기한다. 재적재해도 플래그는 유지된다 (`load_db.py` 는 `dong_id` 만 upsert).
 - `dong_hourly.index_100` (24시간 붐빔 곡선) 의 원천은 **보행인구** `population_hourly.walk_avg` 다.
+- 속성 태그(`dong.tags`, `region.tags`): `coast` 는 해안선 1 km 이내 자동(97곳, 2026-11-07 미리보기 기준), `city` · `mountain` 은 태그 시트로 팀이 입력. `city` 제안값은 "동이면서 인구밀도 1,000명/km² 이상"(81곳). 읍·면은 밀도 최대 724명이라 이 기준에 걸리지 않는다. 시군구 태그는 행정동 태그의 합집합.
 - 보류: `app_user.provider` 의 `apple` 제거와 알림 설정 컬럼 3개는 모바일 Apple 로그인 결정(workation-mobile #2) 뒤에.
 
 ## v0.2 → v0.3 변경
@@ -359,6 +363,7 @@ erDiagram
 5. `schema.sql` 은 최신 상태라 `migrations/` 는 다시 실행할 필요 없다. 단 데이터 UPDATE 가 든 migration(`20261107_metric-v0.3.sql` 의 수동면 플래그)은 적재 뒤에 한 번 더 실행한다.
 6. Database → Extensions 에서 postgis 를 켠 뒤 `02_postgis.sql` 실행, 이어서 `tools/build_boundary_sql.py` 로 만든 경계 SQL 실행.
 7. `03_metrics.sql` 전체 실행. 원천 4테이블을 다시 적재했으면 이 파일도 다시 실행한다.
+8. `tools/build_coast_sql.py apply <출력> 1` 출력 실행(해안 태그), 이어서 `tools/build_tags_sql.py` 로 태그 시트 SQL 을 만들어 실행(도시·산간 태그).
 
 ## 스키마 변경 규칙
 
