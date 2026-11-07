@@ -1,6 +1,8 @@
 -- 워케이션맵 ERD v0.3 (PostgreSQL 15+ / Supabase)
 -- 2026-11-06 · 팀 아카츠키 · 최종 갱신 2026-11-07 (migrations/20261107_metric-v0.3.sql,
 --   20261107_metric-formulas-django.sql, 20261107_dong-tags-coast.sql 반영)
+--   pgvector 확장이 필요한 dong_feature 는 migrations/20261107_pgvector-dong-feature.sql 에 있다
+--   (PostGIS 의 dong.geom 을 02_postgis.sql 로 뺀 것과 같은 이유)
 --
 -- 지표 개편 (2026-11-07, 명세 v0.3 변경안 · migrations/20261107_metric-v0.3.sql)
 --   - metric_def 키: ease·quiet·peer·overnight·evening + 보조 weekend_gap·peak_share·local_life.
@@ -319,6 +321,9 @@ CREATE TABLE region_link (
 );
 COMMENT ON TABLE  region_link      IS '지원사업·숙박·관광 외부 링크 (수동 입력)';
 COMMENT ON COLUMN region_link.kind IS 'support, stay, tour';
+
+-- 동네 특징 벡터 dong_feature(dong_id, month, metric_vec vector(4), curve_vec vector(48)) 는
+-- pgvector 확장 후 migrations/20261107_pgvector-dong-feature.sql 로 추가, 값은 04_dong_feature.sql
 
 -- ───────────────────────── 사용자 ─────────────────────────
 
