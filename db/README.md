@@ -1,6 +1,6 @@
 # DB 스키마 (ERD v0.3)
 
-2026-11-06 작성 · 2026-11-07 Supabase 적용 · 팀 아카츠키 · 데이터 담당
+2026-11-06 작성 · 2026-11-07 Supabase 적용 · 2026-11-07 지표 개편 반영 · 팀 아카츠키 · 데이터 담당
 
 이 폴더가 DB 스키마의 **기준**이다. Spring 엔티티와 FastAPI 쿼리는 `schema.sql` 을 보고 작성한다.
 v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG U+ 전처리 결과에 맞게** 고친 버전. 20테이블.
@@ -10,6 +10,7 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
 | `schema.sql` | Supabase(PostgreSQL) 에 실행한 DDL. 컬럼 설명은 `COMMENT ON`, 전 테이블 RLS |
 | `02_postgis.sql` | 선택. 읍면동 경계 폴리곤 컬럼 (PostGIS 확장 켠 뒤). 아직 실행 안 함 |
 | `erd-mysql-erdcloud.sql` | ERDCloud **가져오기 → SQL** 에 붙여넣는 MySQL 방언 (타입만 변환). 다이어그램 갱신용 |
+| `migrations/YYYYMMDD_설명.sql` | 적용된 DB 에 순서대로 실행하는 변경 파일. 아래 "적용 이력" 참고 |
 
 - ERDCloud 다이어그램: https://www.erdcloud.com/d/SWyGuqFiKzbiNGqX4
 - 적재 스크립트: workation-data `src/load_db.py` (parquet 4개 → DB)
@@ -21,6 +22,36 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
 - `load_db.py` 로 region 12 · dong 204 · population_hourly · population_demographic · dong_month_summary · dong_year_summary 적재 완료 (약 69 MB).
 - `anon` / `authenticated` 롤의 테이블 권한은 전부 REVOKE 했고 기본 권한도 회수했다. 백엔드는 DB 커넥션(또는 service role) 으로만 접근한다.
 - 접속 문자열은 커밋하지 않는다. 설정 방법은 이슈 #2 참고.
+- `metric` / `dong_hourly` 는 비어 있다. FastAPI 점수 계산을 붙일 때 `metric_def` 시드와 함께 채운다.
+
+### 적용 이력
+
+| 파일 | 내용 | Supabase 적용 |
+| --- | --- | --- |
+| `schema.sql` (v0.3 초판) | 20테이블 생성 + RLS | 2026-11-07 |
+| `migrations/20261107_metric-v0.3.sql` | 지표 개편: `dong.is_excluded` 추가·수동면 표시, metric_def/metric/dong_hourly 주석 교체 | **미적용** — 머지 후 실행하고 여기에 날짜 기입 |
+
+## 지표 (명세 v0.3 변경안 3장)
+
+`metric_def.metric_key` 에 들어갈 키. 시드 INSERT 는 아직 없고 FastAPI 가 점수 계산을 붙일 때 같이 넣는다.
+원 명세 v0.1 의 `crowd` · `long_stay` · `night` · `hourly_curve` 키는 폐기.
+
+| 키 | 지표 | 원값 (`metric.raw_value`) | 재료 (`dong_month_summary`) | scope | 점수 |
+| --- | --- | --- | --- | --- | --- |
+| `ease` | 시기 여유 | 월 혼잡 지수 = 해당 월 방문 ÷ 연중 최대 월 방문 × 100 | `vist_total`, `dong_year_summary.vist_max` | region | 역백분위 (혼잡 낮을수록 높음) |
+| `quiet` | 동네 조용함 | 낮 유입 지수 = 평일 낮 체류 ÷ 평일 심야 체류 | `stay_weekday_day`, `stay_weekday_night` | dong + region 집계 | 역백분위 |
+| `peer` | 또래 밀도 | 20~40대 방문 비율 (미상 제외) | `vist_2040_share` | dong + region 집계 | 백분위 |
+| `overnight` | 숙박 성향 | 숙박 계수 — 분자·분모 미확정 (후보: (심야 체류 − 거주) ÷ 방문) | `stay_*_night`, `resd_total`, `vist_total` | region | 백분위 |
+| `evening` | 저녁 활기 | 저녁 보행 ÷ 낮 체류 | `walk_weekday_evening`, `stay_weekday_day` | dong + region 집계 | 백분위 |
+| `weekend_gap` | 주중·주말 차이 (보조) | 주말 낮 체류 ÷ 주중 낮 체류. 0.9~1.1 균형형 | `stay_weekend_day`, `stay_weekday_day` | region | 라벨만 |
+| `peak_share` | 성수기 집중도 (보조) | 상위 3개월 방문 ÷ 연간 방문 (%) | 월별 `vist_total` | region | 비교 문장 |
+| `local_life` | 생활권 지수 (보조) | (거주 + 직장) ÷ (거주 + 직장 + 방문). ≥ 70% 생활권 | `resd_total`, `wrk_total`, `vist_total` | dong | 태그만 |
+
+- **종합 `value`** (워케이션 밸류) 는 프리셋 `quiet` / `lively` / `custom` 의 가중 평균이라 `metric` 에 저장하지 않고 FastAPI 가 요청 시 계산한다 (백엔드 결정 2026-11-06).
+- 백분위·등급은 같은 scope(시군구 12 / 행정동 203), 같은 달 안에서. S 상위 25% / A / B / C 하위 25%.
+- `dong.is_excluded = true` 인 행정동(수동면)은 백분위 모집단·등급·지도에서 빼고 화면에 "집계 제외" 로 표기한다. 재적재해도 플래그는 유지된다 (`load_db.py` 는 `dong_id` 만 upsert).
+- `dong_hourly.index_100` (24시간 붐빔 곡선) 의 원천은 **보행인구** `population_hourly.walk_avg` 다.
+- 보류: `app_user.provider` 의 `apple` 제거와 알림 설정 컬럼 3개는 모바일 Apple 로그인 결정(workation-mobile #2) 뒤에.
 
 ## v0.2 → v0.3 변경
 
@@ -38,8 +69,10 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
 | 사용자 FK | 기본 | `ON DELETE CASCADE` (즐겨찾기·팁·반응·답글·신고·투표), `SET NULL` (사진·공유카드·검색로그) | 탈퇴 처리 |
 | 열거값 | 주석만 | `CHECK` 제약 | 오타 방지 |
 | `dong.geom` | 본 DDL 안 | `02_postgis.sql` 로 분리 | Supabase 는 확장을 `extensions` 스키마에 두고, 경계 데이터는 아직 없음 |
+| `dong.is_excluded`, `excluded_reason` (2026-11-07) | (없음) | 집계 제외 플래그 + 사유. 수동면 true | 명세 v0.3: 특수시설 패턴 행정동 제외, 203곳 백분위 |
+| `metric_def` 키 (2026-11-07) | crowd, quiet, peer, long_stay, night + 보조 4 | ease, quiet, peer, overnight, evening + 보조 3 (주석만, 시드 없음) | 명세 v0.3 지표 개편 |
 
-바뀌지 않은 것: metric_def / metric / dong_hourly / region_link / app_user / favorite / photo / tip / tip_reaction / tip_reply / report / metric_vote / share_card / nl_search_log 의 구조 (키 타입만 정수로).
+바뀌지 않은 것: metric_def / metric / dong_hourly / region_link / app_user / favorite / photo / tip / tip_reaction / tip_reply / report / metric_vote / share_card / nl_search_log 의 구조 (키 타입만 정수로). 2026-11-07 지표 개편도 컬럼 추가는 `dong` 2개뿐이고 나머지는 주석이다.
 
 ## 적재 흐름
 
@@ -109,6 +142,8 @@ erDiagram
     varchar(30) dong_name "UNIQUE with region"
     varchar(10) adm_code "행정동 코드 (추후)"
     numeric area_km2
+    boolean is_excluded "집계 제외 (수동면)"
+    varchar(100) excluded_reason
   }
   population_hourly {
     smallint dong_id PK,FK
@@ -183,7 +218,7 @@ erDiagram
     double walk_share_mean
   }
   metric_def {
-    varchar(20) metric_key PK "crowd quiet peer .."
+    varchar(20) metric_key PK "ease quiet peer overnight evening .."
     varchar(30) name_ko
     text description
     varchar(4) higher_is "good bad"
@@ -203,7 +238,7 @@ erDiagram
     smallint month PK
     varchar(7) day_group PK "weekday weekend"
     smallint hour PK
-    smallint index_100 "최대=100"
+    smallint index_100 "보행인구, 최대=100"
   }
   region_link {
     serial link_id PK
@@ -312,7 +347,8 @@ erDiagram
    python src/load_db.py               # 적재 (약 10초, 네트워크에 따라 다름)
    ```
 4. 검증: Table Editor 에서 `dong` 204행, `population_hourly` 411,264행 확인.
-5. (선택) Database → Extensions 에서 postgis 를 켠 뒤 `02_postgis.sql` 실행.
+5. `schema.sql` 은 최신 상태라 `migrations/` 는 다시 실행할 필요 없다. 단 데이터 UPDATE 가 든 migration(`20261107_metric-v0.3.sql` 의 수동면 플래그)은 적재 뒤에 한 번 더 실행한다.
+6. (선택) Database → Extensions 에서 postgis 를 켠 뒤 `02_postgis.sql` 실행.
 
 ## 스키마 변경 규칙
 

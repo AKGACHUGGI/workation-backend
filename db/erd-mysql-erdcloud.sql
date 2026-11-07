@@ -21,10 +21,12 @@ CREATE TABLE dong (
   dong_name              VARCHAR(30)    NOT NULL COMMENT '읍면동명. 시군구가 다르면 같은 이름 가능 (송정동·중앙동·서면)',
   adm_code               VARCHAR(10)    NULL COMMENT '행정동 코드 10자리 (U+ 미제공, 추후 매핑, NULL 허용)',
   area_km2               DECIMAL(8,3)   NULL COMMENT '면적 km²',
+  is_excluded            TINYINT(1)     NOT NULL DEFAULT false COMMENT 'true 면 지표·등급·지도·백분위에서 제외하고 화면에 "집계 제외" 표기. 데이터 자체는 적재. 수동면(고성군)',
+  excluded_reason        VARCHAR(100)   NULL COMMENT '제외 사유 (is_excluded=true 일 때). 예: 특수시설 패턴',
   PRIMARY KEY (dong_id),
   UNIQUE (region_id, dong_name),
   CONSTRAINT fk_dong_region_id FOREIGN KEY (region_id) REFERENCES region (region_id)
-) COMMENT = '읍면동 (204개). dong_id = region_id*100 + 시군구 내 가나다 순번';
+) COMMENT = '읍면동 (204개, 집계 대상 203개). dong_id = region_id*100 + 시군구 내 가나다 순번';
 
 CREATE TABLE population_hourly (
   dong_id                SMALLINT       NOT NULL COMMENT '',
@@ -144,35 +146,35 @@ CREATE TABLE dong_year_summary (
 ) COMMENT = '읍면동 연간 요약 (204행)';
 
 CREATE TABLE metric_def (
-  metric_key             VARCHAR(20)    NOT NULL COMMENT 'crowd, quiet, peer, long_stay, night, weekend_gap, hourly_curve, peak_share, local_life',
+  metric_key             VARCHAR(20)    NOT NULL COMMENT '핵심: ease(시기 여유), quiet(동네 조용함), peer(또래 밀도), overnight(숙박 성향), evening(저녁 활기) / 보조: weekend_gap(주중·주말 차이), peak_share(성수기 집중도), local_life(생활권 지수)',
   name_ko                VARCHAR(30)    NOT NULL COMMENT '지표 한글명',
   description            TEXT           NULL COMMENT '',
-  higher_is              VARCHAR(4)     NOT NULL COMMENT 'good, bad (점수 방향)',
-  is_core                TINYINT(1)     NOT NULL DEFAULT true COMMENT '핵심 지표 여부 (종합 점수에 포함)',
+  higher_is              VARCHAR(4)     NOT NULL COMMENT 'good, bad (점수 방향). v0.3 핵심 5종은 전부 good — 원값이 낮을수록 좋은 지표(ease·quiet)는 역백분위로 점수를 뒤집는다',
+  is_core                TINYINT(1)     NOT NULL DEFAULT true COMMENT '핵심 지표 여부 (종합 value 계산에 들어감). 보조 3종은 false',
   PRIMARY KEY (metric_key)
-) COMMENT = '지표 정의 (핵심 5 + 보조 4)';
+) COMMENT = '지표 정의 (핵심 5 + 보조 3). 종합 value 는 프리셋별로 달라 정의·저장하지 않는다';
 
 CREATE TABLE metric (
-  scope                  VARCHAR(6)     NOT NULL COMMENT 'region, dong',
+  scope                  VARCHAR(6)     NOT NULL COMMENT 'region, dong. 동네 성격 그룹(quiet·peer·evening)은 dong 원본 + region 집계 둘 다, 시기·체류 그룹(ease·overnight)은 region 만',
   unit_id                SMALLINT       NOT NULL COMMENT 'region_id 또는 dong_id (논리 참조)',
   month                  SMALLINT       NOT NULL COMMENT '1~12, 0 = 연간',
   metric_key             VARCHAR(20)    NOT NULL COMMENT '',
-  raw_value              DOUBLE         NULL COMMENT '원값',
-  score                  SMALLINT       NULL COMMENT '백분위 점수 0~100',
-  grade                  CHAR(1)        NULL COMMENT 'S, A, B, C',
+  raw_value              DOUBLE         NULL COMMENT '원값 (카드 보조 표기). ease=월 혼잡 지수, quiet=낮 유입 지수, peer=20~40대 비율, overnight=숙박 계수, evening=저녁 보행÷낮 체류',
+  score                  SMALLINT       NULL COMMENT '백분위 점수 0~100. 같은 scope(시군구 12 / 행정동 203)·같은 달 안에서, 높을수록 좋음',
+  grade                  CHAR(1)        NULL COMMENT 'S(상위 25%), A(25~50%), B(50~75%), C(하위 25%). 경계는 실데이터 보고 조정',
   PRIMARY KEY (scope, unit_id, month, metric_key),
   CONSTRAINT fk_metric_metric_key FOREIGN KEY (metric_key) REFERENCES metric_def (metric_key)
-) COMMENT = '지표 산출값 (시군구·읍면동 × 월 × 지표)';
+) COMMENT = '지표 산출값 (시군구·읍면동 × 월 × 지표). 종합 value 는 프리셋(quiet·lively·custom) 가중 평균이라 저장하지 않고 FastAPI 가 요청 시 계산';
 
 CREATE TABLE dong_hourly (
   dong_id                SMALLINT       NOT NULL COMMENT '',
   month                  SMALLINT       NOT NULL COMMENT '1~12',
   day_group              VARCHAR(7)     NOT NULL COMMENT 'weekday, weekend',
   hour                   SMALLINT       NOT NULL COMMENT '0~23',
-  index_100              SMALLINT       NULL COMMENT '최대 시간대 = 100',
+  index_100              SMALLINT       NULL COMMENT '보행인구 지수. 같은 dong·month·day_group 안에서 최대 시간대 = 100',
   PRIMARY KEY (dong_id, month, day_group, hour),
   CONSTRAINT fk_dong_hourly_dong_id FOREIGN KEY (dong_id) REFERENCES dong (dong_id)
-) COMMENT = '읍면동 24시간 붐빔 곡선 (population_hourly 에서 계산)';
+) COMMENT = '읍면동 24시간 붐빔 곡선. population_hourly.walk_avg(보행인구)를 월·요일그룹·시간대로 평균';
 
 CREATE TABLE region_link (
   link_id                INT AUTO_INCREMENT NOT NULL COMMENT '',

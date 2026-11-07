@@ -1,5 +1,11 @@
 -- 워케이션맵 ERD v0.3 (PostgreSQL 15+ / Supabase)
--- 2026-11-06 · 팀 아카츠키
+-- 2026-11-06 · 팀 아카츠키 · 최종 갱신 2026-11-07 (migrations/20261107_metric-v0.3.sql 반영)
+--
+-- 지표 개편 (2026-11-07, 명세 v0.3 변경안 · migrations/20261107_metric-v0.3.sql)
+--   - metric_def 키: ease·quiet·peer·overnight·evening + 보조 weekend_gap·peak_share·local_life.
+--     종합 value 는 프리셋별로 달라 저장하지 않고 FastAPI 가 요청 시 계산.
+--   - dong.is_excluded / excluded_reason 추가 (수동면 집계 제외 → 행정동 203곳 백분위).
+--   - dong_hourly.index_100 원천 = 보행인구(population_hourly.walk_avg).
 --
 -- v0.2(2026-10-28) → v0.3 변경
 --   - LG U+ 데이터에 행정동 코드가 없어 region/dong 키를 정수 대리키로 변경. 공식 코드는
@@ -50,15 +56,20 @@ CREATE TABLE dong (
   dong_name     VARCHAR(30)  NOT NULL,
   adm_code      VARCHAR(10),
   area_km2      NUMERIC(8,3),
+  is_excluded   BOOLEAN      NOT NULL DEFAULT false,
+  excluded_reason VARCHAR(100),
   UNIQUE (region_id, dong_name)
 );
-COMMENT ON TABLE  dong           IS '읍면동 (204개). dong_id = region_id*100 + 시군구 내 가나다 순번';
+COMMENT ON TABLE  dong           IS '읍면동 (204개, 집계 대상 203개). dong_id = region_id*100 + 시군구 내 가나다 순번';
 COMMENT ON COLUMN dong.dong_id   IS '대리키 (예: 101 = 강릉시 첫 번째 읍면동)';
 COMMENT ON COLUMN dong.region_id IS '소속 시군구';
 COMMENT ON COLUMN dong.dong_name IS '읍면동명. 시군구가 다르면 같은 이름 가능 (송정동·중앙동·서면)';
 COMMENT ON COLUMN dong.adm_code  IS '행정동 코드 10자리 (U+ 미제공, 추후 매핑, NULL 허용)';
 COMMENT ON COLUMN dong.area_km2  IS '면적 km²';
+COMMENT ON COLUMN dong.is_excluded     IS 'true 면 지표·등급·지도·백분위에서 제외하고 화면에 "집계 제외" 표기. 데이터 자체는 적재. 수동면(고성군)';
+COMMENT ON COLUMN dong.excluded_reason IS '제외 사유 (is_excluded=true 일 때). 예: 특수시설 패턴';
 -- 경계 폴리곤(geom) 은 PostGIS 활성화 후 02_postgis.sql 로 추가
+-- is_excluded 값은 migrations/20261107_metric-v0.3.sql 의 UPDATE 로 넣는다 (load_db.py 는 dong_id 만 upsert 하므로 재적재해도 유지)
 
 CREATE INDEX dong_region_idx ON dong (region_id);
 
@@ -248,11 +259,11 @@ CREATE TABLE metric_def (
   is_core       BOOLEAN      NOT NULL DEFAULT true,
   CHECK (higher_is IN ('good', 'bad'))
 );
-COMMENT ON TABLE  metric_def             IS '지표 정의 (핵심 5 + 보조 4)';
-COMMENT ON COLUMN metric_def.metric_key  IS 'crowd, quiet, peer, long_stay, night, weekend_gap, hourly_curve, peak_share, local_life';
+COMMENT ON TABLE  metric_def             IS '지표 정의 (핵심 5 + 보조 3). 종합 value 는 프리셋별로 달라 정의·저장하지 않는다';
+COMMENT ON COLUMN metric_def.metric_key  IS '핵심: ease(시기 여유), quiet(동네 조용함), peer(또래 밀도), overnight(숙박 성향), evening(저녁 활기) / 보조: weekend_gap(주중·주말 차이), peak_share(성수기 집중도), local_life(생활권 지수)';
 COMMENT ON COLUMN metric_def.name_ko     IS '지표 한글명';
-COMMENT ON COLUMN metric_def.higher_is   IS 'good, bad (점수 방향)';
-COMMENT ON COLUMN metric_def.is_core     IS '핵심 지표 여부 (종합 점수에 포함)';
+COMMENT ON COLUMN metric_def.higher_is   IS 'good, bad (점수 방향). v0.3 핵심 5종은 전부 good — 원값이 낮을수록 좋은 지표(ease·quiet)는 역백분위로 점수를 뒤집는다';
+COMMENT ON COLUMN metric_def.is_core     IS '핵심 지표 여부 (종합 value 계산에 들어감). 보조 3종은 false';
 
 CREATE TABLE metric (
   scope         VARCHAR(6)   NOT NULL,
@@ -268,13 +279,13 @@ CREATE TABLE metric (
   CHECK (score BETWEEN 0 AND 100),
   CHECK (grade IN ('S', 'A', 'B', 'C'))
 );
-COMMENT ON TABLE  metric            IS '지표 산출값 (시군구·읍면동 × 월 × 지표)';
-COMMENT ON COLUMN metric.scope      IS 'region, dong';
+COMMENT ON TABLE  metric            IS '지표 산출값 (시군구·읍면동 × 월 × 지표). 종합 value 는 프리셋(quiet·lively·custom) 가중 평균이라 저장하지 않고 FastAPI 가 요청 시 계산';
+COMMENT ON COLUMN metric.scope      IS 'region, dong. 동네 성격 그룹(quiet·peer·evening)은 dong 원본 + region 집계 둘 다, 시기·체류 그룹(ease·overnight)은 region 만';
 COMMENT ON COLUMN metric.unit_id    IS 'region_id 또는 dong_id (논리 참조)';
 COMMENT ON COLUMN metric.month      IS '1~12, 0 = 연간';
-COMMENT ON COLUMN metric.raw_value  IS '원값';
-COMMENT ON COLUMN metric.score      IS '백분위 점수 0~100';
-COMMENT ON COLUMN metric.grade      IS 'S, A, B, C';
+COMMENT ON COLUMN metric.raw_value  IS '원값 (카드 보조 표기). ease=월 혼잡 지수, quiet=낮 유입 지수, peer=20~40대 비율, overnight=숙박 계수, evening=저녁 보행÷낮 체류';
+COMMENT ON COLUMN metric.score      IS '백분위 점수 0~100. 같은 scope(시군구 12 / 행정동 203)·같은 달 안에서, 높을수록 좋음';
+COMMENT ON COLUMN metric.grade      IS 'S(상위 25%), A(25~50%), B(50~75%), C(하위 25%). 경계는 실데이터 보고 조정';
 
 CREATE TABLE dong_hourly (
   dong_id       SMALLINT     NOT NULL REFERENCES dong(dong_id),
@@ -285,11 +296,11 @@ CREATE TABLE dong_hourly (
   PRIMARY KEY (dong_id, month, day_group, hour),
   CHECK (day_group IN ('weekday', 'weekend'))
 );
-COMMENT ON TABLE  dong_hourly           IS '읍면동 24시간 붐빔 곡선 (population_hourly 에서 계산)';
+COMMENT ON TABLE  dong_hourly           IS '읍면동 24시간 붐빔 곡선. population_hourly.walk_avg(보행인구)를 월·요일그룹·시간대로 평균';
 COMMENT ON COLUMN dong_hourly.month     IS '1~12';
 COMMENT ON COLUMN dong_hourly.day_group IS 'weekday, weekend';
 COMMENT ON COLUMN dong_hourly.hour      IS '0~23';
-COMMENT ON COLUMN dong_hourly.index_100 IS '최대 시간대 = 100';
+COMMENT ON COLUMN dong_hourly.index_100 IS '보행인구 지수. 같은 dong·month·day_group 안에서 최대 시간대 = 100';
 
 CREATE TABLE region_link (
   link_id       SERIAL       PRIMARY KEY,
