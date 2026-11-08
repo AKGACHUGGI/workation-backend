@@ -358,3 +358,48 @@ def test_weighted_rounds_half_up():
 
     scores = {"quiet": {"score": 60}, "ease": {"score": 61}}
     assert weighted(scores, {"quiet": 1, "ease": 1}) == 61  # 60.5 → 61 (SQL round 와 같게)
+
+
+# ───────────── 사진 ─────────────
+
+
+@pytest.fixture
+def photos(data):
+    from django.db import connection
+
+    rows = [
+        ("region", 1, 10, "https://r2.example/a.webp", "한국관광공사 포토코리아 / 갑"),
+        ("region", 1, 7, "https://r2.example/b.webp", "한국관광공사 포토코리아 / 을"),
+        ("region", 1, None, "https://r2.example/c.webp", "한국관광공사 포토코리아 / 병"),
+        ("dong", 101, 7, "https://r2.example/b.webp", "한국관광공사 포토코리아 / 을"),
+        ("region", 2, 10, "https://r2.example/d.webp", "한국관광공사 포토코리아 / 정"),
+    ]
+    with connection.cursor() as cur:
+        for scope, unit, month, url, credit in rows:
+            cur.execute(
+                "INSERT INTO photo (scope, unit_id, month, url, credit, source, status)"
+                " VALUES (%s, %s, %s, %s, %s, 'tourapi', 'approved')",
+                [scope, unit, month, url, credit],
+            )
+
+
+def test_region_photos_same_month_first(client, photos):
+    body = client.get("/api/v1/regions/51820?month=10").json()
+    urls = [p["url"] for p in body["photos"]["featured"]]
+    assert urls[0] == "https://r2.example/a.webp"
+    assert body["photos"]["totalCount"] == 3
+    assert body["photos"]["featured"][0]["credit"] == "한국관광공사 포토코리아 / 갑"
+
+
+def test_dong_photos_prefer_dong_and_dedupe(client, photos):
+    body = client.get("/api/v1/dongs/5182025300?month=10").json()
+    urls = [p["url"] for p in body["photos"]["featured"]]
+    assert urls[0] == "https://r2.example/b.webp"  # 그 동 사진이 먼저 (달이 달라도)
+    assert sorted(urls) == sorted(set(urls))  # 같은 사진이 시군구 · 동으로 두 번 나오지 않음
+    assert body["photos"]["totalCount"] == 3
+
+
+def test_tiers_item_photo(client, photos):
+    body = client.get("/api/v1/tiers?metric=quiet&month=10").json()
+    items = {i["name"]: i for t in body["tiers"] for i in t["items"]}
+    assert items["강릉시"]["photo"]["url"] == "https://r2.example/d.webp"

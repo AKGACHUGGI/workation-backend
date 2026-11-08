@@ -1,6 +1,6 @@
 """지역 상세(GET /regions/{id}), 월별 혼잡(GET /regions/{id}/months), 동네 프로필(GET /dongs/{id}).
 명세: workation-docs 명세/api/openapi.yaml. 경로의 id 는 공식 코드(시군구 5자리 · 행정동 10자리)다.
-사진 · 팁 · 투표 · 지원사업 링크는 아직 데이터가 없어 빈 값으로 내려준다."""
+팁 · 투표 · 지원사업 링크는 아직 데이터가 없어 빈 값으로 내려준다. 사진은 regions/photos.py."""
 
 import logging
 
@@ -12,6 +12,7 @@ from core.errors import ParamError, bad_request, not_found, parse_choice, parse_
 from metrics import scoring
 from metrics.models import Metric
 from regions.models import DayGroup, Dong, DongHourly, Region
+from regions.photos import dong_photos, region_photos
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,6 @@ TAG_LABELS = {
     "resort": "리조트",
     "long_stay": "장기 숙소",
 }
-EMPTY_PHOTOS = {"featured": [], "totalCount": 0}
 
 
 def _score(entry: dict | None) -> dict | None:
@@ -99,7 +99,7 @@ def region_detail(request, region_id: str):
             "weekendGap": _weekend_gap(gap),
             "reason": f"{_when(month)} " + " · ".join(reason_parts) if reason_parts else "",
             "links": [],
-            "photos": EMPTY_PHOTOS,
+            "photos": region_photos(region.region_id, month),
             "tipCount": 0,
             "vote": None,
         }
@@ -248,7 +248,7 @@ def dong_detail(request, dong_id: str):
         "sidoName": region.sido_name,
         "month": month,
         "tags": sorted(dong.tags or []),
-        "photos": EMPTY_PHOTOS,
+        "photos": dong_photos(dong.dong_id, region.region_id, month),
         "tipCount": 0,
         "vote": None,
         "location": {

@@ -22,6 +22,7 @@ from django.db import connection
 
 from core import clova
 from metrics.scoring import LABELS, REGION_ONLY
+from regions.photos import dong_photos
 from regions.views import TAG_LABELS
 
 logger = logging.getLogger(__name__)
@@ -278,6 +279,9 @@ def rank(cond: Conditions, question: str) -> list[dict]:
                 "regionName": r["sigungu_name"],
                 "score": round(float(r["total"]), 1),
                 "reason": " · ".join(facts),
+                "photo": next(
+                    iter(dong_photos(r["dong_id"], r["region_id"], cond.month, 1)["featured"]), None
+                ),
             }
         )
     return results
