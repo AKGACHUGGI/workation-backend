@@ -44,6 +44,7 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
 | `03_metrics.sql` | `metric_def` 시드, `metric`, `dong_hourly` 산출 | 2026-11-07 |
 | `migrations/20261107_metric-formulas-django.sql` | 주석만: 저녁 활기·숙박 성향 식 확정, Django·Cloudflare 표기 | 2026-11-07 |
 | `migrations/20261107_dong-tags-coast.sql` + `build_coast_sql.py apply … 1` · `build_poi_tags_sql.py apply` 출력 | `dong.tags`, `dong.coast_dist_km` 추가, 해안 거리와 자동 태그 적재 | 2026-11-07 |
+| `photo` 1,148행 (관광공사 포토코리아 814장, Cloudflare R2) | 시군구 814 + 행정동 334행, `source = tourapi`, `status = approved`. 분류 · 변환 · 업로드 스크립트는 데이터 담당 로컬(수집 스크립트와 같은 이유로 저장소에 올리지 않음) | 2026-11-08 |
 | `migrations/20261107_text-embedding.sql` + `05_dong_doc.sql` + `build_embeddings.py` 출력 | `tag_vocab` · `dong_doc` 추가, 표현 165개 · 소개문 203개 임베딩 | 2026-11-07 |
 | `migrations/20261107_pgvector-dong-feature.sql` + `04_dong_feature.sql` | pgvector 확장, `dong_feature` 테이블 추가와 특징 벡터 2,639행 적재 | 2026-11-07 |
 
@@ -93,6 +94,9 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
       FROM tag_vocab ORDER BY embedding <=> :q LIMIT 3;   -- :q = 조각의 임베딩 (같은 모델)
     ```
   - CLOVA Studio 기본 한도는 분당 60회다. 서비스에서는 질문 조각 임베딩을 Redis 에 캐시한다.
+- 사진 (`photo`, 2026-11-08): 관광공사 포토코리아 갤러리 사진 814장을 가로 1600px WebP 로 줄여 Cloudflare R2(`photos/<갤러리 id>.webp`)에 올렸다. 전부 **공공누리 1유형**이라 화면에 `credit`(예: "한국관광공사 포토코리아 / 작가")을 꼭 함께 보여 준다.
+  - 시군구는 모든 사진, 행정동은 촬영지 문구로 특정된 334장(65개 동). 촬영지가 "제주도" 뿐인 181장(대부분 음식)과 원본 링크가 깨진 34장은 뺐다.
+  - API 는 같은 달 → 앞뒤 한 달 → 월 모름 → 그 밖 순으로 고르고 같은 순위 안에서는 랜덤 (`regions/photos.py`).
 - 보류: `app_user.provider` 의 `apple` 제거와 알림 설정 컬럼 3개는 모바일 Apple 로그인 결정(workation-mobile #2) 뒤에.
 
 ## v0.2 → v0.3 변경
