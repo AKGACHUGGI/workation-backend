@@ -12,7 +12,7 @@
 완료 기준:
 
 - `place` 테이블에 관광공사 장소가 저장되고, 동 태그(`dong.tags`)는 이 테이블에서 계산된다.
-- `db/tools/sync_graph.py` 를 실행하면 Neo4j 에 노드·관계가 채워진다 (전체 삭제 후 재적재).
+- `uv run python manage.py sync_graph` 를 실행하면 Neo4j 에 노드·관계가 채워진다 (전체 삭제 후 재적재).
 - `GET /api/explore/graph` 가 그래프 전체를 §5 형식으로 돌려준다. 압축 응답 100KB 이하(목표, 실측).
 - `uv run pytest` 가 Neo4j 없이 통과한다.
 
@@ -22,7 +22,7 @@
 | --- | --- | --- |
 | 저장소 | **Postgres = 원본, Neo4j(AuraDB Free) = 읽기 전용 복사본** | 탐색용 그래프 질의·시연. 원본은 기존 파이프라인 유지 |
 | 쓰기 | 서비스는 Neo4j 에 쓰지 않는다 | 두 DB 간 트랜잭션·동기화 문제 회피 |
-| 동기화 | 적재 후 `sync_graph.py` 수동 실행, 전체 삭제 후 재적재 | 데이터는 배치로만 바뀌고 규모가 작다(수 초) |
+| 동기화 | 적재 후 `manage.py sync_graph` 수동 실행, 전체 삭제 후 재적재 | 데이터는 배치로만 바뀌고 규모가 작다(수 초) |
 | 전달 방식 | 진입 시 그래프 전체 1회 전달, 이후 상호작용은 브라우저에서 | 노드 약 1,230개라 작다. 태그 클릭 등 즉시 반응 |
 | 장소 범위 | 태그 근거 장소만. **음식점은 Neo4j 에서 제외**(Postgres 에는 저장) | 워케이션 판단과 거리가 멀고 장소의 54% 를 차지. `food` 태그 계산에는 필요 |
 | 지표 | 노드가 아니라 동 노드의 속성(연간 등급) | 월별 관계 약 8천 개를 늘릴 만큼 탐색에 기여하지 않음 |
@@ -53,13 +53,13 @@
 | `(Dong)-[:HAS_TAG]->(Tag)` | 약 560 | `dong.tags` |
 | `(Place)-[:LOCATED_IN]->(Dong)` | 약 1,000 | `place.dong_id` |
 | `(Place)-[:EVIDENCE_OF]->(Tag)` | 약 1,000 | `place.tag` (mountain 은 태그 시트 제안 근거 장소) |
-| `(Dong)-[:SIMILAR {rank, dist}]->(Dong)` | 약 1,000 | `dong_feature` 연간 `metric_vec` 거리 상위 5. `webapi/data.py` `similar_dongs` 재사용 |
+| `(Dong)-[:SIMILAR {rank, dist}]->(Dong)` | 약 1,000 | `dong_feature` 연간 `metric_vec` 거리 상위 5. `similar_dongs` 와 같은 거리식, 한 번의 쿼리 |
 
 ## 4. 데이터 준비
 
 ```
 ① TourAPI ──(build_poi_tags_sql.py, 로컬)──▶ Postgres place + dong.tags · region.tags
-② Postgres ──(sync_graph.py, 로컬)──▶ Neo4j
+② Postgres ──(manage.py sync_graph, 로컬)──▶ Neo4j
 ```
 
 ### 4-1. `place` 테이블 (migration `db/migrations/<적용일 YYYYMMDD>_place.sql`, 기존 이름 규칙)
@@ -85,13 +85,14 @@ RLS ENABLE, 정책 없음 (다른 테이블과 같음). 출처 표기는 "한국
 - 받기에 실패하면 SQL 파일을 만들지 않는다 (반쪽 반영 방지). 생성 SQL 은 지금처럼 한 트랜잭션.
 - `preview` 모드는 유지 (DB 변경 없이 동별 개수).
 
-### 4-3. `db/tools/sync_graph.py` (신규)
+### 4-3. `webapi/management/commands/sync_graph.py` (신규 Django 명령)
 
-- Postgres(`DATABASE_URL`)에서 읽고 Neo4j(`NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`)에 쓴다.
+- Django DB 설정(`.env` 의 `DB_*`)으로 Postgres 를 읽고 Neo4j(`NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`)에 쓴다. 읽기 · 변환 · 쓰기 함수는 `webapi/graph.py` 에 두고 API 와 같이 쓴다.
 - 행 → 노드·관계 변환은 **순수 함수** (`build_graph(rows) -> (nodes, edges)`)로 분리해 테스트한다. 같은 함수를 API 테스트의 가짜 그래프 생성에도 쓴다.
-- Neo4j 쓰기는 한 트랜잭션: 전체 삭제 → 노드 → 관계 → `(:Meta {synced_at})`. 실패하면 이전 그래프가 남는다.
+- Neo4j 쓰기는 한 트랜잭션: 전체 삭제 → 노드 → 관계 → `(:Meta {synced_at})`. 실패하면 이전 그래프가 남는다. Neo4j 속성에는 맵을 넣을 수 없어 동 등급은 `grade_quiet` 처럼 펼쳐 저장하고 읽을 때 되돌린다.
 - 끝나면 라벨별 노드 수와 관계 수를 출력한다.
-- 실행 순서는 `db/README.md` 적재 흐름 끝에 추가한다: 지표·태그·장소 반영 후 `sync_graph.py`.
+- 실행 순서는 `db/README.md` 적재 흐름 끝에 추가한다: 지표·태그·장소 반영 후 `manage.py sync_graph`.
+- 비슷한 동은 동마다 `similar_dongs` 를 부르지 않고 같은 거리식(`metric_vec <->`, 연간)으로 한 번에 상위 5를 뽑는다. 집계 제외 동은 후보에서 뺀다.
 
 ## 5. API — `GET /api/explore/graph`
 
@@ -134,14 +135,14 @@ RLS ENABLE, 정책 없음 (다른 테이블과 같음). 출처 표기는 "한국
 | --- | --- |
 | Neo4j 연결 실패, 캐시 있음 | 캐시로 200 |
 | Neo4j 연결 실패, 캐시 없음 | 503 `{"error": {"code": "GRAPH_UNAVAILABLE", "message": "탐색 데이터를 불러오지 못했어요."}}` (`core/errors.error`) |
-| Neo4j 가 비어 있음 (`Meta` 없음) | 위와 같은 503. 로그에 "sync_graph 실행 필요" |
+| Neo4j 가 비어 있음 (`Meta` 없음) | 위와 같은 503. 로그에 "manage.py sync_graph 실행 필요" |
 | `NEO4J_URI` 미설정 | 위와 같은 503 (로컬 개발에서 Neo4j 없이도 서버가 뜬다) |
 
 ## 6. 설정
 
 - `pyproject.toml` 에 `neo4j` 추가.
 - `.env.example` 에 `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`, `TOURAPI_KEY` 추가 (값 없이).
-- Aura Free 인스턴스는 팀 계정으로 하나 만든다. 72시간 사용이 없으면 일시정지되고, 일시정지 30일이면 삭제된다(2026-11 Neo4j 문서). 삭제돼도 `sync_graph.py` 로 복구한다. **시연 전날과 당일 콘솔에서 상태 확인**.
+- Aura Free 인스턴스는 팀 계정으로 하나 만든다. 72시간 사용이 없으면 일시정지되고, 일시정지 30일이면 삭제된다(2026-11 Neo4j 문서). 삭제돼도 `manage.py sync_graph` 로 복구한다. **시연 전날과 당일 콘솔에서 상태 확인**.
 
 ## 7. 테스트
 
@@ -154,7 +155,7 @@ RLS ENABLE, 정책 없음 (다른 테이블과 같음). 출처 표기는 "한국
 
 - [ ] `place` 저장 수, 동 경계 밖으로 빠진 수 기록
 - [ ] 태그 재계산 후 태그별 동 수가 `db/README.md` 기록(2026-11-07)과 크게 다르지 않음. 다르면 차이를 README 에 기록
-- [ ] `sync_graph.py` 출력의 라벨별 노드 수 · 관계 수
+- [ ] `manage.py sync_graph` 출력의 라벨별 노드 수 · 관계 수
 - [ ] `/api/explore/graph` 응답 크기(원본 · gzip)와 응답 시간(캐시 없음 · 있음)
 
 ## 8. 프론트로 넘기는 것 (UI 확정 후 설계)
