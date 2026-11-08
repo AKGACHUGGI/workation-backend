@@ -16,16 +16,27 @@ ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=["localhost", "127.0.0.
 # Django 기본 앱(admin·auth·sessions)은 로그인(W-07) 작업 때 정한다.
 # Supabase 에 migrate 로 테이블이 생기지 않게 지금은 넣지 않는다.
 INSTALLED_APPS = [
+    "corsheaders",
     "rest_framework",
     "core",
     "regions",
     "metrics",
+    "search",
 ]
 
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.middleware.common.CommonMiddleware",
 ]
+
+# 웹(Vite 개발 서버) 에서 API 를 부르기 위한 CORS. 배포 도메인은 .env 로 더한다.
+CORS_ALLOWED_ORIGINS = env.list(
+    "CORS_ALLOWED_ORIGINS", default=["http://localhost:5173", "http://127.0.0.1:5173"]
+)
+
+# 자연어 검색(HyperCLOVA X · CLOVA 임베딩). 비어 있으면 규칙 파서 · 문자열 매칭으로 동작한다.
+CLOVA_API_KEY = env("CLOVA_API_KEY", default="")
 
 ROOT_URLCONF = "config.urls"
 WSGI_APPLICATION = "config.wsgi.application"
