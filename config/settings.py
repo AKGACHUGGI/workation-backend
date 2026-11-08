@@ -22,6 +22,7 @@ INSTALLED_APPS = [
     "regions",
     "metrics",
     "search",
+    "webapi",
 ]
 
 MIDDLEWARE = [
@@ -51,7 +52,10 @@ DATABASES = {
         "USER": env("DB_USER", default="postgres"),
         "PASSWORD": env("DB_PASSWORD", default=""),
         "OPTIONS": {"sslmode": env("DB_SSLMODE", default="prefer")},
-        "CONN_MAX_AGE": 60,
+        # Supabase Session pooler 는 동시 연결 15개까지. runserver 는 요청마다 새 스레드라
+        # 연결을 붙잡아 두면 금방 한도를 넘으므로 개발(DEBUG)에서는 요청마다 닫는다.
+        # Gunicorn(2 × 4 스레드)은 재사용이 이득
+        "CONN_MAX_AGE": env.int("DB_CONN_MAX_AGE", default=0 if DEBUG else 60),
         "CONN_HEALTH_CHECKS": True,
     }
 }
