@@ -351,3 +351,10 @@ def test_search_nl_no_conditions(client, monkeypatch):
 def test_search_nl_bad_query(client):
     res = client.post("/api/v1/search/nl", {"query": ""}, content_type="application/json")
     assert res.status_code == 400
+
+
+def test_weighted_rounds_half_up():
+    from metrics.scoring import weighted
+
+    scores = {"quiet": {"score": 60}, "ease": {"score": 61}}
+    assert weighted(scores, {"quiet": 1, "ease": 1}) == 61  # 60.5 → 61 (SQL round 와 같게)

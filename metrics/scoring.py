@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 
 from metrics.models import Metric
@@ -54,7 +55,8 @@ def weighted(scores: dict[str, dict], weights: dict[str, float]) -> int | None:
         if w > 0 and s is not None:
             num += w * s
             den += w
-    return round(num / den) if den else None
+    # 파이썬 round 는 0.5 를 짝수로 보내므로(60.5 → 60) SQL round 와 같게 0.5 는 올린다
+    return math.floor(num / den + 0.5) if den else None
 
 
 def quartile_grades(values: dict) -> dict:
