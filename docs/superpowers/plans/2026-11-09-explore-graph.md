@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 관광공사 장소를 `place` 테이블에 저장하고, Postgres 데이터를 Neo4j 지식그래프로 동기화해 `GET /api/explore/graph` 로 한 번에 내려준다.
+**Goal:** 관광공사 장소를 `place` 테이블에 저장하고, Postgres 데이터를 Neo4j 지식그래프로 동기화해 `GET /api/explore/graph` 로 웹 W-09 형식에 맞춰 한 번에 내려준다.
 
-**Architecture:** Postgres 가 원본이고 Neo4j(AuraDB Free)는 읽기 전용 복사본이다. `webapi/graph.py` 가 Postgres 읽기(`load_rows`) → 순수 변환(`build_graph`) → Neo4j 쓰기(`write_graph`) / 읽기(`fetch_graph`)를 맡고, Django 명령 `sync_graph` 와 API 뷰가 이를 쓴다. API 는 응답을 1시간 캐시하고, Neo4j 가 안 되면 마지막 응답으로, 그것도 없으면 503 으로 답한다.
+**Architecture:** Postgres 가 원본이고 Neo4j(AuraDB Free)는 읽기 전용 복사본이다. `webapi/graph.py` 가 Postgres 읽기(`load_rows`) → 순수 변환(`build_graph`) → Neo4j 쓰기(`write_graph`) / 읽기(`fetch_graph`) → 웹 형식 변환(`to_response`)을 맡고, Django 명령 `sync_graph` 와 API 뷰가 이를 쓴다. API 는 응답을 1시간 캐시하고, Neo4j 가 안 되면 마지막 응답으로, 그것도 없으면 503 으로 답한다.
 
 **Tech Stack:** Django 5.2 · DRF 3.18 · PostgreSQL 17 (PostGIS · pgvector는 Supabase 에만) · Neo4j 공식 Python 드라이버 `neo4j` · pytest-django · ruff
 
@@ -17,11 +17,14 @@
 - 커밋 전 검사(CI 와 같음): `uv run ruff check .` · `uv run ruff format --check .` · `docker compose up -d --wait` · `uv run pytest`. ruff 는 `db/` 를 검사하지 않는다.
 - 줄 길이 100 (ruff). Python 하한 3.12.
 - 테스트는 Neo4j · TourAPI · Supabase 에 붙지 않는다. 테스트 DB 는 `db/schema.sql` 만 실행되어 PostGIS(`dong.geom`)와 pgvector(`dong_feature`)가 없다.
-- id 규칙: 시군구 `sigungu_code`(5자리), 행정동 `adm_code`(10자리). 그래프 노드 id 는 `sido:<시도명>` · `region:<sigungu_code>` · `dong:<adm_code>` · `tag:<태그>` · `place:<contentid>`.
+- 응답 형식은 웹이 정하고 백엔드가 맞춘다: workation-web `docs/superpowers/specs/2026-11-09-W-09-지도탐색-design.md` §6 `ExploreGraphResponse` (브랜치 `docs/W-09-explore-spec`). 최상위 키 `syncedAt · tags · provinces · sigungu · dongs · places`.
+- id 규칙: 도 = 시군구 코드 앞 2자리, 시군구 `sigungu_code`(5자리), 행정동 `adm_code`(10자리), 장소 `contentid`. 응답 id 는 모두 문자열. Neo4j 노드 id 는 `sido:<2자리>` · `region:<sigungu_code>` · `dong:<adm_code>` · `tag:<태그>` · `place:<contentid>`.
 - 에러 응답 형식: `{"error": {"code", "message"}}` (`core/errors.error`). 503 코드는 `GRAPH_UNAVAILABLE`, 메시지 `탐색 데이터를 불러오지 못했어요.`
-- 그래프에서 음식점(`food`) 장소는 뺀다. `place` 테이블에는 저장한다.
+- 태그는 12개(`food` 제외), 순서 coast · city · cafe · library · long_stay · resort · beach · park · mountain · island · surf · market. 묶음 coast · city = `trait`, cafe · library = `work`, long_stay · resort = `stay`, beach · park · mountain · island · surf = `rest`, market = `life`. `display`: coast · city · mountain = `badge`, 나머지 `branch`.
+- 그래프·응답의 장소는 `branch` 태그 근거만(음식점·산·숲 근거 제외). `place` 테이블에는 모두 저장한다. 이미지는 `http://` → `https://`, 그 밖은 null.
+- 집계 제외 동(`is_excluded`)과 `adm_code` 없는 동은 그래프·응답에서 뺀다(경계·id 가 없다).
 - 비슷한 동은 연간(`month = 0`) `metric_vec` 거리 상위 5, 집계 제외 동 제외.
-- 장소 출처 표기는 `한국관광공사`.
+- 장소 출처 표기 "한국관광공사" 는 웹이 고정 문구로 한다.
 
 ## File Structure
 
@@ -30,12 +33,12 @@
 | `db/schema.sql` (수정) | `place` 테이블 DDL + RLS (테스트 DB 도 이걸로 만든다) |
 | `db/migrations/20261109_place.sql` (신규) | Supabase 에 `place` 추가 |
 | `db/tools/build_poi_tags_sql.py` (수정) | TourAPI 200건 단위 · 재시도, 장소를 `place` 에 저장, 태그를 `place` 에서 계산 |
-| `webapi/graph.py` (신규) | 그래프 읽기 · 변환 · Neo4j 쓰기/읽기. 이 기능의 핵심 모듈 |
+| `webapi/graph.py` (신규) | 그래프 읽기 · 변환 · Neo4j 쓰기/읽기 · 웹 응답 형식. 이 기능의 핵심 모듈 |
 | `webapi/management/commands/sync_graph.py` (신규) | `manage.py sync_graph` |
 | `webapi/views.py`, `webapi/urls.py` (수정) | `GET /api/explore/graph` |
 | `config/settings.py`, `config/settings_test.py`, `.env.example`, `pyproject.toml` (수정) | Neo4j 설정 · GZip · 의존성 |
 | `tests/test_poi_tags_tool.py` | 장소 수집 스크립트 |
-| `tests/test_graph_build.py` | `build_graph` · 속성 변환 · `load_rows` |
+| `tests/test_graph_build.py` | `build_graph` · 속성 변환 · `to_response` · `load_rows` |
 | `tests/test_graph_sync.py` | `write_graph` · `fetch_graph` · `sync_graph` 명령 (가짜 드라이버) |
 | `tests/test_explore_api.py` | API · 캐시 · 503 · gzip |
 | `db/README.md`, `docs/개발-가이드.md` (수정) | 적재 흐름 · 구조 · API 표 |
@@ -421,19 +424,25 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 3: 그래프 변환 (순수 함수)
+### Task 3: 그래프 변환과 웹 응답 형식 (순수 함수)
 
 **Files:**
 - Create: `webapi/graph.py`
 - Test: `tests/test_graph_build.py`
 
 **Interfaces:**
-- Consumes: `regions.views.TAG_LABELS` (태그 13개 → 한글 이름).
+- Consumes: `regions.views.TAG_LABELS` (태그 13개 → 한글 이름. food 포함, 여기서 뺀다).
 - Produces (later tasks rely on these exact names):
-  - `GraphRows` dataclass: `regions: list[dict]` (키 `region_id, sido_name, sigungu_name, sigungu_code, lat, lng`), `dongs: list[dict]` (키 `dong_id, region_id, dong_name, adm_code, is_excluded, tags, lat, lng, grades`), `places: list[dict]` (키 `place_id, name, tag, lat, lng, dong_id, image_url`), `similar: list[tuple[int, int, int, float]]` (`dong_id, other_dong_id, rank, dist`)
-  - `build_graph(rows: GraphRows) -> dict` → `{"nodes": [...], "edges": [...]}`. 노드 키는 `FIELDS[kind]` 순서 그대로, 동은 `grades` 추가. 선은 `{"from", "to", "type"}` + SIMILAR 만 `rank`, `dist`
-  - `node_props(node: dict) -> dict`, `node_from_props(props: dict) -> dict`, `edge_props(edge: dict) -> dict`
-  - 상수 `GRADE_KEYS`, `SIMILAR_TOP`, `HIDDEN_PLACE_TAGS`, `TAG_GROUP`, `FIELDS`, `LABEL`, `CREDIT`
+  - `GraphRows` dataclass:
+    - `regions: list[dict]` 키 `region_id, sido_name, sigungu_name, sigungu_code, lat, lng`
+    - `sidos: dict[str, tuple[float, float]]` 시도 코드(시군구 코드 앞 2자리) → `(lat, lng)`
+    - `dongs: list[dict]` 키 `dong_id, region_id, dong_name, adm_code, is_excluded, tags, coast_km, lat, lng, bbox, grades`
+    - `places: list[dict]` 키 `place_id, name, tag, lat, lng, dong_id, image_url`
+    - `similar: list[tuple[int, int, int, float]]` (`dong_id, other_dong_id, rank, dist`)
+  - `build_graph(rows: GraphRows) -> dict` → Neo4j 모델 `{"nodes": [...], "edges": [...]}`. 노드 키는 `FIELDS[kind]`, 동은 `grades` 추가. 선은 `{"from", "to", "type"}` + SIMILAR 만 `rank`, `dist`
+  - `to_response(synced_at: str, nodes: list[dict], edges: list[dict]) -> dict` → 웹 W-09 §6 형식
+  - `node_props(node) -> dict`, `node_from_props(props) -> dict`, `edge_props(edge) -> dict`, `https_image(url) -> str | None`
+  - 상수 `GRADE_KEYS`, `SIMILAR_TOP`, `TAG_ORDER`, `TAG_GROUP`, `BADGE_TAGS`, `FIELDS`, `LABEL`
 
 - [ ] **Step 1: 실패하는 테스트**
 
@@ -442,9 +451,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```python
 """탐색 지식그래프 변환 (webapi/graph.py). DB · Neo4j 없이 도는 순수 함수 테스트."""
 
-from regions.views import TAG_LABELS
 from webapi import graph
-from webapi.graph import GraphRows, build_graph
+from webapi.graph import GraphRows, build_graph, to_response
+
+AT = "2026-11-09T10:00:00+09:00"
 
 
 def sample_rows() -> GraphRows:
@@ -455,22 +465,30 @@ def sample_rows() -> GraphRows:
             {"region_id": 2, "sido_name": "강원특별자치도", "sigungu_name": "강릉시",
              "sigungu_code": "51150", "lat": 37.75, "lng": 128.88},
         ],
+        sidos={"51": (37.8, 128.3)},
         dongs=[
             {"dong_id": 101, "region_id": 1, "dong_name": "거진읍", "adm_code": "5182025300",
-             "is_excluded": False, "tags": ["coast", "cafe"], "lat": 38.44, "lng": 128.45,
+             "is_excluded": False, "tags": ["cafe", "food", "coast", "beach"], "coast_km": 0.4,
+             "lat": 38.44, "lng": 128.45, "bbox": [128.4, 38.4, 128.5, 38.5],
              "grades": {"quiet": "S", "peer": "B"}},
             {"dong_id": 102, "region_id": 1, "dong_name": "수동면", "adm_code": None,
-             "is_excluded": True, "tags": [], "lat": None, "lng": None, "grades": {}},
+             "is_excluded": True, "tags": [], "coast_km": None, "lat": None, "lng": None,
+             "bbox": None, "grades": {}},
             {"dong_id": 201, "region_id": 2, "dong_name": "경포동", "adm_code": "5115060500",
-             "is_excluded": False, "tags": ["cafe"], "lat": 37.79, "lng": 128.9, "grades": {}},
+             "is_excluded": False, "tags": ["mountain", "cafe"], "coast_km": None,
+             "lat": 37.79, "lng": 128.9, "bbox": [128.85, 37.75, 128.95, 37.83], "grades": {}},
         ],
         places=[
             {"place_id": 11, "name": "카페A", "tag": "cafe", "lat": 38.441, "lng": 128.451,
-             "dong_id": 101, "image_url": "http://img/a.jpg"},
+             "dong_id": 101, "image_url": "http://tong.visitkorea.or.kr/a.jpg"},
             {"place_id": 12, "name": "식당B", "tag": "food", "lat": 38.442, "lng": 128.452,
              "dong_id": 101, "image_url": None},
             {"place_id": 13, "name": "카페C", "tag": "cafe", "lat": 38.2, "lng": 128.3,
              "dong_id": 102, "image_url": None},
+            {"place_id": 14, "name": "산D", "tag": "mountain", "lat": 37.8, "lng": 128.9,
+             "dong_id": 201, "image_url": None},
+            {"place_id": 15, "name": "해변E", "tag": "beach", "lat": 38.443, "lng": 128.453,
+             "dong_id": 101, "image_url": ""},
         ],
         similar=[(101, 201, 1, 0.12341), (201, 101, 1, 0.12341), (101, 201, 6, 0.9)],
     )
@@ -484,11 +502,14 @@ def edges(g, type_):
     return [(e["from"], e["to"]) for e in g["edges"] if e["type"] == type_]
 
 
+# ───────────── build_graph (Neo4j 모델) ─────────────
+
+
 def test_hierarchy_sido_region_dong():
     g = build_graph(sample_rows())
-    assert ids(g, "sido") == {"sido:강원특별자치도"}
+    assert ids(g, "sido") == {"sido:51"}
     assert ids(g, "region") == {"region:51820", "region:51150"}
-    assert ("region:51820", "sido:강원특별자치도") in edges(g, "IN")
+    assert ("region:51820", "sido:51") in edges(g, "IN")
     assert ("dong:5182025300", "region:51820") in edges(g, "IN")
 
 
@@ -498,30 +519,30 @@ def test_excluded_dong_and_its_places_are_dropped():
     assert "place:13" not in ids(g, "place")
 
 
-def test_food_place_hidden_but_food_tag_node_kept():
+def test_food_and_badge_places_dropped_food_tag_dropped():
     g = build_graph(sample_rows())
-    assert ids(g, "place") == {"place:11"}
-    assert "tag:food" in ids(g, "tag")
-    assert len(ids(g, "tag")) == len(TAG_LABELS)
+    assert ids(g, "place") == {"place:11", "place:15"}  # 음식점 12 · 산 14 제외
+    assert len(ids(g, "tag")) == 12 and "tag:food" not in ids(g, "tag")
+    assert ("dong:5182025300", "tag:food") not in edges(g, "HAS_TAG")
 
 
-def test_place_edges_and_fields():
+def test_tag_nodes_have_group_display_order():
     g = build_graph(sample_rows())
-    assert edges(g, "LOCATED_IN") == [("place:11", "dong:5182025300")]
-    assert edges(g, "EVIDENCE_OF") == [("place:11", "tag:cafe")]
-    p = next(n for n in g["nodes"] if n["id"] == "place:11")
-    assert p == {"id": "place:11", "kind": "place", "name": "카페A", "lat": 38.441, "lng": 128.451,
-                 "tag": "cafe", "image": "http://img/a.jpg", "credit": "한국관광공사"}
+    tags = {n["id"]: n for n in g["nodes"] if n["kind"] == "tag"}
+    assert tags["tag:coast"] == {"id": "tag:coast", "kind": "tag", "name": "바닷가",
+                                 "group": "trait", "display": "badge", "order": 1}
+    assert tags["tag:mountain"]["display"] == "badge" and tags["tag:mountain"]["group"] == "rest"
+    assert tags["tag:market"]["group"] == "life" and tags["tag:market"]["order"] == 12
+    assert set(graph.TAG_ORDER) == set(graph.TAG_GROUP)
 
 
-def test_dong_tags_and_grades_with_nulls():
-    g = build_graph(sample_rows())
-    assert set(edges(g, "HAS_TAG")) == {
-        ("dong:5182025300", "tag:coast"), ("dong:5182025300", "tag:cafe"),
-        ("dong:5115060500", "tag:cafe"),
-    }
-    d = next(n for n in g["nodes"] if n["id"] == "dong:5115060500")
-    assert d["grades"] == {"quiet": None, "peer": None, "evening": None}
+def test_https_image():
+    assert graph.https_image("http://tong.visitkorea.or.kr/a.jpg") == (
+        "https://tong.visitkorea.or.kr/a.jpg"
+    )
+    assert graph.https_image("https://x/a.jpg") == "https://x/a.jpg"
+    assert graph.https_image("") is None and graph.https_image(None) is None
+    assert graph.https_image("ftp://x/a.jpg") is None
 
 
 def test_similar_keeps_top5_and_rounds_dist():
@@ -530,10 +551,6 @@ def test_similar_keeps_top5_and_rounds_dist():
     assert len(sim) == 2
     assert sim[0] == {"from": "dong:5182025300", "to": "dong:5115060500", "type": "SIMILAR",
                       "rank": 1, "dist": 0.1234}
-
-
-def test_every_tag_has_group():
-    assert set(graph.TAG_GROUP) == set(TAG_LABELS)
 
 
 def test_neo4j_props_round_trip():
@@ -547,6 +564,70 @@ def test_neo4j_props_round_trip():
     assert graph.node_props(dong)["grade_quiet"] == "S"
     sim = next(e for e in g["edges"] if e["type"] == "SIMILAR")
     assert graph.edge_props(sim) == {"rank": 1, "dist": 0.1234}
+
+
+# ───────────── to_response (웹 W-09 §6 형식) ─────────────
+
+
+def response():
+    g = build_graph(sample_rows())
+    return to_response(AT, g["nodes"], g["edges"])
+
+
+def test_response_top_level_and_tags():
+    res = response()
+    assert list(res) == ["syncedAt", "tags", "provinces", "sigungu", "dongs", "places"]
+    assert res["syncedAt"] == AT
+    assert [t["id"] for t in res["tags"]] == list(graph.TAG_ORDER)
+    assert res["tags"][2] == {"id": "cafe", "label": "카페 많음", "group": "work",
+                              "display": "branch"}
+
+
+def test_response_provinces_and_sigungu():
+    res = response()
+    assert res["provinces"] == [
+        {"id": "51", "name": "강원특별자치도", "center": {"lat": 37.8, "lng": 128.3}}
+    ]
+    assert {"id": "51150", "name": "강릉시", "provinceId": "51",
+            "center": {"lat": 37.75, "lng": 128.88}} in res["sigungu"]
+
+
+def test_response_dongs():
+    dongs = {d["id"]: d for d in response()["dongs"]}
+    assert set(dongs) == {"5182025300", "5115060500"}  # 집계 제외 동 없음
+    d = dongs["5182025300"]
+    assert d == {
+        "id": "5182025300", "name": "거진읍", "sigunguId": "51820",
+        "center": {"lat": 38.44, "lng": 128.45}, "bbox": [128.4, 38.4, 128.5, 38.5],
+        "grades": {"quiet": "S", "peer": "B", "evening": None},
+        "tags": [  # 태그 바 순서, food 제외, badge 는 null
+            {"tagId": "coast", "placeCount": None},
+            {"tagId": "cafe", "placeCount": 1},
+            {"tagId": "beach", "placeCount": 1},
+        ],
+        "coastKm": 0.4,
+        "similar": ["5115060500"],
+    }
+    other = dongs["5115060500"]
+    assert other["grades"] is None
+    assert other["tags"] == [{"tagId": "cafe", "placeCount": 0},
+                             {"tagId": "mountain", "placeCount": None}]
+    assert other["coastKm"] is None
+
+
+def test_response_places():
+    assert response()["places"] == [
+        {"id": "11", "name": "카페A", "dongId": "5182025300", "lat": 38.441, "lng": 128.451,
+         "tag": "cafe", "image": "https://tong.visitkorea.or.kr/a.jpg"},
+        {"id": "15", "name": "해변E", "dongId": "5182025300", "lat": 38.443, "lng": 128.453,
+         "tag": "beach", "image": None},
+    ]
+
+
+def test_response_same_after_neo4j_round_trip():
+    g = build_graph(sample_rows())
+    stored = [graph.node_from_props(graph.node_props(n)) for n in g["nodes"]]
+    assert to_response(AT, stored, g["edges"]) == to_response(AT, g["nodes"], g["edges"])
 ```
 
 - [ ] **Step 2: 실패 확인**
@@ -557,19 +638,21 @@ Expected: FAIL (`ModuleNotFoundError: No module named 'webapi.graph'`)
 - [ ] **Step 3: `webapi/graph.py` 작성 (변환 부분)**
 
 ```python
-"""탐색 지식그래프 (/explore). 설계: docs/superpowers/specs/2026-11-09-explore-graph-design.md
+"""탐색 지식그래프 (/explore, 웹 W-09). 설계: docs/superpowers/specs/2026-11-09-explore-graph-design.md
 
 Postgres 가 원본이고 Neo4j 는 읽기 전용 복사본이다.
   load_rows()    Postgres → GraphRows                 (manage.py sync_graph)
-  build_graph()  GraphRows → {nodes, edges}            순수 함수. API 응답과 같은 모양
+  build_graph()  GraphRows → {nodes, edges}            Neo4j 에 저장하는 노드 · 관계
   write_graph()  {nodes, edges} → Neo4j               전체 삭제 후 재적재, 한 트랜잭션
-  fetch_graph()  Neo4j → {syncedAt, nodes, edges}     GET /api/explore/graph
+  fetch_graph()  Neo4j → to_response() → 웹 형식      GET /api/explore/graph
+응답 형식은 웹(workation-web W-09 §6 ExploreGraphResponse)이 정하고 백엔드가 맞춘다.
 Neo4j 속성에는 맵을 넣을 수 없어 동 등급은 grade_quiet 처럼 펼쳐 저장하고 읽을 때 되돌린다.
 """
 
 from __future__ import annotations
 
 import logging
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
 from regions.views import TAG_LABELS
@@ -578,9 +661,14 @@ logger = logging.getLogger(__name__)
 
 GRADE_KEYS = ("quiet", "peer", "evening")
 SIMILAR_TOP = 5
-HIDDEN_PLACE_TAGS = {"food"}  # 관광 맛집이라 워케이션 판단과 거리가 멀다. place 테이블에는 있다
-CREDIT = "한국관광공사"
+# 웹 태그 바 순서 (W-09 §3-0). food 는 관광 맛집이라 워케이션 판단과 거리가 멀어 뺀다
+TAG_ORDER = (
+    "coast", "city", "cafe", "library", "long_stay", "resort",
+    "beach", "park", "mountain", "island", "surf", "market",
+)  # fmt: skip
 TAG_GROUP = {
+    "coast": "trait",
+    "city": "trait",
     "cafe": "work",
     "library": "work",
     "long_stay": "stay",
@@ -591,17 +679,16 @@ TAG_GROUP = {
     "island": "rest",
     "surf": "rest",
     "market": "life",
-    "food": "life",
-    "coast": "terrain",
-    "city": "terrain",
 }
-# 종류별 노드 키 (API 응답 순서). Neo4j 는 null 속성을 저장하지 않아 읽을 때 이 목록으로 채운다
+# 동 표시의 배지. 장소 개수가 아니라 해안 거리 · 팀 시트로 붙어서 가지 · 장소 핀이 없다
+BADGE_TAGS = {"coast", "city", "mountain"}
+# 종류별 노드 키. Neo4j 는 null 속성을 저장하지 않아 읽을 때 이 목록으로 채운다
 FIELDS = {
-    "sido": ("id", "kind", "name"),
+    "sido": ("id", "kind", "name", "lat", "lng"),
     "region": ("id", "kind", "name", "lat", "lng"),
-    "dong": ("id", "kind", "name", "lat", "lng"),
-    "tag": ("id", "kind", "name", "group"),
-    "place": ("id", "kind", "name", "lat", "lng", "tag", "image", "credit"),
+    "dong": ("id", "kind", "name", "lat", "lng", "bbox", "coast_km"),
+    "tag": ("id", "kind", "name", "group", "display", "order"),
+    "place": ("id", "kind", "name", "lat", "lng", "tag", "image"),
 }
 LABEL = {"sido": "Sido", "region": "Region", "dong": "Dong", "tag": "Tag", "place": "Place"}
 
@@ -609,30 +696,55 @@ LABEL = {"sido": "Sido", "region": "Region", "dong": "Dong", "tag": "Tag", "plac
 @dataclass
 class GraphRows:
     regions: list[dict] = field(default_factory=list)
+    sidos: dict[str, tuple[float, float]] = field(default_factory=dict)
     dongs: list[dict] = field(default_factory=list)
     places: list[dict] = field(default_factory=list)
     similar: list[tuple[int, int, int, float]] = field(default_factory=list)
 
 
+def https_image(url: str | None) -> str | None:
+    """관광공사 이미지는 https 로도 열린다 (2026-11-09 확인). 그 밖은 버린다."""
+    if not url:
+        return None
+    if url.startswith("https://"):
+        return url
+    if url.startswith("http://"):
+        return "https://" + url.removeprefix("http://")
+    return None
+
+
 def build_graph(rows: GraphRows) -> dict:
     nodes: list[dict] = []
     edges: list[dict] = []
-    for sido in sorted({r["sido_name"] for r in rows.regions}):
-        nodes.append({"id": f"sido:{sido}", "kind": "sido", "name": sido})
 
+    sido_names: dict[str, str] = {}
     region_key: dict[int, str] = {}
     for r in rows.regions:
-        if not r["sigungu_code"]:
+        code = r["sigungu_code"]
+        if not code:
             continue
-        rid = f"region:{r['sigungu_code']}"
+        sido_names.setdefault(code[:2], r["sido_name"])
+        rid = f"region:{code}"
         region_key[r["region_id"]] = rid
         nodes.append(
             {"id": rid, "kind": "region", "name": r["sigungu_name"], "lat": r["lat"], "lng": r["lng"]}
         )
-        edges.append({"from": rid, "to": f"sido:{r['sido_name']}", "type": "IN"})
+        edges.append({"from": rid, "to": f"sido:{code[:2]}", "type": "IN"})
+    for code, name in sorted(sido_names.items()):
+        lat, lng = rows.sidos.get(code, (None, None))
+        nodes.append({"id": f"sido:{code}", "kind": "sido", "name": name, "lat": lat, "lng": lng})
 
-    for key, label in TAG_LABELS.items():
-        nodes.append({"id": f"tag:{key}", "kind": "tag", "name": label, "group": TAG_GROUP[key]})
+    for order, key in enumerate(TAG_ORDER, 1):
+        nodes.append(
+            {
+                "id": f"tag:{key}",
+                "kind": "tag",
+                "name": TAG_LABELS[key],
+                "group": TAG_GROUP[key],
+                "display": "badge" if key in BADGE_TAGS else "branch",
+                "order": order,
+            }
+        )
 
     dong_key: dict[int, str] = {}
     for d in rows.dongs:
@@ -647,18 +759,18 @@ def build_graph(rows: GraphRows) -> dict:
                 "name": d["dong_name"],
                 "lat": d["lat"],
                 "lng": d["lng"],
+                "bbox": d["bbox"],
+                "coast_km": d["coast_km"],
                 "grades": {k: d["grades"].get(k) for k in GRADE_KEYS},
             }
         )
         edges.append({"from": did, "to": region_key[d["region_id"]], "type": "IN"})
         for t in d["tags"]:
-            if t in TAG_LABELS:
+            if t in TAG_GROUP:
                 edges.append({"from": did, "to": f"tag:{t}", "type": "HAS_TAG"})
 
     for p in rows.places:
-        if p["tag"] in HIDDEN_PLACE_TAGS or p["tag"] not in TAG_LABELS:
-            continue
-        if p["dong_id"] not in dong_key:
+        if p["tag"] not in TAG_GROUP or p["tag"] in BADGE_TAGS or p["dong_id"] not in dong_key:
             continue
         pid = f"place:{p['place_id']}"
         nodes.append(
@@ -669,8 +781,7 @@ def build_graph(rows: GraphRows) -> dict:
                 "lat": p["lat"],
                 "lng": p["lng"],
                 "tag": p["tag"],
-                "image": p["image_url"],
-                "credit": CREDIT,
+                "image": https_image(p["image_url"]),
             }
         )
         edges.append({"from": pid, "to": dong_key[p["dong_id"]], "type": "LOCATED_IN"})
@@ -708,12 +819,110 @@ def node_from_props(props: dict) -> dict:
 
 def edge_props(edge: dict) -> dict:
     return {k: v for k, v in edge.items() if k not in ("from", "to", "type")}
+
+
+# ───────────────────────── 웹 응답 형식 (W-09 §6) ─────────────────────────
+
+
+def _bare(node_id: str) -> str:
+    return node_id.split(":", 1)[1]
+
+
+def _center(node: dict) -> dict | None:
+    return None if node.get("lat") is None else {"lat": node["lat"], "lng": node["lng"]}
+
+
+def to_response(synced_at: str, nodes: list[dict], edges: list[dict]) -> dict:
+    by_kind: dict[str, list[dict]] = defaultdict(list)
+    for n in nodes:
+        by_kind[n["kind"]].append(n)
+    for group in by_kind.values():
+        group.sort(key=lambda n: n["id"])
+    parent: dict[str, str] = {}
+    tags_of: dict[str, list[str]] = defaultdict(list)
+    similar: dict[str, list[tuple[int, str]]] = defaultdict(list)
+    place_dong: dict[str, str] = {}
+    for e in edges:
+        if e["type"] == "IN":
+            parent[e["from"]] = e["to"]
+        elif e["type"] == "HAS_TAG":
+            tags_of[e["from"]].append(e["to"])
+        elif e["type"] == "SIMILAR":
+            similar[e["from"]].append((e["rank"], e["to"]))
+        elif e["type"] == "LOCATED_IN":
+            place_dong[e["from"]] = e["to"]
+
+    tags = sorted(by_kind["tag"], key=lambda t: t["order"])
+    order = {t["id"]: t["order"] for t in tags}
+    badge = {t["id"] for t in tags if t["display"] == "badge"}
+
+    places = [
+        {
+            "id": _bare(p["id"]),
+            "name": p["name"],
+            "dongId": _bare(place_dong[p["id"]]),
+            "lat": p["lat"],
+            "lng": p["lng"],
+            "tag": p["tag"],
+            "image": p["image"],
+        }
+        for p in by_kind["place"]
+        if p["id"] in place_dong
+    ]
+    count = Counter((p["dongId"], p["tag"]) for p in places)
+
+    dongs = []
+    for d in by_kind["dong"]:
+        did = _bare(d["id"])
+        has_grade = any(v is not None for v in d["grades"].values())
+        dongs.append(
+            {
+                "id": did,
+                "name": d["name"],
+                "sigunguId": _bare(parent[d["id"]]),
+                "center": _center(d),
+                "bbox": d["bbox"],
+                "grades": d["grades"] if has_grade else None,
+                "tags": [
+                    {
+                        "tagId": _bare(t),
+                        "placeCount": None if t in badge else count[(did, _bare(t))],
+                    }
+                    for t in sorted(tags_of[d["id"]], key=order.__getitem__)
+                ],
+                "coastKm": d["coast_km"],
+                "similar": [_bare(other) for _, other in sorted(similar[d["id"]])],
+            }
+        )
+
+    return {
+        "syncedAt": synced_at,
+        "tags": [
+            {"id": _bare(t["id"]), "label": t["name"], "group": t["group"], "display": t["display"]}
+            for t in tags
+        ],
+        "provinces": [
+            {"id": _bare(s["id"]), "name": s["name"], "center": _center(s)}
+            for s in by_kind["sido"]
+        ],
+        "sigungu": [
+            {
+                "id": _bare(r["id"]),
+                "name": r["name"],
+                "provinceId": _bare(parent[r["id"]]),
+                "center": _center(r),
+            }
+            for r in by_kind["region"]
+        ],
+        "dongs": dongs,
+        "places": places,
+    }
 ```
 
 - [ ] **Step 4: 통과 확인**
 
 Run: `uv run pytest tests/test_graph_build.py -v`
-Expected: 8 passed
+Expected: 12 passed
 
 - [ ] **Step 5: 린트 · 포맷**
 
@@ -724,7 +933,7 @@ Expected: `All checks passed!` (format 이 테스트 파일의 dict 줄바꿈을
 
 ```bash
 git add webapi/graph.py tests/test_graph_build.py
-git commit -m "feat: 탐색 지식그래프 변환 build_graph (도 · 시군구 · 동 · 태그 · 장소 · 비슷한 동)
+git commit -m "feat: 탐색 지식그래프 변환 build_graph · 웹 W-09 응답 형식 to_response
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -738,8 +947,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Test: `tests/test_graph_build.py` (끝에 추가)
 
 **Interfaces:**
-- Consumes: Task 1 `place`, Task 3 `GraphRows`, `GRADE_KEYS`, `SIMILAR_TOP`. 모델 `regions.models.Region`, `regions.models.Dong`, `metrics.models.Metric` (`metric_def_id` 가 지표 키).
-- Produces: `load_rows() -> GraphRows`. 좌표는 PostGIS `ST_PointOnSurface`, 비슷한 동은 pgvector. 둘 다 없으면(테스트 DB) 좌표 `None`, `similar == []`.
+- Consumes: Task 1 `place`, Task 3 `GraphRows`, `GRADE_KEYS`, `SIMILAR_TOP`. 모델 `regions.models.Region`, `regions.models.Dong` (`coast_dist_km` 는 Decimal), `metrics.models.Metric` (`metric_def_id` 가 지표 키).
+- Produces: `load_rows() -> GraphRows`. 중심점 · bbox 는 PostGIS, 비슷한 동은 pgvector. 둘 다 없으면(테스트 DB) 중심점 · bbox `None`, `sidos == {}`, `similar == []`.
 
 - [ ] **Step 1: 실패하는 테스트**
 
@@ -750,14 +959,16 @@ from django.db import connection
 
 from metrics.models import Metric, MetricDef
 from regions.models import Dong, Region
-from regions.views import TAG_LABELS
 from webapi import graph
-from webapi.graph import GraphRows, build_graph
+from webapi.graph import GraphRows, build_graph, to_response
 ```
 
 그리고 파일 끝에 추가:
 
 ```python
+# ───────────── load_rows (테스트 DB: PostGIS · pgvector 없음) ─────────────
+
+
 def test_load_rows_reads_postgres_without_postgis(db):
     for key in ("quiet", "peer", "evening"):
         MetricDef.objects.create(metric_key=key, name_ko=key, higher_is="good")
@@ -765,7 +976,8 @@ def test_load_rows_reads_postgres_without_postgis(db):
         region_id=1, sido_name="강원특별자치도", sigungu_name="고성군", sigungu_code="51820"
     )
     Dong.objects.create(
-        dong_id=101, region=goseong, dong_name="거진읍", adm_code="5182025300", tags=["cafe"]
+        dong_id=101, region=goseong, dong_name="거진읍", adm_code="5182025300",
+        tags=["cafe"], coast_dist_km="0.400",
     )
     Metric.objects.create(scope="dong", unit_id=101, month=0, metric_def_id="quiet", grade="S")
     Metric.objects.create(scope="dong", unit_id=101, month=10, metric_def_id="peer", grade="A")
@@ -781,9 +993,12 @@ def test_load_rows_reads_postgres_without_postgis(db):
         {"region_id": 1, "sido_name": "강원특별자치도", "sigungu_name": "고성군",
          "sigungu_code": "51820", "lat": None, "lng": None}
     ]
-    dong = rows.dongs[0]
-    assert dong["grades"] == {"quiet": "S"}  # 연간(month 0) 등급만
-    assert dong["lat"] is None and dong["tags"] == ["cafe"] and dong["is_excluded"] is False
+    assert rows.sidos == {}
+    assert rows.dongs == [
+        {"dong_id": 101, "region_id": 1, "dong_name": "거진읍", "adm_code": "5182025300",
+         "is_excluded": False, "tags": ["cafe"], "coast_km": 0.4, "lat": None, "lng": None,
+         "bbox": None, "grades": {"quiet": "S"}}  # 연간(month 0) 등급만
+    ]
     assert rows.places == [
         {"place_id": 11, "name": "카페A", "tag": "cafe", "lat": 38.44, "lng": 128.45,
          "dong_id": 101, "image_url": None}
@@ -804,7 +1019,7 @@ import 블록을 다음으로 바꾼다.
 from __future__ import annotations
 
 import logging
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
 from django.db import DatabaseError, connection, transaction
@@ -814,18 +1029,27 @@ from regions.models import Dong, Region
 from regions.views import TAG_LABELS
 ```
 
-`edge_props` 아래에 추가:
+`edge_props` 아래(웹 응답 형식 구역 위)에 추가:
 
 ```python
 # ───────────────────────── Postgres 읽기 ─────────────────────────
 
-DONG_POINT_SQL = """
-    SELECT dong_id, ST_Y(p), ST_X(p)
-      FROM (SELECT dong_id, ST_PointOnSurface(geom) AS p FROM dong WHERE geom IS NOT NULL) s"""
+SIDO_POINT_SQL = """
+    SELECT sido, ST_Y(p), ST_X(p)
+      FROM (SELECT left(r.sigungu_code, 2) AS sido, ST_PointOnSurface(ST_Union(d.geom)) AS p
+              FROM dong d JOIN region r USING (region_id)
+             WHERE d.geom IS NOT NULL AND r.sigungu_code IS NOT NULL
+             GROUP BY 1) s"""
 REGION_POINT_SQL = """
     SELECT region_id, ST_Y(p), ST_X(p)
       FROM (SELECT region_id, ST_PointOnSurface(ST_Union(geom)) AS p
               FROM dong WHERE geom IS NOT NULL GROUP BY region_id) s"""
+DONG_POINT_SQL = """
+    SELECT dong_id, ST_Y(p), ST_X(p)
+      FROM (SELECT dong_id, ST_PointOnSurface(geom) AS p FROM dong WHERE geom IS NOT NULL) s"""
+DONG_BBOX_SQL = """
+    SELECT dong_id, ST_XMin(geom), ST_YMin(geom), ST_XMax(geom), ST_YMax(geom)
+      FROM dong WHERE geom IS NOT NULL"""
 # 동마다 similar_dongs 를 부르지 않고 같은 거리식(연간 metric_vec <->)으로 한 번에 상위 N
 SIMILAR_SQL = """
     SELECT a.dong_id, s.dong_id, s.rank::int, s.dist
@@ -850,34 +1074,45 @@ def _optional(sql: str, params: list | None = None) -> list[tuple]:
             cur.execute(sql, params or [])
             return cur.fetchall()
     except DatabaseError:
-        logger.warning("PostGIS · pgvector 없음: 좌표 또는 비슷한 동을 비운다")
+        logger.warning("PostGIS · pgvector 없음: 중심점 · bbox · 비슷한 동을 비운다")
         return []
 
 
-def _points(sql: str) -> dict[int, tuple[float, float]]:
+def _points(sql: str) -> dict:
     return {k: (round(lat, 5), round(lng, 5)) for k, lat, lng in _optional(sql)}
 
 
 def load_rows() -> GraphRows:
     region_pt = _points(REGION_POINT_SQL)
     dong_pt = _points(DONG_POINT_SQL)
+    bbox = {k: [round(float(v), 5) for v in box] for k, *box in _optional(DONG_BBOX_SQL)}
     grades: dict[int, dict[str, str]] = defaultdict(dict)
     for unit_id, key, grade in Metric.objects.filter(
         scope="dong", month=0, metric_def_id__in=GRADE_KEYS, grade__isnull=False
     ).values_list("unit_id", "metric_def_id", "grade"):
         grades[unit_id][key] = grade
 
-    rows = GraphRows()
+    rows = GraphRows(sidos=_points(SIDO_POINT_SQL))
     for r in Region.objects.order_by("region_id").values(
         "region_id", "sido_name", "sigungu_name", "sigungu_code"
     ):
         lat, lng = region_pt.get(r["region_id"], (None, None))
         rows.regions.append({**r, "lat": lat, "lng": lng})
     for d in Dong.objects.order_by("dong_id").values(
-        "dong_id", "region_id", "dong_name", "adm_code", "is_excluded", "tags"
+        "dong_id", "region_id", "dong_name", "adm_code", "is_excluded", "tags", "coast_dist_km"
     ):
+        coast = d.pop("coast_dist_km")
         lat, lng = dong_pt.get(d["dong_id"], (None, None))
-        rows.dongs.append({**d, "lat": lat, "lng": lng, "grades": grades.get(d["dong_id"], {})})
+        rows.dongs.append(
+            {
+                **d,
+                "coast_km": None if coast is None else float(coast),
+                "lat": lat,
+                "lng": lng,
+                "bbox": bbox.get(d["dong_id"]),
+                "grades": grades.get(d["dong_id"], {}),
+            }
+        )
     with connection.cursor() as cur:
         cur.execute(PLACE_SQL)
         cols = [c.name for c in cur.description]
@@ -889,7 +1124,7 @@ def load_rows() -> GraphRows:
 - [ ] **Step 4: 통과 확인**
 
 Run: `uv run pytest tests/test_graph_build.py -v`
-Expected: 9 passed
+Expected: 13 passed
 
 - [ ] **Step 5: 린트 · 포맷 후 Commit**
 
@@ -911,13 +1146,12 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Test: `tests/test_graph_sync.py`
 
 **Interfaces:**
-- Consumes: Task 3 `build_graph`, `node_props`, `node_from_props`, `edge_props`, `LABEL`; Task 4 `load_rows`.
+- Consumes: Task 3 `build_graph`, `to_response`, `node_props`, `node_from_props`, `edge_props`, `LABEL`; Task 4 `load_rows`.
 - Produces:
   - `class GraphUnavailable(Exception)`
   - `open_driver()` → neo4j `Driver` (설정 없으면 `GraphUnavailable`)
   - `write_graph(graph: dict, driver, synced_at: str) -> None`
-  - `records_to_graph(synced_at: str, node_rows: list[dict], rel_rows: list[tuple[str, str, str, dict]]) -> dict`
-  - `fetch_graph() -> dict` → `{"syncedAt", "nodes", "edges"}`. 실패는 전부 `GraphUnavailable`
+  - `fetch_graph() -> dict` → 웹 W-09 §6 형식(`to_response` 결과). 실패는 전부 `GraphUnavailable`
   - 설정 `settings.NEO4J_URI`, `settings.NEO4J_USER`, `settings.NEO4J_PASSWORD`
 
 - [ ] **Step 1: 의존성과 설정**
@@ -968,7 +1202,7 @@ import pytest
 from django.core.management import call_command
 from neo4j.exceptions import ServiceUnavailable
 
-from tests.test_graph_build import sample_rows
+from tests.test_graph_build import AT, sample_rows
 from webapi import graph
 
 
@@ -1023,15 +1257,16 @@ class FakeDriver:
 def test_write_graph_replaces_everything_in_order():
     g = graph.build_graph(sample_rows())
     driver = FakeDriver()
-    graph.write_graph(g, driver, "2026-11-09T10:00:00+09:00")
+    graph.write_graph(g, driver, AT)
     queries = [q for q, _ in driver.log]
     assert "CREATE INDEX node_id IF NOT EXISTS" in queries[0]
     assert queries[1] == "MATCH (n) DETACH DELETE n"
     assert queries[-1] == "CREATE (:Meta {synced_at: $at})"
-    dong_q, dong_p = next((q, p) for q, p in driver.log if ":Node:Dong" in q)
+    _, dong_p = next((q, p) for q, p in driver.log if ":Node:Dong" in q)
     assert {r["id"] for r in dong_p["rows"]} == {"dong:5182025300", "dong:5115060500"}
-    assert next(r for r in dong_p["rows"] if r["id"] == "dong:5182025300")["grade_quiet"] == "S"
-    sim_q, sim_p = next((q, p) for q, p in driver.log if "[r:SIMILAR]" in q)
+    geojin = next(r for r in dong_p["rows"] if r["id"] == "dong:5182025300")
+    assert geojin["grade_quiet"] == "S" and geojin["bbox"] == [128.4, 38.4, 128.5, 38.5]
+    _, sim_p = next((q, p) for q, p in driver.log if "[r:SIMILAR]" in q)
     assert sim_p["rows"][0] == {
         "src": "dong:5182025300",
         "dst": "dong:5115060500",
@@ -1039,35 +1274,21 @@ def test_write_graph_replaces_everything_in_order():
     }
 
 
-def test_records_to_graph_restores_api_shape():
-    out = graph.records_to_graph(
-        "2026-11-09T10:00:00+09:00",
-        [{"id": "dong:1", "kind": "dong", "name": "가", "grade_peer": "A"}],
-        [("dong:1", "dong:2", "SIMILAR", {"rank": 1, "dist": 0.1})],
-    )
-    assert out == {
-        "syncedAt": "2026-11-09T10:00:00+09:00",
-        "nodes": [
-            {"id": "dong:1", "kind": "dong", "name": "가", "lat": None, "lng": None,
-             "grades": {"quiet": None, "peer": "A", "evening": None}}
-        ],
-        "edges": [{"from": "dong:1", "to": "dong:2", "type": "SIMILAR", "rank": 1, "dist": 0.1}],
-    }
+def neo4j_answers():
+    """build_graph 결과를 Neo4j 가 돌려줄 레코드 모양으로 바꾼 것."""
+    g = graph.build_graph(sample_rows())
+    nodes = [{"p": graph.node_props(n)} for n in g["nodes"]]
+    rels = [
+        {"src": e["from"], "dst": e["to"], "type": e["type"], "p": graph.edge_props(e)}
+        for e in g["edges"]
+    ]
+    return g, [[{"at": AT}], nodes, rels]
 
 
-def test_fetch_graph_reads_meta_nodes_and_relations(monkeypatch):
-    driver = FakeDriver(
-        answers=[
-            [{"at": "2026-11-09T10:00:00+09:00"}],
-            [{"p": {"id": "tag:cafe", "kind": "tag", "name": "카페 많음", "group": "work"}}],
-            [{"src": "dong:1", "dst": "tag:cafe", "type": "HAS_TAG", "p": {}}],
-        ]
-    )
-    monkeypatch.setattr(graph, "open_driver", lambda: driver)
-    out = graph.fetch_graph()
-    assert out["syncedAt"] == "2026-11-09T10:00:00+09:00"
-    assert out["nodes"] == [{"id": "tag:cafe", "kind": "tag", "name": "카페 많음", "group": "work"}]
-    assert out["edges"] == [{"from": "dong:1", "to": "tag:cafe", "type": "HAS_TAG"}]
+def test_fetch_graph_returns_web_response(monkeypatch):
+    g, answers = neo4j_answers()
+    monkeypatch.setattr(graph, "open_driver", lambda: FakeDriver(answers=answers))
+    assert graph.fetch_graph() == graph.to_response(AT, g["nodes"], g["edges"])
 
 
 def test_fetch_graph_empty_neo4j_is_unavailable(monkeypatch):
@@ -1097,7 +1318,7 @@ def test_sync_graph_command(monkeypatch):
     out = StringIO()
     call_command("sync_graph", stdout=out)
     text = out.getvalue()
-    assert "Dong 2" in text and "Place 1" in text and "SIMILAR 2" in text
+    assert "Tag 12" in text and "Dong 2" in text and "Place 2" in text and "SIMILAR 2" in text
     assert any(q == "CREATE (:Meta {synced_at: $at})" for q, _ in driver.log)
 ```
 
@@ -1108,7 +1329,7 @@ Expected: FAIL (`AttributeError: module 'webapi.graph' has no attribute 'write_g
 
 - [ ] **Step 4: `webapi/graph.py` 에 Neo4j 부분 추가**
 
-import 블록에 추가 (알파벳 순서는 `ruff format`/`ruff check --fix` 가 맞춘다):
+import 블록에 추가 (순서는 `uv run ruff check --fix` 가 맞춘다):
 
 ```python
 from django.conf import settings
@@ -1123,7 +1344,7 @@ UNAVAILABLE_EMPTY = "Neo4j 가 비어 있음: uv run python manage.py sync_graph
 
 
 class GraphUnavailable(Exception):
-    """Neo4j 미설정 · 연결 실패 · 동기화 전. API 는 503 으로 바꾼다."""
+    """Neo4j 미설정 · 연결 실패 · 동기화 전. API 는 마지막 응답 또는 503 으로 바꾼다."""
 ```
 
 파일 끝에 추가:
@@ -1169,14 +1390,6 @@ def write_graph(graph: dict, driver, synced_at: str) -> None:
         session.execute_write(work)
 
 
-def records_to_graph(
-    synced_at: str, node_rows: list[dict], rel_rows: list[tuple[str, str, str, dict]]
-) -> dict:
-    nodes = sorted((node_from_props(p) for p in node_rows), key=lambda n: n["id"])
-    edges = [{"from": s, "to": d, "type": t, **p} for s, d, t, p in rel_rows]
-    return {"syncedAt": synced_at, "nodes": nodes, "edges": edges}
-
-
 def fetch_graph() -> dict:
     try:
         with open_driver() as driver:
@@ -1190,10 +1403,10 @@ def fetch_graph() -> dict:
             )
     except (DriverError, Neo4jError) as ex:  # 일시정지 · 인증 실패 · 주소 오류
         raise GraphUnavailable(str(ex)) from ex
-    return records_to_graph(
+    return to_response(
         meta[0]["at"],
-        [r["p"] for r in nodes],
-        [(r["src"], r["dst"], r["type"], r["p"]) for r in rels],
+        [node_from_props(r["p"]) for r in nodes],
+        [{"from": r["src"], "to": r["dst"], "type": r["type"], **r["p"]} for r in rels],
     )
 ```
 
@@ -1239,7 +1452,7 @@ class Command(BaseCommand):
 - [ ] **Step 6: 통과 확인**
 
 Run: `uv run pytest tests/test_graph_sync.py tests/test_graph_build.py -v`
-Expected: 16 passed
+Expected: 19 passed
 
 - [ ] **Step 7: 린트 · 포맷 후 Commit**
 
@@ -1276,12 +1489,16 @@ from django.core.cache import cache
 
 from webapi import graph
 
-SAMPLE = {
+SAMPLE = {  # 웹 W-09 §6 형식. gzip 기준(200바이트)을 넘도록 태그를 여럿 둔다
     "syncedAt": "2026-11-09T10:00:00+09:00",
-    "nodes": [
-        {"id": f"tag:t{i}", "kind": "tag", "name": f"태그{i}", "group": "work"} for i in range(20)
+    "tags": [
+        {"id": f"t{i}", "label": f"태그{i}", "group": "work", "display": "branch"}
+        for i in range(12)
     ],
-    "edges": [],
+    "provinces": [],
+    "sigungu": [],
+    "dongs": [],
+    "places": [],
 }
 
 
@@ -1499,7 +1716,7 @@ SELECT t, count(*) FROM dong, unnest(tags) t GROUP BY t ORDER BY 2 DESC;  -- REA
 
 경계 밖으로 빠진 수(2,291 − place 수)와 태그별 동 수 변화를 `db/README.md` 에 기록하고, "적용 이력" 의 적용일을 채운다.
 - [ ] **Step 3: Aura 인스턴스** — console.neo4j.io 에서 AuraDB Free 생성, 접속 정보를 `.env` 의 `NEO4J_URI` · `NEO4J_USER` · `NEO4J_PASSWORD` 에 넣는다 (팀에는 안전한 경로로만 공유).
-- [ ] **Step 4: 동기화** — `uv run python manage.py sync_graph`. 출력의 라벨별 노드 수(Sido 4 · Region 12 · Dong 203 · Tag 13 · Place 약 1,000)와 관계 수를 PR 에 붙인다.
+- [ ] **Step 4: 동기화** — `uv run python manage.py sync_graph`. 출력의 라벨별 노드 수(Sido 4 · Region 12 · Dong 203 · Tag 12 · Place 약 870)와 관계 수를 PR 에 붙인다.
 - [ ] **Step 5: API 실측**
 
 ```bash
@@ -1509,4 +1726,4 @@ curl -s -o /dev/null -H 'Accept-Encoding: gzip' -w 'gzip %{size_download}B %{tim
 ```
 
 목표: gzip 100KB 이하. 두 번째 호출(캐시)은 첫 호출보다 빠르다. 결과를 PR 에 붙인다.
-- [ ] **Step 6: 이미지 URL 확인** — `/tmp/g.json` 의 `image` 가 `http://` 인지 확인하고 PR 에 적는다 (웹 https 에서 혼합 콘텐츠로 막히면 후속 이슈).
+- [ ] **Step 6: 이미지 URL 확인** — `/tmp/g.json` 의 `places[].image` 가 모두 `https://` 또는 null 인지, 몇 개를 브라우저에서 열어 뜨는지 확인하고 PR 에 적는다.
