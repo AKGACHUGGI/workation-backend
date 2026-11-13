@@ -6,7 +6,7 @@ import pytest
 
 from core.clova import CHAT_MODEL, ClovaError
 from explore import ask, brief
-from tests.explore_samples import jumunjin_raw
+from tests.explore_samples import jumunjin_no_type_raw, jumunjin_raw
 
 FACT_IDS = {
     "weekday_hours": ["F2-1", "F2-1h"],
@@ -263,3 +263,11 @@ def test_answer_without_facts_skips_chat():
     calls = []
     out = ask.answer(raw, ["life"], lambda s, u: calls.append(u) or reply(), question="q")
     assert calls == [] and out.sentences == ["이 동네는 그 내용을 계산할 데이터가 부족해요."]
+
+
+def test_type_rule_without_representative_type():
+    raw = jumunjin_no_type_raw()
+    assert ask.rule_answer(raw, ["type"], ask.facts_for(raw, ["type"])) == [
+        "뚜렷하게 맞는 유형은 없어요.",
+        "몰입형 20점 · 네트워킹형 35점 · 로컬살이형 39점이에요.",
+    ]

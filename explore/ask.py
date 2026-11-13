@@ -221,7 +221,7 @@ def anchors(fact: Fact) -> set[str]:
     if fact.id.startswith("F1-"):
         words |= METRIC_WORDS[fact.id.split("-")[1]]
     elif fact.id.startswith("F4-"):
-        name = fact.text.split(" ")[0]  # "장기체류형 61점 (유형 1위)"
+        name = fact.text.split(" ")[0]  # "로컬살이형 60점 (유형 1위)"
         words |= {name, name.removesuffix("형")}
     elif fact.id.startswith("F6-"):
         words.add(fact.text.split(" ")[-1])  # "비슷한 동 1: 속초시 노학동"
@@ -298,6 +298,15 @@ def _intent_rule(raw: dict, intent: str, ids: set[str]) -> list[str]:
         if not types:
             return [NO_DATA]
         _, name, score, _ = types[0]
+        if score < derive.TYPE_MIN:
+            # 대표 유형 없음: 세 점수를 유형 순서(몰입 → 네트워킹 → 로컬)대로 보여 준다
+            by_name = {n: s for _, n, s, _ in types}
+            listed = " · ".join(
+                f"{derive.TYPE_KO[t]} {by_name[derive.TYPE_KO[t]]}점"
+                for t in derive.TYPES
+                if derive.TYPE_KO[t] in by_name
+            )
+            return ["뚜렷하게 맞는 유형은 없어요.", f"{listed}이에요."]
         if len(types) == 1:
             return [f"{name} {score}점으로 가장 잘 맞아요."]
         _, name2, score2, _ = types[1]
