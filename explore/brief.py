@@ -137,10 +137,19 @@ def collect_facts(raw: dict) -> list[Fact]:
 
     top_degree = me["top"][0]["degree"] if me["top"] else n
     for rank, name, score, _ in sorted(rec["types"]):
-        common = top_degree / n if rank == 1 else 1.0  # 1위가 아닌 유형은 강점이 아니므로 뒤로
-        facts.append(
-            Fact(f"F4-{rank}", f"{name} {score}점 (유형 {rank}위)", _vals(score, rank), common)
-        )
+        if rank == 1 and score >= derive.TYPE_MIN:
+            facts.append(
+                Fact("F4-1", f"{name} {score}점 (유형 1위)", _vals(score, rank), top_degree / n)
+            )
+        elif rank == 1:
+            # 1위가 기준 미만이면 대표 유형이 아니다 → 강점이 아니므로 뒤로, 문구에도 밝힌다
+            text = f"{name} {score}점 (유형 1위, 기준 {derive.TYPE_MIN}점 미만)"
+            facts.append(Fact("F4-1", text, _vals(score, rank, derive.TYPE_MIN), 1.0))
+        else:
+            # 1위가 아닌 유형은 강점이 아니므로 뒤로
+            facts.append(
+                Fact(f"F4-{rank}", f"{name} {score}점 (유형 {rank}위)", _vals(score, rank), 1.0)
+            )
 
     if rec["near"]:
         km = f"{rec['near'][0]:.1f}"
@@ -208,16 +217,30 @@ def rule_sentences(raw: dict, facts: list[Fact]) -> list[str]:
         second = f"{josa(sgg)} {months}월이 가장 한산하고 {busiest}월이 가장 붐벼요."
 
     _, top_name, top_score, _ = sorted(rec["types"])[0]
+    has_type = top_score >= derive.TYPE_MIN  # 대표 유형이 없으면 유형 이름을 쓰지 않는다
     sgg_first = [f.id.split("-")[1] for f in facts if f.id.endswith("-sgg")]
     grades = {g[0]: g for g in rec["grades"]}
     if sgg_first:
-        metric = min(sgg_first, key=METRICS.index)
-        third = f"{top_name} {top_score}점이고, {sgg} 안 {METRIC_KO[metric]} 1위예요."
+        ko = METRIC_KO[min(sgg_first, key=METRICS.index)]
+        third = (
+            f"{top_name} {top_score}점이고, {sgg} 안 {ko} 1위예요."
+            if has_type
+            else f"{sgg} 안 {ko} 1위인 동네예요."
+        )
     elif grades:
         best = min(grades.values(), key=lambda g: (GRADES.index(g[1]), -g[2], METRICS.index(g[0])))
-        third = f"{top_name} {top_score}점으로, {METRIC_KO[best[0]]} {best[1]}({best[2]}점)이에요."
+        grade = f"{METRIC_KO[best[0]]} {best[1]}({best[2]}점)"
+        third = (
+            f"{top_name} {top_score}점으로, {grade}이에요."
+            if has_type
+            else f"{grade}이 이 동네의 가장 큰 특징이에요."
+        )
     else:
-        third = f"{top_name} {top_score}점이에요."
+        third = (
+            f"{top_name} {top_score}점이에요."
+            if has_type
+            else "뚜렷하게 맞는 워케이션 유형은 없어요."
+        )
     return [first, second, third]
 
 

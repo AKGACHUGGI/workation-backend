@@ -218,3 +218,15 @@ def jumunjin_raw() -> dict:
         "dong_count": 203,
         "region_count": 12,
     }
+
+
+def jumunjin_no_type_raw() -> dict:
+    """주문진읍 값에서 유형 점수만 모두 40 미만으로 낮춘 표본. 대표 유형 없음 확인용."""
+    raw = jumunjin_raw()
+    raw["rec"]["types"] = [
+        [1, "로컬살이형", 39, "생활권 지수 0.60"],
+        [2, "네트워킹형", 35, "또래 밀도 30 · 저녁 활기 40"],
+        [3, "몰입형", 20, "조용함 31 · 오전 한산 4"],
+    ]
+    raw["facts"]["5115025000"]["top"] = []  # FACTS 는 기준 미만 1위를 top 으로 주지 않는다
+    return raw

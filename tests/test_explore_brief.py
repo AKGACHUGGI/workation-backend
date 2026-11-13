@@ -6,7 +6,7 @@ import pytest
 
 from core.clova import ClovaError
 from explore import brief
-from tests.explore_samples import jumunjin_raw
+from tests.explore_samples import jumunjin_no_type_raw, jumunjin_raw
 
 RULES = [
     "평일 차량은 12시에 가장 많고, 업무시간엔 9시가 가장 한산해요.",
@@ -206,3 +206,21 @@ def test_prompt_lists_facts_rare_first():
     assert user.startswith(
         "동네: 강원특별자치도 강릉시 주문진읍\n사실 (드문 것부터):\nF1-evening-sgg: "
     )
+
+
+def test_no_type_top_fact_is_not_a_strength():
+    f = {x.id: x for x in brief.collect_facts(jumunjin_no_type_raw())}
+    assert f["F4-1"].text == "로컬살이형 39점 (유형 1위, 기준 40점 미만)"
+    assert f["F4-1"].values == {"39", "1", "40"}
+    assert f["F4-1"].common == 1.0
+    assert f["F4-2"].text == "네트워킹형 35점 (유형 2위)"
+
+
+def test_rule_third_without_type():
+    raw = jumunjin_no_type_raw()
+    third = lambda: brief.rule_sentences(raw, brief.collect_facts(raw))[2]  # noqa: E731
+    assert third() == "강릉시 안 저녁 활기 1위인 동네예요."
+    raw["rec"]["grades"][2][5] = 2  # 저녁 활기 강릉 2위로 → 시군구 1위 사실 없음
+    assert third() == "저녁 활기 A(62점)이 이 동네의 가장 큰 특징이에요."
+    raw["rec"]["grades"] = []
+    assert third() == "뚜렷하게 맞는 워케이션 유형은 없어요."
