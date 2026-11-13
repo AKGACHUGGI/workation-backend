@@ -3,10 +3,12 @@
 
 임베딩 모델은 DB 의 tag_vocab · dong_doc 을 만든 모델(clova-embedding-v2)과 같아야 한다.
 기본 한도가 분당 60회라 429 를 받으면 응답 헤더의 대기 시간만큼 한 번 기다렸다 다시 시도한다.
+임베딩은 `emb:{모델}:{sha1(문장)}` 로 기한 없이 캐시한다 (홈 검색 · 동네에 물어보기 공용).
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 import urllib.error
@@ -14,6 +16,7 @@ import urllib.request
 import uuid
 
 from django.conf import settings
+from django.core.cache import cache
 
 BASE = "https://clovastudio.stream.ntruss.com"
 CHAT_MODEL = "HCX-005"
@@ -57,7 +60,13 @@ def _post(path: str, payload: dict, timeout: float) -> dict:
 
 
 def embed(text: str) -> list[float]:
-    return _post("/v1/api-tools/embedding/v2", {"text": text}, timeout=10)["embedding"]
+    """같은 문장 = 같은 벡터라 만료 없이 캐시 (Redis LRU 가 정리). 실패는 캐시하지 않는다."""
+    key = f"emb:{EMBED_MODEL}:{hashlib.sha1(text.encode()).hexdigest()}"
+    vec = cache.get(key)
+    if vec is None:
+        vec = _post("/v1/api-tools/embedding/v2", {"text": text}, timeout=10)["embedding"]
+        cache.set(key, vec, None)
+    return vec
 
 
 def chat(

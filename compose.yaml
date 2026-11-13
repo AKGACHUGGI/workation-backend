@@ -1,4 +1,4 @@
-# 로컬 테스트 DB 와 탐색 그래프 Neo4j. 앱 · Traefik · Redis 는 배포 세팅 때 추가한다.
+# 로컬 테스트 DB · 탐색 그래프 Neo4j · 캐시 Redis. 앱 · Traefik 은 배포 세팅 때 추가한다.
 # 단위 테스트는 test-db 만 있으면 된다: docker compose up -d --wait test-db
 services:
   test-db:
@@ -30,6 +30,19 @@ services:
       interval: 5s
       timeout: 5s
       retries: 30
+
+  # 캐시 (홈 검색 · 탐색 · throttle 공용). 앱은 REDIS_URL=redis://localhost:6379/0
+  # 단위 테스트는 Redis 없이 돈다 (settings_test 는 메모리 캐시)
+  redis:
+    image: redis:7
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
 volumes:
   neo4j-data:

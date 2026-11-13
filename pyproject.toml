@@ -11,6 +11,7 @@ dependencies = [
     "gunicorn>=26",
     "django-cors-headers>=4.6",
     "neo4j>=5.28,<6",
+    "redis>=5",
 ]
 
 [dependency-groups]

@@ -47,6 +47,27 @@ NEO4J_URI = env("NEO4J_URI", default="")
 NEO4J_USER = env("NEO4J_USER", default="neo4j")
 NEO4J_PASSWORD = env("NEO4J_PASSWORD", default="")
 
+# 캐시. REDIS_URL 이 있으면 Redis(홈 검색·탐색·throttle 이 같이 씀), 없으면 프로세스 메모리.
+# Redis 가 죽으면 캐시 없이 진행한다 (core/cache.py). 키 접두어: emb: · explore: · throttle_
+REDIS_URL = env("REDIS_URL", default="")
+if REDIS_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "core.cache.SafeRedisCache",
+            "LOCATION": REDIS_URL,
+            "KEY_PREFIX": "workation",
+            # Redis 가 응답하지 않을 때 요청을 오래 붙잡지 않는다
+            "OPTIONS": {"socket_connect_timeout": 1, "socket_timeout": 1},
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "KEY_PREFIX": "workation",
+        }
+    }
+
 ROOT_URLCONF = "config.urls"
 WSGI_APPLICATION = "config.wsgi.application"
 
@@ -82,6 +103,10 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],
     "UNAUTHENTICATED_USER": None,
+    # 동네에 물어보기 IP 당 한도 (explore ask 뷰의 throttle scope). 카운터는 위 CACHES
+    "DEFAULT_THROTTLE_RATES": {"explore_ask_burst": "10/min", "explore_ask_day": "200/day"},
+    # 프록시 뒤에서 X-Forwarded-For 의 몇 번째를 IP 로 볼지. Traefik 뒤면 1, 없으면 REMOTE_ADDR
+    "NUM_PROXIES": env.int("DRF_NUM_PROXIES", default=None),
 }
 
 LOGGING = {

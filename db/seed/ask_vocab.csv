@@ -1,0 +1,82 @@
+intent,phrase,canonical
+weekday_hours,평일엔 몇 시가 붐비고 몇 시가 한산해?,true
+weekday_hours,평일 몇 시에 가장 붐벼?,false
+weekday_hours,평일 낮에 한산한 시간 있어?,false
+weekday_hours,출근 시간에 차 많이 막혀?,false
+weekday_hours,아침 9시쯤 카공하기 어때?,false
+weekday_hours,평일 오후에 조용해?,false
+weekday_hours,오전에 일하기 조용해?,false
+weekday_hours,평일 오전에 업무 보기 괜찮아?,false
+weekday_hours,오후 2시쯤 차 많이 다녀?,false
+weekday_hours,점심시간에 붐벼?,false
+weekend_hours,주말엔 몇 시가 붐비고 몇 시가 한산해?,true
+weekend_hours,주말에 몇 시가 제일 붐벼?,false
+weekend_hours,토요일에 사람 많아?,false
+weekend_hours,일요일 오후에 한산해?,false
+weekend_hours,주말 아침에 산책하기 조용해?,false
+months,1년 중 언제 가면 한산해?,true
+months,몇 월에 가는 게 좋아?,false
+months,성수기가 언제야?,false
+months,여름에 사람 많이 와?,false
+months,비수기는 몇 월이야?,false
+months,관광객이 적은 달은?,false
+months,1월과 7월 중 어디가 더 붐벼?,false
+months,달마다 차이가 커?,false
+months,3월엔 사람 많아?,false
+quiet,이 동네 조용해?,true
+quiet,시끄러운 동네야?,false
+quiet,낮에 사람 많이 몰려?,false
+quiet,한적하게 일하기 좋아?,false
+quiet,번잡한 편이야?,false
+peer,또래 사람들이 많아?,true
+peer,2030 많이 와?,false
+peer,젊은 사람 많아?,false
+peer,나이 드신 분들이 많은 동네야?,false
+peer,또래랑 어울리기 좋아?,false
+evening,저녁에 활기 있어?,true
+evening,밤에 돌아다니는 사람 많아?,false
+evening,퇴근하고 산책할 분위기야?,false
+evening,저녁엔 썰렁해?,false
+evening,해 지면 조용해져?,false
+type,어떤 워케이션에 잘 맞아?,true
+type,몰입해서 일하기 좋아?,false
+type,네트워킹하기 좋은 동네야?,false
+type,한 달 살기 맞아?,false
+type,현지인처럼 지내기 좋아?,false
+type,오래 머물기 괜찮아?,false
+coast,바다가 가까워?,true
+coast,바닷가 동네야?,false
+coast,해변까지 멀어?,false
+coast,바다 보면서 일할 수 있어?,false
+coast,해안이랑 얼마나 떨어져 있어?,false
+life,"생활권이야, 관광지야?",true
+life,주민들이 사는 동네야?,false
+life,관광객 위주 동네야?,false
+life,현지 생활 느낌이 나?,false
+life,관광지 느낌이 강해?,false
+similar,비슷한 동네는 어디야?,true
+similar,여기랑 닮은 동네 있어?,false
+similar,분위기 비슷한 곳 추천해 줘,false
+similar,여기 말고 비슷한 데는?,false
+similar,이런 느낌 다른 동네 알려 줘,false
+unknown_place,밥먹기 좋아?,false
+unknown_place,맛집 있어?,false
+unknown_place,카페 많아?,false
+unknown_place,볼거리 있어?,false
+unknown_place,술집 있어?,false
+unknown_place,편의점 가까워?,false
+unknown_stay,숙소 어때?,false
+unknown_stay,방값 비싸?,false
+unknown_stay,한 달 살기 집 있어?,false
+unknown_stay,게스트하우스 있어?,false
+unknown_stay,에어비앤비 많아?,false
+unknown_transport,교통 편해?,false
+unknown_transport,버스 자주 와?,false
+unknown_transport,주차 돼?,false
+unknown_transport,기차역 가까워?,false
+unknown_transport,공항에서 멀어?,false
+unknown_other,날씨 어때?,false
+unknown_other,치안 괜찮아?,false
+unknown_other,와이파이 잘 돼?,false
+unknown_other,물가 비싸?,false
+unknown_other,병원 가까워?,false

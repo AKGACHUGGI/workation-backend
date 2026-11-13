@@ -41,6 +41,13 @@ SYSTEM = "\n".join(
 )
 
 
+# HCX-005 는 system 의 형식 지시를 자주 무시한다 → user 끝에 한 번 더 (2026-11-13 실측)
+FORMAT_TAIL = (
+    "\n\n위 사실만으로 존댓말 해요체로 쓰고, 반드시 아래 JSON 하나만 출력해. 다른 글은 쓰지 마.\n"
+    '{"sentences": [{"text": "문장", "facts": ["사실 id"]}]}'
+)
+
+
 @dataclass(frozen=True)
 class Fact:
     id: str
@@ -218,20 +225,32 @@ def build_prompt(raw: dict, facts: list[Fact]) -> tuple[str, str]:
     rec = raw["rec"]
     lines = "\n".join(f"{f.id}: {f.text}" for f in facts)
     where = f"{rec['sido']} {rec['region']['name']} {rec['dong']['name']}"
-    return SYSTEM, f"동네: {where}\n사실 (드문 것부터):\n{lines}"
+    return SYSTEM, f"동네: {where}\n사실 (드문 것부터):\n{lines}{FORMAT_TAIL}"
 
 
-def parse_reply(reply: str) -> list[tuple[str, list[str]]]:
-    """{"sentences": [{"text", "facts"}] × 3} → [(문장, 사실 id 목록)]. 모양이 다르면 ValueError."""
+def parse_reply(reply: str, sizes: range = range(3, 4)) -> list[tuple[str, list[str]]]:
+    """{"sentences": [{"text", "facts"}] × 3} → [(문장, 사실 id 목록)]. 모양이 다르면 ValueError.
+    sizes = 받는 문장 수 (브리핑 3, 질문 답 1~3)."""
     start, end = reply.find("{"), reply.rfind("}")
     if start < 0 or end < start:
         raise ValueError("JSON 없음")
+    body = reply[start : end + 1]
+    # 마지막 } · ]} 를 빠뜨린 응답도 읽는다 (HCX-005 실측)
+    for candidate in (body, body + "}", body + "]}"):
+        try:
+            items = json.loads(candidate)["sentences"]
+            break
+        except json.JSONDecodeError as ex:
+            error = ex
+        except (KeyError, TypeError) as ex:
+            raise ValueError(f"JSON 모양 다름: {ex}") from ex
+    else:
+        raise ValueError(f"JSON 모양 다름: {error}")
     try:
-        items = json.loads(reply[start : end + 1])["sentences"]
         out = [(str(i["text"]).strip(), [str(x) for x in i["facts"]]) for i in items]
-    except (json.JSONDecodeError, KeyError, TypeError) as ex:
+    except (KeyError, TypeError) as ex:
         raise ValueError(f"JSON 모양 다름: {ex}") from ex
-    if len(out) != 3:
+    if len(out) not in sizes:
         raise ValueError(f"문장 수 {len(out)}")
     return out
 

@@ -574,3 +574,25 @@ ALTER TABLE dong_type_score        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE dong_hour_stat         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE dong_similar           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE dong_brief             ENABLE ROW LEVEL SECURITY;
+
+-- ───────────────────────── 동네에 물어보기 답 (2026-11-13) ─────────────────────────
+-- 질문 답의 원본. Redis 는 앞단 캐시다. 의도 사전 ask_vocab 은 vector 컬럼이라
+-- migrations/20261113_explore-ask.sql 에만 둔다 (tag_vocab 과 같은 이유: 테스트 DB 에 pgvector 없음).
+
+CREATE TABLE dong_answer (
+  dong_id       SMALLINT     NOT NULL REFERENCES dong(dong_id) ON DELETE CASCADE,
+  intents       VARCHAR(40)  NOT NULL,
+  facts_hash    CHAR(64)     NOT NULL,
+  sentences     JSONB        NOT NULL,
+  source        VARCHAR(5)   NOT NULL,
+  model         VARCHAR(20),
+  created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  PRIMARY KEY (dong_id, intents, facts_hash),
+  CHECK (source IN ('llm', 'mixed', 'rule'))
+);
+COMMENT ON TABLE  dong_answer            IS '탐색 v6.1 동네에 물어보기 답. (동, 의도, 사실, 질문) 조합마다 한 번 만들어 다시 쓴다. build_briefs 가 60일 지난 행을 지운다';
+COMMENT ON COLUMN dong_answer.intents    IS '의도 이름순 + 연결 (예: quiet+weekday_hours). unknown_* 안내는 저장하지 않는다';
+COMMENT ON COLUMN dong_answer.facts_hash IS '프롬프트(사실 + 정규화한 질문)의 SHA-256. 질문이나 그래프가 바뀌면 새 행이 생긴다';
+COMMENT ON COLUMN dong_answer.source     IS 'llm(전부 생성 통과) · mixed(일부 규칙 문장) · rule(전부 규칙 문장)';
+
+ALTER TABLE dong_answer            ENABLE ROW LEVEL SECURITY;

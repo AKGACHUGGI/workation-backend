@@ -25,6 +25,7 @@ EXPECTED_TABLES = {
     "dong_hour_stat",
     "dong_similar",
     "dong_brief",
+    "dong_answer",
 }
 
 

@@ -112,7 +112,8 @@ def sample_graph_input() -> GraphInput:
 
 
 def _facts_row(code, scores, grades, top, quiet, coastal, life, region):
-    """FACTS Cypher 한 행. scores = (quiet, peer, evening) 점수, grades 는 (등급, degree) 3개."""
+    """FACTS Cypher 한 행. scores = (quiet, peer, evening) 점수, grades 는 (등급, degree) 3개.
+    life = (key, 이름, degree, 생활권 지수)."""
     return {
         "code": code,
         "grades": [
@@ -122,7 +123,7 @@ def _facts_row(code, scores, grades, top, quiet, coastal, life, region):
         "top": [{"id": f"type:{top[0]}", "name": top[1], "degree": top[2]}],
         "quiet": [{"day": day, "h": h, "degree": deg} for day, h, deg in quiet],
         "near": [{"id": "place:coast", "kind": "바닷가", "degree": 97}] if coastal else [],
-        "life": [{"id": f"life:{life[0]}", "name": life[1], "degree": life[2]}],
+        "life": [{"id": f"life:{life[0]}", "name": life[1], "degree": life[2], "value": life[3]}],
         "region": {"id": f"region:{region[0]}", "name": region[1], "degree": region[2]},
     }
 
@@ -130,7 +131,7 @@ def _facts_row(code, scores, grades, top, quiet, coastal, life, region):
 def jumunjin_raw() -> dict:
     """주문진읍 실측. 비슷한 동 공통 수는 노학동 6 · 대정읍 4 · 영천동 5 (스펙 §6-3 규칙)."""
     stay_top = ("long_stay", "장기체류형", 58)
-    local = ("local", "생활권", 107)
+    local = ("local", "생활권", 107, 0.7365)
     coast_quiet = [("weekday", 9, 108), ("weekend", 3, 102)]
     return {
         "rec": {
@@ -186,7 +187,7 @@ def jumunjin_raw() -> dict:
                 stay_top,
                 coast_quiet,
                 True,
-                local,
+                ("local", "생활권", 107, 0.7228),
                 ("51210", "속초시", 8),
             ),
             "5013025000": _facts_row(
@@ -196,7 +197,7 @@ def jumunjin_raw() -> dict:
                 ("networking", "네트워킹형", 49),
                 coast_quiet,
                 True,
-                ("tourist", "관광지", 96),
+                ("tourist", "관광지", 96, 0.6584),
                 ("50130", "서귀포시", 17),
             ),
             "5013056000": _facts_row(
@@ -206,7 +207,7 @@ def jumunjin_raw() -> dict:
                 ("networking", "네트워킹형", 49),
                 coast_quiet,
                 True,
-                ("tourist", "관광지", 96),
+                ("tourist", "관광지", 96, 0.6387),
                 ("50130", "서귀포시", 17),
             ),
         },
