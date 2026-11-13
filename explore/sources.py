@@ -7,13 +7,17 @@ load_centers() 하나에서 PostGIS 를 쓴다 (테스트에서는 바꿔 끼운
 
 from __future__ import annotations
 
+import json
+import logging
 from collections import defaultdict
 from dataclasses import dataclass
 
-from django.db import connection, transaction
+from django.db import DatabaseError, connection, transaction
 
 from explore.derive import TypeScore
 from explore.graph import DongRow, GraphInput, RegionRow
+
+logger = logging.getLogger(__name__)
 
 # 집계 제외 동(수동면)과 경계·코드 없는 동은 그래프·API 에서 뺀다
 DONG_OK = "d.is_excluded = false AND d.adm_code IS NOT NULL"
@@ -206,3 +210,48 @@ def load_graph_input() -> GraphInput:
         dict(ease),
         data_year(),
     )
+
+
+def load_brief_targets() -> list[tuple[int, str]]:
+    """브리핑을 만들 동 (dong_id, adm_code). build_explore 가 유형 점수를 만든 동."""
+    return _rows(
+        f"""SELECT DISTINCT d.dong_id, d.adm_code FROM dong d
+              JOIN dong_type_score t ON t.dong_id = d.dong_id
+             WHERE {DONG_OK} ORDER BY d.dong_id"""
+    )
+
+
+def load_brief_hashes() -> dict[int, str]:
+    return dict(_rows("SELECT dong_id, facts_hash FROM dong_brief"))
+
+
+def save_brief(
+    dong_id: int, sentences: list[str], source: str, model: str | None, facts_hash: str
+) -> None:
+    with connection.cursor() as cur:
+        cur.execute(
+            """INSERT INTO dong_brief (dong_id, sentences, source, model, facts_hash, generated_at)
+               VALUES (%s, %s::jsonb, %s, %s, %s, now())
+               ON CONFLICT (dong_id) DO UPDATE SET
+                 sentences = EXCLUDED.sentences, source = EXCLUDED.source,
+                 model = EXCLUDED.model, facts_hash = EXCLUDED.facts_hash,
+                 generated_at = EXCLUDED.generated_at""",
+            [dong_id, json.dumps(sentences, ensure_ascii=False), source, model, facts_hash],
+        )
+
+
+def fetch_briefing(adm_code: str) -> list[str]:
+    """API 용. 행이 없거나 조회가 실패하면 [] (나머지 응답은 정상, 스펙 §6-4)."""
+    try:
+        with connection.cursor() as cur:
+            cur.execute(
+                """SELECT b.sentences::text FROM dong_brief b JOIN dong d ON d.dong_id = b.dong_id
+                    WHERE d.adm_code = %s""",
+                [adm_code],
+            )
+            row = cur.fetchone()
+    except DatabaseError as ex:
+        logger.warning("dong_brief 조회 실패: %s", ex)
+        return []
+    # Django 의 psycopg 백엔드는 jsonb 를 문자열로 돌려준다 → ::text 로 읽어 직접 푼다
+    return json.loads(row[0]) if row else []
