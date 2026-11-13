@@ -28,6 +28,8 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
+    # 200바이트 이상 JSON 을 gzip (Accept-Encoding: gzip 일 때). 탐색 동 상세 응답이 크다
+    "django.middleware.gzip.GZipMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.middleware.common.CommonMiddleware",
 ]

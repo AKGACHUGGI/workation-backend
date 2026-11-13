@@ -6,7 +6,7 @@ from io import StringIO
 
 import pytest
 from django.core.management import call_command
-from django.db import connection
+from django.db import DatabaseError, connection
 
 from explore import derive, graph, sources
 from metrics.models import Metric, MetricDef
@@ -199,3 +199,24 @@ def test_load_graph_input(explore_data, monkeypatch):
     assert inp.ease[1][2] == 69.8 and inp.data_year == 2025
     counts = graph.expected_counts(graph.build_graph(inp))
     assert counts["nodes"]["Dong"] == 4 and counts["rels"]["SIMILAR"] == 4
+
+
+def test_brief_rows(explore_data):
+    build()
+    assert sources.load_brief_targets() == [
+        (112, "5115037000"), (116, "5115025000"), (901, "5211357500"), (902, "5211160500"),
+    ]  # fmt: skip
+    sources.save_brief(116, ["가", "나", "다"], "mixed", "HCX-005", "a" * 64)
+    sources.save_brief(116, ["라", "마", "바"], "rule", None, "b" * 64)  # upsert
+    assert sources.load_brief_hashes() == {116: "b" * 64}
+    assert sources.fetch_briefing("5115025000") == ["라", "마", "바"]
+    assert sources.fetch_briefing("5115037000") == []
+
+
+def test_fetch_briefing_db_error_is_empty(monkeypatch):
+    class Broken:
+        def cursor(self):
+            raise DatabaseError('relation "dong_brief" does not exist')
+
+    monkeypatch.setattr(sources, "connection", Broken())
+    assert sources.fetch_briefing("5115025000") == []
