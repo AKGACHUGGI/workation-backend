@@ -19,3 +19,6 @@ DATABASES = {
 
 # .env 에 Neo4j 접속 정보가 있어도 단위 테스트는 붙지 않는다 (통합 테스트는 NEO4J_TEST_URI)
 NEO4J_URI = ""
+
+# .env 에 REDIS_URL 이 있어도 단위 테스트는 프로세스 메모리 캐시만 쓴다
+CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
