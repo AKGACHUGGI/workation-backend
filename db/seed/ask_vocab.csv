@@ -7,6 +7,8 @@ weekday_hours,아침 9시쯤 카공하기 어때?,false
 weekday_hours,평일 오후에 조용해?,false
 weekday_hours,오전에 일하기 조용해?,false
 weekday_hours,평일 오전에 업무 보기 괜찮아?,false
+weekday_hours,오후 2시쯤 차 많이 다녀?,false
+weekday_hours,점심시간에 붐벼?,false
 weekend_hours,주말엔 몇 시가 붐비고 몇 시가 한산해?,true
 weekend_hours,주말에 몇 시가 제일 붐벼?,false
 weekend_hours,토요일에 사람 많아?,false
@@ -18,6 +20,9 @@ months,성수기가 언제야?,false
 months,여름에 사람 많이 와?,false
 months,비수기는 몇 월이야?,false
 months,관광객이 적은 달은?,false
+months,1월과 7월 중 어디가 더 붐벼?,false
+months,달마다 차이가 커?,false
+months,3월엔 사람 많아?,false
 quiet,이 동네 조용해?,true
 quiet,시끄러운 동네야?,false
 quiet,낮에 사람 많이 몰려?,false

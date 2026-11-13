@@ -135,6 +135,18 @@ def test_parse_reply_with_code_fence():
     assert brief.parse_reply(text) == GOOD
 
 
+def test_parse_reply_missing_last_brace():
+    # HCX-005 가 마지막 } 를 자주 빠뜨린다 (2026-11-13 실측)
+    text = reply(GOOD)
+    assert brief.parse_reply(text[:-1]) == GOOD
+    assert brief.parse_reply(text[:-2]) == GOOD  # ]} 둘 다 없음
+
+
+def test_prompt_repeats_format_at_end():
+    _, user = brief.build_prompt(jumunjin_raw(), facts())
+    assert user.endswith(brief.FORMAT_TAIL)
+
+
 @pytest.mark.parametrize("text", ["문장만 있어요", '{"sentences": []}', '{"x": 1}', "{bad"])
 def test_parse_reply_rejects(text):
     with pytest.raises(ValueError):

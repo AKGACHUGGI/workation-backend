@@ -322,7 +322,7 @@ def build_prompt(raw: dict, facts: list[Fact], question: str) -> tuple[str, str]
     rec = raw["rec"]
     where = f"{rec['sido']} {rec['region']['name']} {rec['dong']['name']}"
     lines = "\n".join(f"{f.id}: {f.text}" for f in facts)
-    return SYSTEM, f"동네: {where}\n질문: {question}\n사실:\n{lines}"
+    return SYSTEM, f"동네: {where}\n질문: {question}\n사실:\n{lines}{brief.FORMAT_TAIL}"
 
 
 def _intents_of(cited: list[str], intents: list[str]) -> list[str]:

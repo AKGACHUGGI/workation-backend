@@ -5,7 +5,7 @@ import json
 import pytest
 
 from core.clova import CHAT_MODEL, ClovaError
-from explore import ask
+from explore import ask, brief
 from tests.explore_samples import jumunjin_raw
 
 FACT_IDS = {
@@ -155,6 +155,12 @@ def test_prompt_has_user_question_and_chosen_facts():
         "F3-1: 강릉시 월별 방문: 가장 한산한 달 2·4·9월, 가장 붐비는 달 8월\n"
         "F3-2: 강릉시 월별 방문 원값(클수록 붐빔): 1월 80.3, 2월 69.8, 3월 78.4,"
     )
+
+
+def test_ask_prompt_repeats_format_at_end():
+    raw = jumunjin_raw()
+    _, user = ask.build_prompt(raw, ask.facts_for(raw, ["quiet"]), "조용해?")
+    assert user.endswith(brief.FORMAT_TAIL)
 
 
 def test_detail_facts_allow_month_and_hour_values():

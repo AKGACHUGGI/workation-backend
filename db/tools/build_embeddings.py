@@ -13,7 +13,7 @@
         SELECT dong_id, body FROM dong_doc WHERE embedding IS NULL ORDER BY dong_id;
       UPDATE 는 body 가 그대로일 때만 적용되므로, 그 사이 문장이 바뀐 행은 비어 있게 남는다.
   python3 db/tools/build_embeddings.py ask db/seed/ask_vocab.csv <출력 접두어> [임베딩된 표현.csv]
-      동네에 물어보기 의도 사전. CSV 를 검사(의도 14개, 의도마다 5~8개, 대표 질문)하고 전체를 넣는다.
+      동네에 물어보기 의도 사전. CSV 를 검사(의도 14개, 의도마다 5~12개, 대표 질문)하고 전체를 넣는다.
       CSV 에서 빠진 표현은 DB 에서도 지운다. 네 번째 인자를 주면 거기 있는 표현은 임베딩을 다시
       만들지 않는다 (새 표현만 CLOVA 호출). 그 CSV 는 아래 결과를 받는다.
         SELECT phrase FROM ask_vocab WHERE embedding IS NOT NULL AND model = 'clova-embedding-v2';
@@ -160,8 +160,8 @@ def read_ask(src: Path) -> list[tuple[str, str, bool]]:
     for intent in ASK_ANSWERABLE + ASK_UNKNOWN:
         n = sum(1 for i, _, _ in out if i == intent)
         canon = sum(1 for i, _, c in out if i == intent and c)
-        if not 5 <= n <= 8:
-            sys.exit(f"{intent} 표현은 5~8개: {n}개")
+        if not 5 <= n <= 12:
+            sys.exit(f"{intent} 표현은 5~12개: {n}개")
         if canon != (1 if intent in ASK_ANSWERABLE else 0):
             sys.exit(f"{intent} 대표 질문(canonical) 수가 틀림: {canon}개")
     return out
