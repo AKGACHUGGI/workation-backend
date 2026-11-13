@@ -21,6 +21,10 @@ EXPECTED_TABLES = {
     "metric_vote",
     "share_card",
     "nl_search_log",
+    "dong_type_score",
+    "dong_hour_stat",
+    "dong_similar",
+    "dong_brief",
 }
 
 

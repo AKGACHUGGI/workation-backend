@@ -10,6 +10,7 @@ dependencies = [
     "django-environ>=0.14",
     "gunicorn>=26",
     "django-cors-headers>=4.6",
+    "neo4j>=5.28,<6",
 ]
 
 [dependency-groups]
