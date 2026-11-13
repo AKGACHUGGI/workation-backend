@@ -53,7 +53,7 @@ RETURN d.code AS code,
   [(d)-[q:QUIET_AT]->(h:Hour) | {day: q.day, h: h.h,
     degree: CASE q.day WHEN 'weekday' THEN h.degree_weekday ELSE h.degree_weekend END}] AS quiet,
   [(d)-[:NEAR]->(p:Place) | {id: p.id, kind: p.kind, degree: p.degree}] AS near,
-  [(d)-[:LIFE]->(t:Tag) | {id: t.id, name: t.name, degree: t.degree}] AS life,
+  [(d)-[l:LIFE]->(t:Tag) | {id: t.id, name: t.name, degree: t.degree, value: l.value}] AS life,
   r {.id, .name, .degree} AS region
 """
 

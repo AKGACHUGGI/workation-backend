@@ -221,8 +221,9 @@ def build_prompt(raw: dict, facts: list[Fact]) -> tuple[str, str]:
     return SYSTEM, f"동네: {where}\n사실 (드문 것부터):\n{lines}"
 
 
-def parse_reply(reply: str) -> list[tuple[str, list[str]]]:
-    """{"sentences": [{"text", "facts"}] × 3} → [(문장, 사실 id 목록)]. 모양이 다르면 ValueError."""
+def parse_reply(reply: str, sizes: range = range(3, 4)) -> list[tuple[str, list[str]]]:
+    """{"sentences": [{"text", "facts"}] × 3} → [(문장, 사실 id 목록)]. 모양이 다르면 ValueError.
+    sizes = 받는 문장 수 (브리핑 3, 질문 답 1~3)."""
     start, end = reply.find("{"), reply.rfind("}")
     if start < 0 or end < start:
         raise ValueError("JSON 없음")
@@ -231,7 +232,7 @@ def parse_reply(reply: str) -> list[tuple[str, list[str]]]:
         out = [(str(i["text"]).strip(), [str(x) for x in i["facts"]]) for i in items]
     except (json.JSONDecodeError, KeyError, TypeError) as ex:
         raise ValueError(f"JSON 모양 다름: {ex}") from ex
-    if len(out) != 3:
+    if len(out) not in sizes:
         raise ValueError(f"문장 수 {len(out)}")
     return out
 

@@ -70,6 +70,7 @@ def test_pins_with_real_cypher(driver):
 def test_dong_with_real_cypher(driver):
     sync(driver, sample_graph_input(), "first")
     raw = queries.fetch_dong("5115025000")
+    assert raw["facts"]["5115025000"]["life"][0]["value"] == 0.7365
     assert (raw["dong_count"], raw["region_count"]) == (4, 3)
     body = queries.shape_dong(raw, [])
     assert body["sido"] == "강원특별자치도" and body["coastKm"] == 0.0
