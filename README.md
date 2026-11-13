@@ -28,6 +28,12 @@ docker compose up -d --wait test-db       # 테스트용 postgres:17 (5432 가 �
 uv run pytest
 ```
 
+탐색 화면(`/api/explore/*`)은 로컬 Neo4j 를 씁니다. 처음 한 번, 그리고 Supabase 파생 표가 바뀌었을 때 실행합니다 (Supabase 는 읽기만 함).
+
+```bash
+scripts/explore-local.sh                  # neo4j 컨테이너 시작 + sync_graph (몇 초)
+```
+
 커밋 전 검사, 모델 규칙, 새 API 추가 방법은 [docs/개발-가이드.md](docs/개발-가이드.md) 를 참고하세요.
 
 ## DB 스키마
