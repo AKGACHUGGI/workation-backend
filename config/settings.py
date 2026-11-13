@@ -23,10 +23,13 @@ INSTALLED_APPS = [
     "metrics",
     "search",
     "webapi",
+    "explore",
 ]
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
+    # 200바이트 이상 JSON 을 gzip (Accept-Encoding: gzip 일 때). 탐색 동 상세 응답이 크다
+    "django.middleware.gzip.GZipMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.middleware.common.CommonMiddleware",
 ]
@@ -38,6 +41,11 @@ CORS_ALLOWED_ORIGINS = env.list(
 
 # 자연어 검색(HyperCLOVA X · CLOVA 임베딩). 비어 있으면 규칙 파서 · 문자열 매칭으로 동작한다.
 CLOVA_API_KEY = env("CLOVA_API_KEY", default="")
+
+# 탐색 그래프 (Neo4j, Postgres 의 읽기 전용 복사본). 비어 있으면 /api/explore/* 가 503
+NEO4J_URI = env("NEO4J_URI", default="")
+NEO4J_USER = env("NEO4J_USER", default="neo4j")
+NEO4J_PASSWORD = env("NEO4J_PASSWORD", default="")
 
 ROOT_URLCONF = "config.urls"
 WSGI_APPLICATION = "config.wsgi.application"

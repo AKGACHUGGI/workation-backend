@@ -24,10 +24,10 @@ pk AS (  -- 평일 연간 곡선의 가장 붐비는 시간, 낮(9~18시) 중 �
          (array_agg(hour ORDER BY index_100, hour) FILTER (WHERE hour BETWEEN 9 AND 18))[1] AS calm_h
     FROM dong_hourly WHERE month = 0 AND day_group = 'weekday' GROUP BY dong_id
 ),
-ez AS (  -- 시군구 시기 여유: 한산한 달 3개, 붐비는 달 3개
+ez AS (  -- 시군구 월별 방문 원값: 한산한 달 3개(원값 낮은 순), 붐비는 달 3개(높은 순)
   SELECT unit_id AS region_id,
-         (SELECT string_agg(m::text, '·' ORDER BY m) FROM unnest((array_agg(month ORDER BY score DESC, month))[1:3]) m) || '월' AS calm_m,
-         (SELECT string_agg(m::text, '·' ORDER BY m) FROM unnest((array_agg(month ORDER BY score, month))[1:3]) m) || '월' AS busy_m
+         (SELECT string_agg(m::text, '·' ORDER BY m) FROM unnest((array_agg(month ORDER BY raw_value, month))[1:3]) m) || '월' AS calm_m,
+         (SELECT string_agg(m::text, '·' ORDER BY m) FROM unnest((array_agg(month ORDER BY raw_value DESC, month))[1:3]) m) || '월' AS busy_m
     FROM metric WHERE scope = 'region' AND metric_key = 'ease' AND month BETWEEN 1 AND 12 GROUP BY unit_id
 ),
 ov AS (

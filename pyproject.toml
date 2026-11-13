@@ -10,6 +10,7 @@ dependencies = [
     "django-environ>=0.14",
     "gunicorn>=26",
     "django-cors-headers>=4.6",
+    "neo4j>=5.28,<6",
 ]
 
 [dependency-groups]
@@ -36,3 +37,4 @@ ignore = ["DJ001"]
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings_test"
 testpaths = ["tests"]
+markers = ["neo4j: 실제 Neo4j 가 필요한 통합 테스트 (NEO4J_TEST_URI 가 있을 때만 실행)"]

@@ -1,4 +1,5 @@
-# 로컬 테스트 전용 DB. 앱 · Traefik · Redis 는 배포 세팅 때 추가한다.
+# 로컬 테스트 DB 와 탐색 그래프 Neo4j. 앱 · Traefik · Redis 는 배포 세팅 때 추가한다.
+# 단위 테스트는 test-db 만 있으면 된다: docker compose up -d --wait test-db
 services:
   test-db:
     image: postgres:17
@@ -11,3 +12,24 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  # 탐색 그래프 (Postgres 의 읽기 전용 복사본). 포트는 이 컴퓨터에서만 연다 (스펙 §5-2)
+  neo4j:
+    image: neo4j:5-community
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-localpassword}
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 512m
+    ports:
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
+    volumes:
+      - neo4j-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:7474 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  neo4j-data:

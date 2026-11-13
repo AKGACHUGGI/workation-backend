@@ -16,3 +16,6 @@ DATABASES = {
         "PASSWORD": os.environ.get("TEST_DB_PASSWORD", "postgres"),
     }
 }
+
+# .env 에 Neo4j 접속 정보가 있어도 단위 테스트는 붙지 않는다 (통합 테스트는 NEO4J_TEST_URI)
+NEO4J_URI = ""

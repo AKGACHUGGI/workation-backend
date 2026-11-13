@@ -47,6 +47,8 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
 | `photo` 1,148행 (관광공사 포토코리아 814장, Cloudflare R2) | 시군구 814 + 행정동 334행, `source = tourapi`, `status = approved`. 분류 · 변환 · 업로드 스크립트는 데이터 담당 로컬(수집 스크립트와 같은 이유로 저장소에 올리지 않음) | 2026-11-08 |
 | `migrations/20261107_text-embedding.sql` + `05_dong_doc.sql` + `build_embeddings.py` 출력 | `tag_vocab` · `dong_doc` 추가, 표현 165개 · 소개문 203개 임베딩 | 2026-11-07 |
 | `migrations/20261107_pgvector-dong-feature.sql` + `04_dong_feature.sql` | pgvector 확장, `dong_feature` 테이블 추가와 특징 벡터 2,639행 적재 | 2026-11-07 |
+| `migrations/20261113_explore-v6.sql` | 탐색 v6 파생 표 4개 (`dong_type_score` · `dong_hour_stat` · `dong_similar` · `dong_brief`) + RLS | 2026-11-13 |
+| `05_dong_doc.sql` 한산한 달 원값 기준 (2026-11-13) | `calm_m` · `busy_m` 을 ease 점수 → 원값 순으로. 문장이 바뀐 동만 임베딩을 다시 만든다 | 미적용 |
 
 ## 지표 (명세 v0.3 변경안 3장)
 
@@ -128,10 +130,15 @@ LG U+ CSV 2종 ──preprocess.py──▶ parquet 4개 ──load_db.py──�
                                                                dong_month_summary, dong_year_summary
                                                                        │
                                                         03_metrics.sql ──▶ metric_def, metric, dong_hourly
+                                                                       │
+                                     ② manage.py build_explore ──▶ dong_type_score, dong_hour_stat, dong_similar
+                                     ③ manage.py sync_graph    ──▶ Neo4j 탐색 그래프 (읽기 전용 복사본)
+                                     ④ manage.py build_briefs  ──▶ dong_brief (HyperCLOVA, 코드 검증)
 ```
 
 - `load_db.py` 는 region/dong 을 이름 기준 upsert, 데이터 4테이블은 한 트랜잭션에서 TRUNCATE + COPY. 다시 돌려도 id 가 안 바뀐다.
 - 로컬 PostgreSQL 16 검증 (2026-11-06): DDL 적용 OK, 적재 2.4초, 재실행 OK, 요약 ↔ 시간대 원본 재계산 오차 1e-11, 총 용량 약 70 MB (population_hourly 63 MB).
+- 월 지표 적재(03_metrics.sql) 뒤 ②~④ 를 차례로 실행한다 (탐색 v6, `docs/superpowers/specs/2026-11-13-explore-graph-v6-design.md` §5). ②는 세 표를 한 트랜잭션에서 다시 만들고, ③은 `NEO4J_URI` 가 필요하며 개수가 Postgres 와 다르면 종료 코드 1, ④는 `CLOVA_API_KEY` 가 없으면 규칙 문장만 만든다.
 
 ## 다이어그램
 
