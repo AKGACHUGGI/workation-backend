@@ -12,7 +12,7 @@ from rest_framework.views import APIView
 
 from core import clova
 from core.errors import error
-from explore import ask, ask_match, brief, queries, sources
+from explore import ask, ask_match, queries, sources
 from explore.graphdb import GraphUnavailable
 
 logger = logging.getLogger(__name__)
@@ -122,7 +122,7 @@ class DongAsk(APIView):
         if intents[0] in ask.GUIDE:
             sentences, source = [ask.GUIDE[intents[0]][0]], "guide"
         else:
-            sentences, source = self._answer(dong_id, raw, intents)
+            sentences, source = self._answer(dong_id, raw, intents, question)
         sources.log_question(
             question,
             {
@@ -144,17 +144,19 @@ class DongAsk(APIView):
         )
 
     @staticmethod
-    def _answer(dong_id: str, raw: dict, intents: list[str]) -> tuple[list[str], str]:
+    def _answer(
+        dong_id: str, raw: dict, intents: list[str], question: str
+    ) -> tuple[list[str], str]:
         """Redis → dong_answer → 생성·저장 (스펙 §4 ⑥~⑧)."""
         joined = "+".join(intents)
-        digest = brief.facts_hash(ask.facts_for(raw, intents))
+        digest = ask.prompt_hash(ask.facts_for(raw, intents), question)
         key = f"explore:ask:a:{dong_id}:{joined}:{digest}"
         hit = cache.get(key)
         if hit is not None:
             return hit[0], hit[1]
         stored = sources.load_answer(dong_id, joined, digest)
         if stored is None:
-            result = ask.answer(raw, intents, _chat if clova.enabled() else None)
+            result = ask.answer(raw, intents, _chat if clova.enabled() else None, question=question)
             sources.save_answer(
                 dong_id, joined, result.facts_hash, result.sentences, result.source, result.model
             )

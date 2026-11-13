@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 from collections.abc import Callable
@@ -72,7 +73,7 @@ GUIDE = {
 INTENT_FACTS = {
     "weekday_hours": "F2-1",
     "weekend_hours": "F2-2",
-    "months": "F3-1",
+    "months": "F3-",
     "quiet": "F1-quiet",
     "peer": "F1-peer",
     "evening": "F1-evening",
@@ -86,7 +87,10 @@ METRIC_WORDS = {"quiet": {"조용"}, "peer": {"또래"}, "evening": {"저녁", "
 FIXED_WORDS = {
     "F2-1": {"평일"},
     "F2-2": {"주말"},
+    "F2-1h": {"평일"},
+    "F2-2h": {"주말"},
     "F3-1": {"월"},
+    "F3-2": {"월"},
     "F5-1": {"바다", "해안"},
 }
 NO_DATA = "이 동네는 그 내용을 계산할 데이터가 부족해요."
@@ -156,12 +160,47 @@ def life_fact(raw: dict) -> Fact | None:
     )
 
 
+def detail_facts(raw: dict) -> list[Fact]:
+    """질문에 특정 시각·달이 나와도 답하도록 24시간 차량 값과 월별 원값도 사실로 둔다.
+    F2-1h · F2-2h = 평일·주말 시간대별 차량 이동 인구, F3-2 = 시군구 월별 방문 원값.
+    브리핑에는 안 씀."""
+    rec = raw["rec"]
+    d, sgg = rec["dong"], rec["region"]["name"]
+    out = []
+    for i, (day, ko) in enumerate((("weekday", "평일"), ("weekend", "주말")), start=1):
+        pairs = [
+            (h, v) for h, v in enumerate(d.get(f"driv_{day}") or []) if v is not None and v >= 0
+        ]
+        if pairs:
+            text = f"{ko} 시간대별 차량 이동 인구: " + ", ".join(f"{h}시 {v}명" for h, v in pairs)
+            values = brief._vals(*(x for pair in pairs for x in pair))
+            out.append(Fact(f"F2-{i}h", text, values, 1.0))
+    months = [(m, v) for m, v, _ in sorted(rec["months"]) if v is not None]
+    if months:
+        text = f"{sgg} 월별 방문 원값(클수록 붐빔): " + ", ".join(
+            f"{m}월 {v:.1f}" for m, v in months
+        )
+        values = brief._vals(*(m for m, _ in months), *(f"{v:.1f}" for _, v in months))
+        values |= brief._vals(*(round(v) for _, v in months))
+        out.append(Fact("F3-2", text, values, 1.0))
+    return out
+
+
+def prompt_hash(facts: list[Fact], question: str) -> str:
+    """같은 사실 + 같은 질문(정규형)이면 같은 값. 답 캐시 · dong_answer 키.
+    질문 문장이 CLOVA 에 그대로 들어가므로 의도만으로 답을 나눠 쓰지 않는다
+    (2026-11-13 사용자 결정)."""
+    body = brief.facts_hash(facts) + "\n" + normalize(question)
+    return hashlib.sha256(body.encode()).hexdigest()
+
+
 def facts_for(raw: dict, intents: list[str]) -> list[Fact]:
     """의도에 맞는 사실만. 의도 순서대로, 의도 안에서는 id 순."""
     facts = brief.collect_facts(raw)
     life = life_fact(raw)
     if life is not None:
         facts.append(life)
+    facts += detail_facts(raw)
     out = []
     for intent in intents:
         prefix = INTENT_FACTS[intent]
@@ -277,13 +316,13 @@ def rule_answer(raw: dict, intents: list[str], facts: list[Fact]) -> list[str]:
     return out
 
 
-def build_prompt(raw: dict, intents: list[str], facts: list[Fact]) -> tuple[str, str]:
-    """사용자 문장은 넣지 않는다. 질문 줄은 의도의 대표 질문 (스펙 §4-3)."""
+def build_prompt(raw: dict, facts: list[Fact], question: str) -> tuple[str, str]:
+    """사용자 질문을 그대로 넣는다 (2026-11-13 사용자 결정: 인젝션 차단은 일단 빼고 CLOVA 로 바로).
+    사실은 의도로 고른 것만이고, 답 문장은 그대로 출력 검사(§6)를 거친다."""
     rec = raw["rec"]
     where = f"{rec['sido']} {rec['region']['name']} {rec['dong']['name']}"
-    questions = "\n".join(f"질문: {CANONICAL[i]}" for i in intents)
     lines = "\n".join(f"{f.id}: {f.text}" for f in facts)
-    return SYSTEM, f"동네: {where}\n{questions}\n사실:\n{lines}"
+    return SYSTEM, f"동네: {where}\n질문: {question}\n사실:\n{lines}"
 
 
 def _intents_of(cited: list[str], intents: list[str]) -> list[str]:
@@ -313,15 +352,17 @@ def compose(
     return out, source
 
 
-def answer(raw: dict, intents: list[str], chat: Callable[[str, str], str] | None) -> Answer:
+def answer(
+    raw: dict, intents: list[str], chat: Callable[[str, str], str] | None, *, question: str
+) -> Answer:
     """답할 수 있는 의도 1~2개 → 답. chat(system, user) 이 None(키 없음)이거나 실패하면 규칙 문장.
     서비스 요청 중이라 다시 시도하지 않는다."""
     facts = facts_for(raw, intents)
-    digest = brief.facts_hash(facts)
+    digest = prompt_hash(facts, question)
     rules = rule_answer(raw, intents, facts)
     if chat is None or not facts:
         return Answer(rules, "rule", None, digest)
-    system, user = build_prompt(raw, intents, facts)
+    system, user = build_prompt(raw, facts, question)
     try:
         items = brief.parse_reply(chat(system, user), SENTENCES)
     except ClovaError as ex:

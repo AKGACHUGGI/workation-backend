@@ -5,13 +5,13 @@ import json
 import pytest
 
 from core.clova import CHAT_MODEL, ClovaError
-from explore import ask, brief
+from explore import ask
 from tests.explore_samples import jumunjin_raw
 
 FACT_IDS = {
-    "weekday_hours": ["F2-1"],
-    "weekend_hours": ["F2-2"],
-    "months": ["F3-1"],
+    "weekday_hours": ["F2-1", "F2-1h"],
+    "weekend_hours": ["F2-2", "F2-2h"],
+    "months": ["F3-1", "F3-2"],
     "quiet": ["F1-quiet"],
     "peer": ["F1-peer"],
     "evening": ["F1-evening", "F1-evening-sgg"],
@@ -98,7 +98,7 @@ def test_facts_for_each_intent(intent):
 
 def test_facts_for_two_intents_in_intent_order():
     ids = [f.id for f in ask.facts_for(jumunjin_raw(), ["quiet", "weekday_hours"])]
-    assert ids == ["F1-quiet", "F2-1"]
+    assert ids == ["F1-quiet", "F2-1", "F2-1h"]
 
 
 def test_examples_for():
@@ -145,20 +145,33 @@ def test_anchors():
     assert ask.anchors(facts["F7-1"]) == {"0.74", "생활권"}
 
 
-def test_prompt_has_canonical_questions_not_user_text():
+def test_prompt_has_user_question_and_chosen_facts():
     raw = jumunjin_raw()
-    intents = ["quiet", "weekday_hours"]
-    system, user = ask.build_prompt(raw, intents, ask.facts_for(raw, intents))
+    facts = ask.facts_for(raw, ["months"])
+    system, user = ask.build_prompt(raw, facts, "1월이랑 3월은 어느정도 차이야?")
     assert system == ask.SYSTEM
-    assert user == (
-        "동네: 강원특별자치도 강릉시 주문진읍\n"
-        "질문: 이 동네 조용해?\n"
-        "질문: 평일엔 몇 시가 붐비고 몇 시가 한산해?\n"
-        "사실:\n"
-        "F1-quiet: 조용함 B등급 31점, 전국 203동 중 140위\n"
-        "F2-1: 평일 차량 이동 인구: 12시 2064명으로 가장 많고, "
-        "업무시간(9~17시) 중 9시 1573명으로 가장 적음"
+    assert user.startswith(
+        "동네: 강원특별자치도 강릉시 주문진읍\n질문: 1월이랑 3월은 어느정도 차이야?\n사실:\n"
+        "F3-1: 강릉시 월별 방문: 가장 한산한 달 2·4·9월, 가장 붐비는 달 8월\n"
+        "F3-2: 강릉시 월별 방문 원값(클수록 붐빔): 1월 80.3, 2월 69.8, 3월 78.4,"
     )
+
+
+def test_detail_facts_allow_month_and_hour_values():
+    facts = facts_of(jumunjin_raw(), ["months", "weekday_hours"])
+    ok = "강릉시는 1월이 80.3, 3월이 78.4로 비슷해요."
+    assert ask.check_sentence(ok, ["F3-2"], facts) == []
+    assert ask.check_sentence("1월은 80, 3월은 78 정도예요.", ["F3-2"], facts) == []
+    assert ask.check_sentence("평일 15시엔 2036명이 다녀요.", ["F2-1h"], facts) == []
+    assert "사실에 없는 값: ['999']" in ask.check_sentence(
+        "평일 15시엔 999명이에요.", ["F2-1h"], facts
+    )
+
+
+def test_prompt_hash_depends_on_question():
+    facts = ask.facts_for(jumunjin_raw(), ["months"])
+    assert ask.prompt_hash(facts, "1월 vs 3월?") == ask.prompt_hash(facts, "1월 vs 3월")
+    assert ask.prompt_hash(facts, "1월 vs 3월?") != ask.prompt_hash(facts, "언제 한산해?")
 
 
 @pytest.mark.parametrize(
@@ -195,10 +208,11 @@ def test_answer_all_generated():
         jumunjin_raw(),
         ["weekday_hours"],
         lambda s, u: reply(("평일엔 9시가 가장 한산해서 오전 업무에 맞아요.", ["F2-1"])),
+        question="q",
     )
     assert out.sentences == ["평일엔 9시가 가장 한산해서 오전 업무에 맞아요."]
     assert (out.source, out.model) == ("llm", CHAT_MODEL)
-    assert out.facts_hash == brief.facts_hash(ask.facts_for(jumunjin_raw(), ["weekday_hours"]))
+    assert out.facts_hash == ask.prompt_hash(ask.facts_for(jumunjin_raw(), ["weekday_hours"]), "q")
 
 
 def test_answer_replaces_failed_sentence_with_its_intent_rule():
@@ -209,6 +223,7 @@ def test_answer_replaces_failed_sentence_with_its_intent_rule():
             ("평일엔 9시가 가장 한산해요.", ["F2-1"]),
             ("아주 조용한 동네예요. http://x.kr", ["F1-quiet"]),
         ),
+        question="q",
     )
     assert out.sentences == ["평일엔 9시가 가장 한산해요.", *RULES["quiet"]]
     assert out.source == "mixed"
@@ -223,7 +238,7 @@ def test_answer_replaces_failed_sentence_with_its_intent_rule():
     ],
 )
 def test_answer_bad_reply_is_rule(chat_reply):
-    out = ask.answer(jumunjin_raw(), ["weekday_hours"], lambda s, u: chat_reply)
+    out = ask.answer(jumunjin_raw(), ["weekday_hours"], lambda s, u: chat_reply, question="q")
     assert (out.sentences, out.source, out.model) == (RULES["weekday_hours"], "rule", None)
 
 
@@ -232,13 +247,13 @@ def test_answer_chat_error_and_no_key_are_rule():
         raise ClovaError("CLOVA HTTP 500")
 
     raw = jumunjin_raw()
-    assert ask.answer(raw, ["evening"], fail).sentences == RULES["evening"]
-    assert ask.answer(raw, ["evening"], None).source == "rule"
+    assert ask.answer(raw, ["evening"], fail, question="q").sentences == RULES["evening"]
+    assert ask.answer(raw, ["evening"], None, question="q").source == "rule"
 
 
 def test_answer_without_facts_skips_chat():
     raw = jumunjin_raw()
     raw["facts"]["5115025000"]["life"] = []
     calls = []
-    out = ask.answer(raw, ["life"], lambda s, u: calls.append(u) or reply())
+    out = ask.answer(raw, ["life"], lambda s, u: calls.append(u) or reply(), question="q")
     assert calls == [] and out.sentences == ["이 동네는 그 내용을 계산할 데이터가 부족해요."]
