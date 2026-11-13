@@ -243,7 +243,10 @@ def test_build_apply_writes_place_then_tags_from_place():
         "12": place("12", "박물관", "VE070100", ctype="14"),
     }
     sql = poi.build("apply", places)
-    assert "(11, '카페 ''A''', 'cafe', '39', 'FD050100', 128.900000, 37.800000, 'http://img/a.jpg')" in sql
+    assert (
+        "(11, '카페 ''A''', 'cafe', '39', 'FD050100', 128.900000, 37.800000, 'http://img/a.jpg')"
+        in sql
+    )
     assert "(12," not in sql  # 태그 없는 장소는 넣지 않는다
     assert sql.index("TRUNCATE place;") < sql.index("INSERT INTO place")
     assert "FROM place GROUP BY dong_id, tag" in sql
@@ -304,15 +307,28 @@ def is_last_page(page: int, total: int, rows: int = ROWS) -> bool:
 
 
 def get_page(key: str, regn: str, code: str, page: int) -> dict:
-    q = urllib.parse.urlencode({
-        "serviceKey": key, "MobileOS": "ETC", "MobileApp": "workation", "_type": "json",
-        "numOfRows": ROWS, "pageNo": page, "lDongRegnCd": regn, "lDongSignguCd": code})
+    q = urllib.parse.urlencode(
+        {
+            "serviceKey": key,
+            "MobileOS": "ETC",
+            "MobileApp": "workation",
+            "_type": "json",
+            "numOfRows": ROWS,
+            "pageNo": page,
+            "lDongRegnCd": regn,
+            "lDongSignguCd": code,
+        }
+    )
     for attempt in range(1, RETRY + 1):
         try:
-            return json.loads(urllib.request.urlopen(f"{URL}?{q}", timeout=40).read())["response"]["body"]
+            return json.loads(urllib.request.urlopen(f"{URL}?{q}", timeout=40).read())["response"][
+                "body"
+            ]
         except (OSError, ValueError, KeyError) as ex:  # 시간 초과 · 연결 끊김 · 응답 깨짐
             if attempt == RETRY:
-                sys.exit(f"TourAPI 응답 없음 ({regn}-{code} {page}쪽): {ex} — SQL 파일을 만들지 않았다")
+                sys.exit(
+                    f"TourAPI 응답 없음 ({regn}-{code} {page}쪽): {ex} — SQL 파일을 만들지 않았다"
+                )
             print(f"  다시 시도 {attempt}/{RETRY - 1} ({regn}-{code} {page}쪽): {ex}")
             time.sleep(2 * attempt)
 
@@ -362,7 +378,8 @@ def build(mode: str, places: dict[str, dict]) -> str:
             rows.append(
                 f"({int(cid)}, {sql_str(it.get('title') or '이름 없음')}, '{tag}', "
                 f"{sql_str(it.get('contenttypeid'))}, {sql_str(it.get('lclsSystm3'))}, "
-                f"{float(it['mapx']):.6f}, {float(it['mapy']):.6f}, {sql_str(it.get('firstimage'))})")
+                f"{float(it['mapx']):.6f}, {float(it['mapy']):.6f}, {sql_str(it.get('firstimage'))})"
+            )
     in_dong = "JOIN dong d ON ST_Contains(d.geom, ST_SetSRID(ST_MakePoint(p.x, p.y), 4326))"
     head = [
         "-- 장소 · 장소 태그 (db/tools/build_poi_tags_sql.py 로 생성, 직접 고치지 말 것)",
@@ -373,11 +390,19 @@ def build(mode: str, places: dict[str, dict]) -> str:
         "  x float8, y float8, image text) ON COMMIT DROP;",
         "INSERT INTO poi VALUES\n" + ",\n".join(rows) + ";",
     ]
-    if mode == "preview":  # 이 API 는 마지막 문장 결과만 돌려주므로 SELECT 로 끝낸다. 임시 테이블뿐이라 남는 것 없음
-        return "\n".join(head + [
-            f"SELECT d.dong_id, p.tag, count(*) AS n FROM poi p {in_dong}",
-            "  GROUP BY 1, 2 ORDER BY 1, 2;",
-        ]) + "\n"
+    if (
+        mode == "preview"
+    ):  # 이 API 는 마지막 문장 결과만 돌려주므로 SELECT 로 끝낸다. 임시 테이블뿐이라 남는 것 없음
+        return (
+            "\n".join(
+                head
+                + [
+                    f"SELECT d.dong_id, p.tag, count(*) AS n FROM poi p {in_dong}",
+                    "  GROUP BY 1, 2 ORDER BY 1, 2;",
+                ]
+            )
+            + "\n"
+        )
     managed = "ARRAY[" + ", ".join(f"'{t}'" for t in MANAGED) + "]"
     need = "CASE c.tag " + " ".join(f"WHEN '{t}' THEN {k}" for t, k, _ in TAGS) + " END"
     body = [
@@ -460,35 +485,111 @@ AT = "2026-11-09T10:00:00+09:00"
 def sample_rows() -> GraphRows:
     return GraphRows(
         regions=[
-            {"region_id": 1, "sido_name": "강원특별자치도", "sigungu_name": "고성군",
-             "sigungu_code": "51820", "lat": 38.38, "lng": 128.46},
-            {"region_id": 2, "sido_name": "강원특별자치도", "sigungu_name": "강릉시",
-             "sigungu_code": "51150", "lat": 37.75, "lng": 128.88},
+            {
+                "region_id": 1,
+                "sido_name": "강원특별자치도",
+                "sigungu_name": "고성군",
+                "sigungu_code": "51820",
+                "lat": 38.38,
+                "lng": 128.46,
+            },
+            {
+                "region_id": 2,
+                "sido_name": "강원특별자치도",
+                "sigungu_name": "강릉시",
+                "sigungu_code": "51150",
+                "lat": 37.75,
+                "lng": 128.88,
+            },
         ],
         sidos={"51": (37.8, 128.3)},
         dongs=[
-            {"dong_id": 101, "region_id": 1, "dong_name": "거진읍", "adm_code": "5182025300",
-             "is_excluded": False, "tags": ["cafe", "food", "coast", "beach"], "coast_km": 0.4,
-             "lat": 38.44, "lng": 128.45, "bbox": [128.4, 38.4, 128.5, 38.5],
-             "grades": {"quiet": "S", "peer": "B"}},
-            {"dong_id": 102, "region_id": 1, "dong_name": "수동면", "adm_code": None,
-             "is_excluded": True, "tags": [], "coast_km": None, "lat": None, "lng": None,
-             "bbox": None, "grades": {}},
-            {"dong_id": 201, "region_id": 2, "dong_name": "경포동", "adm_code": "5115060500",
-             "is_excluded": False, "tags": ["mountain", "cafe"], "coast_km": None,
-             "lat": 37.79, "lng": 128.9, "bbox": [128.85, 37.75, 128.95, 37.83], "grades": {}},
+            {
+                "dong_id": 101,
+                "region_id": 1,
+                "dong_name": "거진읍",
+                "adm_code": "5182025300",
+                "is_excluded": False,
+                "tags": ["cafe", "food", "coast", "beach"],
+                "coast_km": 0.4,
+                "lat": 38.44,
+                "lng": 128.45,
+                "bbox": [128.4, 38.4, 128.5, 38.5],
+                "grades": {"quiet": "S", "peer": "B"},
+            },
+            {
+                "dong_id": 102,
+                "region_id": 1,
+                "dong_name": "수동면",
+                "adm_code": None,
+                "is_excluded": True,
+                "tags": [],
+                "coast_km": None,
+                "lat": None,
+                "lng": None,
+                "bbox": None,
+                "grades": {},
+            },
+            {
+                "dong_id": 201,
+                "region_id": 2,
+                "dong_name": "경포동",
+                "adm_code": "5115060500",
+                "is_excluded": False,
+                "tags": ["mountain", "cafe"],
+                "coast_km": None,
+                "lat": 37.79,
+                "lng": 128.9,
+                "bbox": [128.85, 37.75, 128.95, 37.83],
+                "grades": {},
+            },
         ],
         places=[
-            {"place_id": 11, "name": "카페A", "tag": "cafe", "lat": 38.441, "lng": 128.451,
-             "dong_id": 101, "image_url": "http://tong.visitkorea.or.kr/a.jpg"},
-            {"place_id": 12, "name": "식당B", "tag": "food", "lat": 38.442, "lng": 128.452,
-             "dong_id": 101, "image_url": None},
-            {"place_id": 13, "name": "카페C", "tag": "cafe", "lat": 38.2, "lng": 128.3,
-             "dong_id": 102, "image_url": None},
-            {"place_id": 14, "name": "산D", "tag": "mountain", "lat": 37.8, "lng": 128.9,
-             "dong_id": 201, "image_url": None},
-            {"place_id": 15, "name": "해변E", "tag": "beach", "lat": 38.443, "lng": 128.453,
-             "dong_id": 101, "image_url": ""},
+            {
+                "place_id": 11,
+                "name": "카페A",
+                "tag": "cafe",
+                "lat": 38.441,
+                "lng": 128.451,
+                "dong_id": 101,
+                "image_url": "http://tong.visitkorea.or.kr/a.jpg",
+            },
+            {
+                "place_id": 12,
+                "name": "식당B",
+                "tag": "food",
+                "lat": 38.442,
+                "lng": 128.452,
+                "dong_id": 101,
+                "image_url": None,
+            },
+            {
+                "place_id": 13,
+                "name": "카페C",
+                "tag": "cafe",
+                "lat": 38.2,
+                "lng": 128.3,
+                "dong_id": 102,
+                "image_url": None,
+            },
+            {
+                "place_id": 14,
+                "name": "산D",
+                "tag": "mountain",
+                "lat": 37.8,
+                "lng": 128.9,
+                "dong_id": 201,
+                "image_url": None,
+            },
+            {
+                "place_id": 15,
+                "name": "해변E",
+                "tag": "beach",
+                "lat": 38.443,
+                "lng": 128.453,
+                "dong_id": 101,
+                "image_url": "",
+            },
         ],
         similar=[(101, 201, 1, 0.12341), (201, 101, 1, 0.12341), (101, 201, 6, 0.9)],
     )
@@ -529,8 +630,14 @@ def test_food_and_badge_places_dropped_food_tag_dropped():
 def test_tag_nodes_have_group_display_order():
     g = build_graph(sample_rows())
     tags = {n["id"]: n for n in g["nodes"] if n["kind"] == "tag"}
-    assert tags["tag:coast"] == {"id": "tag:coast", "kind": "tag", "name": "바닷가",
-                                 "group": "trait", "display": "badge", "order": 1}
+    assert tags["tag:coast"] == {
+        "id": "tag:coast",
+        "kind": "tag",
+        "name": "바닷가",
+        "group": "trait",
+        "display": "badge",
+        "order": 1,
+    }
     assert tags["tag:mountain"]["display"] == "badge" and tags["tag:mountain"]["group"] == "rest"
     assert tags["tag:market"]["group"] == "life" and tags["tag:market"]["order"] == 12
     assert set(graph.TAG_ORDER) == set(graph.TAG_GROUP)
@@ -549,8 +656,13 @@ def test_similar_keeps_top5_and_rounds_dist():
     g = build_graph(sample_rows())
     sim = [e for e in g["edges"] if e["type"] == "SIMILAR"]
     assert len(sim) == 2
-    assert sim[0] == {"from": "dong:5182025300", "to": "dong:5115060500", "type": "SIMILAR",
-                      "rank": 1, "dist": 0.1234}
+    assert sim[0] == {
+        "from": "dong:5182025300",
+        "to": "dong:5115060500",
+        "type": "SIMILAR",
+        "rank": 1,
+        "dist": 0.1234,
+    }
 
 
 def test_neo4j_props_round_trip():
@@ -579,8 +691,12 @@ def test_response_top_level_and_tags():
     assert list(res) == ["syncedAt", "tags", "provinces", "sigungu", "dongs", "places"]
     assert res["syncedAt"] == AT
     assert [t["id"] for t in res["tags"]] == list(graph.TAG_ORDER)
-    assert res["tags"][2] == {"id": "cafe", "label": "카페 많음", "group": "work",
-                              "display": "branch"}
+    assert res["tags"][2] == {
+        "id": "cafe",
+        "label": "카페 많음",
+        "group": "work",
+        "display": "branch",
+    }
 
 
 def test_response_provinces_and_sigungu():
@@ -588,8 +704,12 @@ def test_response_provinces_and_sigungu():
     assert res["provinces"] == [
         {"id": "51", "name": "강원특별자치도", "center": {"lat": 37.8, "lng": 128.3}}
     ]
-    assert {"id": "51150", "name": "강릉시", "provinceId": "51",
-            "center": {"lat": 37.75, "lng": 128.88}} in res["sigungu"]
+    assert {
+        "id": "51150",
+        "name": "강릉시",
+        "provinceId": "51",
+        "center": {"lat": 37.75, "lng": 128.88},
+    } in res["sigungu"]
 
 
 def test_response_dongs():
@@ -597,8 +717,11 @@ def test_response_dongs():
     assert set(dongs) == {"5182025300", "5115060500"}  # 집계 제외 동 없음
     d = dongs["5182025300"]
     assert d == {
-        "id": "5182025300", "name": "거진읍", "sigunguId": "51820",
-        "center": {"lat": 38.44, "lng": 128.45}, "bbox": [128.4, 38.4, 128.5, 38.5],
+        "id": "5182025300",
+        "name": "거진읍",
+        "sigunguId": "51820",
+        "center": {"lat": 38.44, "lng": 128.45},
+        "bbox": [128.4, 38.4, 128.5, 38.5],
         "grades": {"quiet": "S", "peer": "B", "evening": None},
         "tags": [  # 태그 바 순서, food 제외, badge 는 null
             {"tagId": "coast", "placeCount": None},
@@ -610,17 +733,33 @@ def test_response_dongs():
     }
     other = dongs["5115060500"]
     assert other["grades"] is None
-    assert other["tags"] == [{"tagId": "cafe", "placeCount": 0},
-                             {"tagId": "mountain", "placeCount": None}]
+    assert other["tags"] == [
+        {"tagId": "cafe", "placeCount": 0},
+        {"tagId": "mountain", "placeCount": None},
+    ]
     assert other["coastKm"] is None
 
 
 def test_response_places():
     assert response()["places"] == [
-        {"id": "11", "name": "카페A", "dongId": "5182025300", "lat": 38.441, "lng": 128.451,
-         "tag": "cafe", "image": "https://tong.visitkorea.or.kr/a.jpg"},
-        {"id": "15", "name": "해변E", "dongId": "5182025300", "lat": 38.443, "lng": 128.453,
-         "tag": "beach", "image": None},
+        {
+            "id": "11",
+            "name": "카페A",
+            "dongId": "5182025300",
+            "lat": 38.441,
+            "lng": 128.451,
+            "tag": "cafe",
+            "image": "https://tong.visitkorea.or.kr/a.jpg",
+        },
+        {
+            "id": "15",
+            "name": "해변E",
+            "dongId": "5182025300",
+            "lat": 38.443,
+            "lng": 128.453,
+            "tag": "beach",
+            "image": None,
+        },
     ]
 
 
@@ -727,7 +866,13 @@ def build_graph(rows: GraphRows) -> dict:
         rid = f"region:{code}"
         region_key[r["region_id"]] = rid
         nodes.append(
-            {"id": rid, "kind": "region", "name": r["sigungu_name"], "lat": r["lat"], "lng": r["lng"]}
+            {
+                "id": rid,
+                "kind": "region",
+                "name": r["sigungu_name"],
+                "lat": r["lat"],
+                "lng": r["lng"],
+            }
         )
         edges.append({"from": rid, "to": f"sido:{code[:2]}", "type": "IN"})
     for code, name in sorted(sido_names.items()):
@@ -902,8 +1047,7 @@ def to_response(synced_at: str, nodes: list[dict], edges: list[dict]) -> dict:
             for t in tags
         ],
         "provinces": [
-            {"id": _bare(s["id"]), "name": s["name"], "center": _center(s)}
-            for s in by_kind["sido"]
+            {"id": _bare(s["id"]), "name": s["name"], "center": _center(s)} for s in by_kind["sido"]
         ],
         "sigungu": [
             {
@@ -976,8 +1120,12 @@ def test_load_rows_reads_postgres_without_postgis(db):
         region_id=1, sido_name="강원특별자치도", sigungu_name="고성군", sigungu_code="51820"
     )
     Dong.objects.create(
-        dong_id=101, region=goseong, dong_name="거진읍", adm_code="5182025300",
-        tags=["cafe"], coast_dist_km="0.400",
+        dong_id=101,
+        region=goseong,
+        dong_name="거진읍",
+        adm_code="5182025300",
+        tags=["cafe"],
+        coast_dist_km="0.400",
     )
     Metric.objects.create(scope="dong", unit_id=101, month=0, metric_def_id="quiet", grade="S")
     Metric.objects.create(scope="dong", unit_id=101, month=10, metric_def_id="peer", grade="A")
@@ -990,18 +1138,41 @@ def test_load_rows_reads_postgres_without_postgis(db):
     rows = graph.load_rows()
 
     assert rows.regions == [
-        {"region_id": 1, "sido_name": "강원특별자치도", "sigungu_name": "고성군",
-         "sigungu_code": "51820", "lat": None, "lng": None}
+        {
+            "region_id": 1,
+            "sido_name": "강원특별자치도",
+            "sigungu_name": "고성군",
+            "sigungu_code": "51820",
+            "lat": None,
+            "lng": None,
+        }
     ]
     assert rows.sidos == {}
     assert rows.dongs == [
-        {"dong_id": 101, "region_id": 1, "dong_name": "거진읍", "adm_code": "5182025300",
-         "is_excluded": False, "tags": ["cafe"], "coast_km": 0.4, "lat": None, "lng": None,
-         "bbox": None, "grades": {"quiet": "S"}}  # 연간(month 0) 등급만
+        {
+            "dong_id": 101,
+            "region_id": 1,
+            "dong_name": "거진읍",
+            "adm_code": "5182025300",
+            "is_excluded": False,
+            "tags": ["cafe"],
+            "coast_km": 0.4,
+            "lat": None,
+            "lng": None,
+            "bbox": None,
+            "grades": {"quiet": "S"},
+        }  # 연간(month 0) 등급만
     ]
     assert rows.places == [
-        {"place_id": 11, "name": "카페A", "tag": "cafe", "lat": 38.44, "lng": 128.45,
-         "dong_id": 101, "image_url": None}
+        {
+            "place_id": 11,
+            "name": "카페A",
+            "tag": "cafe",
+            "lat": 38.44,
+            "lng": 128.45,
+            "dong_id": 101,
+            "image_url": None,
+        }
     ]
     assert rows.similar == []  # 테스트 DB 에는 dong_feature 가 없다
 ```
@@ -1162,7 +1333,6 @@ Expected: `pyproject.toml` dependencies 에 `"neo4j>=…"` 추가, `uv.lock` 갱
 `config/settings.py` 의 `CLOVA_API_KEY = …` 줄 다음에 추가:
 
 ```python
-
 # 탐색 지식그래프 (Neo4j AuraDB, 읽기 전용 복사본). 비어 있으면 /api/explore/graph 가 503
 NEO4J_URI = env("NEO4J_URI", default="")
 NEO4J_USER = env("NEO4J_USER", default="neo4j")
@@ -1172,7 +1342,6 @@ NEO4J_PASSWORD = env("NEO4J_PASSWORD", default="")
 `config/settings_test.py` 끝에 추가:
 
 ```python
-
 # .env 에 Aura 접속 정보가 있어도 테스트는 Neo4j 에 붙지 않는다
 NEO4J_URI = ""
 ```
@@ -1298,9 +1467,7 @@ def test_fetch_graph_empty_neo4j_is_unavailable(monkeypatch):
 
 
 def test_fetch_graph_connection_error_is_unavailable(monkeypatch):
-    monkeypatch.setattr(
-        graph, "open_driver", lambda: FakeDriver(fail=ServiceUnavailable("paused"))
-    )
+    monkeypatch.setattr(graph, "open_driver", lambda: FakeDriver(fail=ServiceUnavailable("paused")))
     with pytest.raises(graph.GraphUnavailable):
         graph.fetch_graph()
 
@@ -1615,7 +1782,7 @@ def explore_graph(request):
 `webapi/urls.py` 의 `path("search/parse", …)` 다음 줄에 추가:
 
 ```python
-    path("explore/graph", views.explore_graph, name="web-explore-graph"),
+(path("explore/graph", views.explore_graph, name="web-explore-graph"),)
 ```
 
 `config/settings.py` 의 `MIDDLEWARE` 맨 앞에 추가:
