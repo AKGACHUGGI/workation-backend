@@ -5,6 +5,8 @@ weekday_hours,평일 낮에 한산한 시간 있어?,false
 weekday_hours,출근 시간에 차 많이 막혀?,false
 weekday_hours,아침 9시쯤 카공하기 어때?,false
 weekday_hours,평일 오후에 조용해?,false
+weekday_hours,오전에 일하기 조용해?,false
+weekday_hours,평일 오전에 업무 보기 괜찮아?,false
 weekend_hours,주말엔 몇 시가 붐비고 몇 시가 한산해?,true
 weekend_hours,주말에 몇 시가 제일 붐벼?,false
 weekend_hours,토요일에 사람 많아?,false
