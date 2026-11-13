@@ -60,7 +60,13 @@ def embed(text: str) -> list[float]:
     return _post("/v1/api-tools/embedding/v2", {"text": text}, timeout=10)["embedding"]
 
 
-def chat(system: str, user: str, max_tokens: int = 300, temperature: float = 0.0) -> str:
+def chat(
+    system: str,
+    user: str,
+    max_tokens: int = 300,
+    temperature: float = 0.0,
+    timeout: float = 15,
+) -> str:
     result = _post(
         f"/v3/chat-completions/{CHAT_MODEL}",
         {
@@ -72,6 +78,6 @@ def chat(system: str, user: str, max_tokens: int = 300, temperature: float = 0.0
             "temperature": temperature,
             "topP": 0.8,
         },
-        timeout=15,
+        timeout=timeout,
     )
     return result["message"]["content"]
