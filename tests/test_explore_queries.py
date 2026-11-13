@@ -205,3 +205,21 @@ def test_no_meta_is_unavailable(monkeypatch):
         queries.fetch_dong("5115025000")
     with pytest.raises(GraphUnavailable):
         queries.fetch_pins("51150")
+
+
+def test_pins_and_facts_pass_type_min(monkeypatch):
+    raw = jumunjin_raw()
+    tx = FakeTx(
+        {
+            queries.META: [META_ROW],
+            queries.PINS: [PINS_REC],
+            queries.DONG: [raw["rec"]],
+            queries.FACTS: list(raw["facts"].values()),
+        }
+    )
+    monkeypatch.setattr(queries, "read", fake_read(tx))
+    queries.fetch_pins("51150")
+    queries.fetch_dong("5115025000")
+    params = {q: p for q, p in tx.calls}
+    assert params[queries.PINS]["type_min"] == 40
+    assert params[queries.FACTS]["type_min"] == 40

@@ -1,7 +1,7 @@
 """explore/graph.py build_graph (순수, Neo4j 없이)."""
 
 from explore import graph
-from tests.explore_samples import sample_graph_input
+from tests.explore_samples import sample_graph_input, weak_yeongok_input
 
 
 def build():
@@ -130,3 +130,12 @@ def test_similar_rank_and_region_links():
 
 def test_meta():
     assert build().meta == {"data_year": 2025, "dong_count": 4, "region_count": 3}
+
+
+def test_type_degree_counts_only_top_at_or_above_min():
+    g = graph.build_graph(weak_yeongok_input())
+    n = nodes_by_id(g)
+    assert n["type:immersion"].props["degree"] == 0  # 연곡면 1위 38 < 40
+    assert n["type:local"].props["degree"] == 2
+    # 막대(동 상세 types)용 FITS 는 기준과 관계없이 3개
+    assert len(rels_of(g, "FITS", "dong:5115037000")) == 3

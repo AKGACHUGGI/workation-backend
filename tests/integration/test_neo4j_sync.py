@@ -13,7 +13,7 @@ import os
 import pytest
 
 from explore import graph, graph_write, graphdb, queries
-from tests.explore_samples import sample_graph_input
+from tests.explore_samples import sample_graph_input, weak_yeongok_input
 
 URI = os.environ.get("NEO4J_TEST_URI", "")
 pytestmark = [pytest.mark.neo4j, pytest.mark.skipif(not URI, reason="NEO4J_TEST_URI 없음")]
@@ -87,3 +87,13 @@ def test_dong_with_real_cypher(driver):
     # 연곡면: 평일 9시 · 주말 3시 · 바닷가 · 같은 강릉시 (1위 유형이 다름)
     assert (yeongok["name"], yeongok["common"]) == ("연곡면", 4)
     assert queries.fetch_dong("0000000000") is None
+
+
+def test_type_below_min_is_null_in_pins_and_facts(driver):
+    sync(driver, weak_yeongok_input(), "first")
+    yeongok = queries.fetch_pins("51150")["dongs"][0]
+    assert yeongok["name"] == "연곡면"
+    assert (yeongok["topType"], yeongok["topScore"]) == (None, None)
+    raw = queries.fetch_dong("5115037000")
+    assert raw["facts"]["5115037000"]["top"] == []
+    assert [t["score"] for t in queries.shape_dong(raw, [])["types"]] == [38, 35, 30]

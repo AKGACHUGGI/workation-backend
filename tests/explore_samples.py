@@ -5,6 +5,8 @@
   203동 기준 degree (유형은 2026-11-14 Supabase 실측, 기준 40 이상 1위만)
 """
 
+import dataclasses
+
 from explore.derive import TypeScore
 from explore.graph import DongRow, GraphInput, RegionRow
 
@@ -100,6 +102,17 @@ def sample_graph_input() -> GraphInput:
     }
     ease = {1: GANGNEUNG_RAW, 4: SOKCHO_RAW, 9: JEONJU_RAW}
     return GraphInput(regions, dongs, grades, types, hours, similar, ease, 2025)
+
+
+def weak_yeongok_input() -> GraphInput:
+    """연곡면 1위가 기준(40) 미만인 표본. 대표 유형 없음 확인용."""
+    inp = sample_graph_input()
+    weak = [
+        TypeScore("immersion", 38, 1, "조용함 55 · 오전 한산 13"),
+        TypeScore("local", 35, 2, "생활권 지수 0.65"),
+        TypeScore("networking", 30, 3, "또래 밀도 20 · 저녁 활기 40"),
+    ]
+    return dataclasses.replace(inp, types=inp.types | {112: weak})
 
 
 def _facts_row(code, scores, grades, top, quiet, coastal, life, region):
