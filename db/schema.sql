@@ -524,13 +524,13 @@ CREATE TABLE dong_type_score (
   rank          SMALLINT     NOT NULL,
   reason        VARCHAR(80)  NOT NULL,
   PRIMARY KEY (dong_id, type),
-  CHECK (type IN ('immersion', 'networking', 'local', 'long_stay')),
+  CHECK (type IN ('immersion', 'networking', 'local')),
   CHECK (score BETWEEN 0 AND 100),
-  CHECK (rank BETWEEN 1 AND 4)
+  CHECK (rank BETWEEN 1 AND 3)
 );
-COMMENT ON TABLE  dong_type_score        IS '탐색 v6 워케이션 유형 4개 점수 (연간). explore/derive.py type_scores';
-COMMENT ON COLUMN dong_type_score.rank   IS '그 동 안 순위 1~4. 동점이면 immersion → networking → local → long_stay';
-COMMENT ON COLUMN dong_type_score.reason IS '화면 이유 문구 (예: 숙박 성향 64 · 한산한 달 7개(성수기보다 20% 이상 적은 달))';
+COMMENT ON TABLE  dong_type_score        IS '탐색 워케이션 유형 3개 점수 (연간). explore/derive.py type_scores. 장기체류형은 2026-11-14 삭제';
+COMMENT ON COLUMN dong_type_score.rank   IS '그 동 안 순위 1~3. 동점이면 immersion → networking → local';
+COMMENT ON COLUMN dong_type_score.reason IS '화면 이유 문구 (예: 생활권 지수 0.74)';
 
 CREATE TABLE dong_hour_stat (
   dong_id       SMALLINT     NOT NULL REFERENCES dong(dong_id) ON DELETE CASCADE,

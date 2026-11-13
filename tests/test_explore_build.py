@@ -6,7 +6,7 @@ from io import StringIO
 
 import pytest
 from django.core.management import call_command
-from django.db import DatabaseError, connection
+from django.db import DatabaseError, IntegrityError, connection, transaction
 
 from explore import derive, graph, sources
 from metrics.models import Metric, MetricDef
@@ -225,3 +225,16 @@ def test_fetch_briefing_db_error_is_empty(monkeypatch):
 
     monkeypatch.setattr(sources, "connection", Broken())
     assert sources.fetch_briefing("5115025000") == []
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "UPDATE dong_type_score SET type = 'long_stay' WHERE dong_id = 116 AND rank = 3",
+        "UPDATE dong_type_score SET rank = 4 WHERE dong_id = 116 AND rank = 3",
+    ],
+)
+def test_type_check_allows_three_types_and_ranks(explore_data, sql):
+    build()
+    with pytest.raises(IntegrityError), transaction.atomic(), connection.cursor() as cur:
+        cur.execute(sql)
