@@ -109,3 +109,108 @@ def sample_graph_input() -> GraphInput:
     }
     ease = {1: GANGNEUNG_RAW, 4: SOKCHO_RAW, 9: JEONJU_RAW}
     return GraphInput(regions, dongs, grades, types, hours, similar, ease, 2025)
+
+
+def _facts_row(code, scores, grades, top, quiet, coastal, life, region):
+    """FACTS Cypher 한 행. scores = (quiet, peer, evening) 점수, grades 는 (등급, degree) 3개."""
+    return {
+        "code": code,
+        "grades": [
+            {"metric": m, "grade": g, "score": s, "degree": deg}
+            for m, s, (g, deg) in zip(("quiet", "peer", "evening"), scores, grades, strict=True)
+        ],
+        "top": [{"id": f"type:{top[0]}", "name": top[1], "degree": top[2]}],
+        "quiet": [{"day": day, "h": h, "degree": deg} for day, h, deg in quiet],
+        "near": [{"id": "place:coast", "kind": "바닷가", "degree": 97}] if coastal else [],
+        "life": [{"id": f"life:{life[0]}", "name": life[1], "degree": life[2]}],
+        "region": {"id": f"region:{region[0]}", "name": region[1], "degree": region[2]},
+    }
+
+
+def jumunjin_raw() -> dict:
+    """주문진읍 실측. 비슷한 동 공통 수는 노학동 6 · 대정읍 4 · 영천동 5 (스펙 §6-3 규칙)."""
+    stay_top = ("long_stay", "장기체류형", 58)
+    local = ("local", "생활권", 107)
+    coast_quiet = [("weekday", 9, 108), ("weekend", 3, 102)]
+    return {
+        "rec": {
+            "dong": {
+                "code": "5115025000",
+                "name": "주문진읍",
+                "coast_km": 0.0,
+                "driv_weekday": JUMUNJIN_WEEKDAY,
+                "driv_weekend": JUMUNJIN_WEEKEND,
+            },
+            "region": {"code": "51150", "name": "강릉시"},
+            "sido": "강원특별자치도",
+            "types": [
+                [1, "장기체류형", 61, STAY],
+                [2, "로컬살이형", 60, "생활권 지수 0.74"],
+                [3, "네트워킹형", 50, "또래 밀도 39 · 저녁 활기 62"],
+                [4, "몰입형", 36, "조용함 31 · 오전 한산 44"],
+            ],
+            "grades": [
+                ["quiet", "B", 31, 140, 203, 12, 21],
+                ["peer", "B", 39, 124, 203, 15, 21],
+                ["evening", "A", 62, 78, 203, 1, 21],
+            ],
+            "hours": [
+                ["QUIET_AT", "weekday", 9],
+                ["PEAK_AT", "weekday", 12],
+                ["QUIET_AT", "weekend", 3],
+                ["PEAK_AT", "weekend", 14],
+            ],
+            "near": [0.0],
+            "months": [[m, raw, m in (2, 4, 9)] for m, raw in sorted(GANGNEUNG_RAW.items())],
+            "similar": [
+                [1, "5121057000", "노학동", "속초시"],
+                [2, "5013025000", "대정읍", "서귀포시"],
+                [3, "5013056000", "영천동", "서귀포시"],
+            ],
+        },
+        "facts": {
+            "5115025000": _facts_row(
+                "5115025000",
+                (31, 39, 62),
+                [("B", 50), ("B", 50), ("A", 51)],
+                stay_top,
+                coast_quiet,
+                True,
+                local,
+                ("51150", "강릉시", 21),
+            ),
+            "5121057000": _facts_row(
+                "5121057000",
+                (39, 52, 47),
+                [("B", 50), ("A", 51), ("B", 50)],
+                stay_top,
+                coast_quiet,
+                True,
+                local,
+                ("51210", "속초시", 8),
+            ),
+            "5013025000": _facts_row(
+                "5013025000",
+                (50, 50, 59),
+                [("A", 51), ("A", 51), ("A", 51)],
+                ("networking", "네트워킹형", 49),
+                coast_quiet,
+                True,
+                ("tourist", "관광지", 96),
+                ("50130", "서귀포시", 17),
+            ),
+            "5013056000": _facts_row(
+                "5013056000",
+                (41, 59, 67),
+                [("B", 50), ("A", 51), ("A", 51)],
+                ("networking", "네트워킹형", 49),
+                coast_quiet,
+                True,
+                ("tourist", "관광지", 96),
+                ("50130", "서귀포시", 17),
+            ),
+        },
+        "synced_at": "2026-11-13T10:00:00+09:00",
+        "dong_count": 203,
+        "region_count": 12,
+    }
