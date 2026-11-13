@@ -157,7 +157,8 @@ def test_clova_failure_is_rule_200(client, monkeypatch, stored):
     monkeypatch.setattr(views, "_chat", fail)
     res = post(client)
     assert res.status_code == 200 and res.json()["source"] == "rule"
-    assert res.json()["answer"] == ["평일 차량은 12시에 가장 많고, 업무시간엔 9시가 가장 한산해요."]
+    # 질문에 "9시" 가 있어 코드가 계산한 시각 규칙 문장으로 바로 답한다
+    assert res.json()["answer"] == ["평일 9시 차량은 하루 가장 많은 12시의 76%로 보통이에요."]
     assert [v[1] for v in stored.values()] == ["rule"]
 
 

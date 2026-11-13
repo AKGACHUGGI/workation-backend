@@ -14,7 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from core.clova import CHAT_MODEL, ClovaError
-from explore import brief, derive
+from explore import ask_calc, brief, derive
 from explore.brief import Fact, josa
 from explore.graph import METRIC_KO, METRICS
 
@@ -91,6 +91,10 @@ FIXED_WORDS = {
     "F2-2h": {"주말"},
     "F3-1": {"월"},
     "F3-2": {"월"},
+    "F8-1": {"월"},
+    "F8-2": {"시"},
+    "F8-3": {"시"},
+    "F8-4": {"시"},
     "F5-1": {"바다", "해안"},
 }
 NO_DATA = "이 동네는 그 내용을 계산할 데이터가 부족해요."
@@ -100,6 +104,7 @@ URL = re.compile(r"https?://|www\.|\.(?:com|net|org|kr|io|co)\b", re.I)
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+")
 PHONE = re.compile(r"\d{2,4}-\d{3,4}-\d{4}")
 LATIN = re.compile(r"[A-Za-z]{2,}")
+TIMES = re.compile(r"\d+(?:\.\d+)?\s*배")  # 배수는 사실에 없는 계산이다
 NORMALIZE = re.compile(r"[\s?.!~]")
 
 SYSTEM = "\n".join(
@@ -108,6 +113,7 @@ SYSTEM = "\n".join(
         "- 1~3문장. 문장마다 60자 이내, 존댓말 해요체.",
         "- 목록에 없는 숫자·달·시각·등급·장소 이름·추측을 쓰지 않는다.",
         "- 목록으로 답할 수 없는 부분은 쓰지 않는다.",
+        "- 비교·계산은 직접 하지 말고 사실에 적힌 결론(비슷함·% 더 붐빔·많은 편)을 쓴다.",
         "- '추천', '최고', '가장 좋', '최적', '강추', '핫플'을 쓰지 않는다.",
         "- 문장마다 근거로 쓴 사실 id 를 facts 에 적는다.",
         '- JSON 하나만 출력한다: {"sentences": [{"text": "...", "facts": ["F2-1"]}]}',
@@ -194,8 +200,9 @@ def prompt_hash(facts: list[Fact], question: str) -> str:
     return hashlib.sha256(body.encode()).hexdigest()
 
 
-def facts_for(raw: dict, intents: list[str]) -> list[Fact]:
-    """의도에 맞는 사실만. 의도 순서대로, 의도 안에서는 id 순."""
+def facts_for(raw: dict, intents: list[str], question: str = "") -> list[Fact]:
+    """의도에 맞는 사실만. 의도 순서대로, 의도 안에서는 id 순.
+    질문에 달·시각이 있으면 코드가 계산한 비교 사실(F8-*)을 끝에 붙인다."""
     facts = brief.collect_facts(raw)
     life = life_fact(raw)
     if life is not None:
@@ -205,7 +212,7 @@ def facts_for(raw: dict, intents: list[str]) -> list[Fact]:
     for intent in intents:
         prefix = INTENT_FACTS[intent]
         out += sorted((f for f in facts if f.id.startswith(prefix)), key=lambda f: f.id)
-    return out
+    return out + ask_calc.computed_facts(raw, question)
 
 
 def anchors(fact: Fact) -> set[str]:
@@ -245,6 +252,10 @@ def check_sentence(text: str, cited: list[str], facts: dict[str, Fact]) -> list[
     latin = [w for w in LATIN.findall(text) if w.lower() not in LATIN_OK]
     if latin:
         problems.append(f"영문 단어: {latin}")
+    if not text.rstrip().rstrip(".!?").endswith(("요", "니다")):
+        problems.append("존댓말 아님")
+    if TIMES.search(text):
+        problems.append("배수 표현")
     return problems
 
 
@@ -307,8 +318,12 @@ def _intent_rule(raw: dict, intent: str, ids: set[str]) -> list[str]:
     return [f"지표가 비슷한 동네는 {josa(', '.join(names), '이에요/예요')}."]
 
 
-def rule_answer(raw: dict, intents: list[str], facts: list[Fact]) -> list[str]:
-    """의도 순서대로 규칙 문장. 같은 문장(데이터 부족)은 한 번만."""
+def rule_answer(raw: dict, intents: list[str], facts: list[Fact], question: str = "") -> list[str]:
+    """질문 속 달·시각을 계산한 규칙 문장이 있으면 그것만(질문에 바로 답한다).
+    없으면 의도 순서대로 규칙 문장. 같은 문장(데이터 부족)은 한 번만."""
+    computed = ask_calc.computed_rules(raw, question)
+    if computed:
+        return computed
     ids = {f.id for f in facts}
     out: list[str] = []
     for intent in intents:
@@ -330,26 +345,73 @@ def _intents_of(cited: list[str], intents: list[str]) -> list[str]:
     return hit or intents
 
 
+def _topics(cited: list[str], intents: list[str]) -> set[str]:
+    """문장이 다루는 주제: 계산 사실(F8)이면 'calc', 아니면 인용한 의도."""
+    if any(c.startswith("F8-") for c in cited):
+        return {"calc"}
+    return set(_intents_of(cited, intents))
+
+
 def compose(
-    raw: dict, intents: list[str], items: list[tuple[str, list[str]]], facts: list[Fact]
+    raw: dict,
+    intents: list[str],
+    items: list[tuple[str, list[str]]],
+    facts: list[Fact],
+    question: str = "",
 ) -> tuple[list[str], str]:
-    """통과한 생성 문장은 그대로, 실패한 문장 자리에는 그 문장이 인용한 의도의 규칙 문장
-    (인용이 맞지 않으면 고른 의도 전부). 이미 넣은 규칙 문장은 다시 넣지 않는다."""
+    """통과한 생성 문장은 그대로. 실패한 문장은 같은 주제를 통과한 문장이 이미 답했으면 빼고,
+    아니면 그 주제의 규칙 문장으로 채운다 (같은 말이 두 번 나오지 않게).
+    같은 규칙 문장은 한 번만."""
     by_id = {f.id: f for f in facts}
     ids = set(by_id)
+    checked = [(text, cited, check_sentence(text, cited, by_id)) for text, cited in items]
+    covered = set().union(*(_topics(c, intents) for _, c, p in checked if not p))
     out: list[str] = []
     passed = 0
-    for text, cited in items:
-        problems = check_sentence(text, cited, by_id)
+    for text, cited, problems in checked:
         if not problems:
             out.append(text)
             passed += 1
             continue
         logger.info("질문 답 문장 교체 %r: %s", text, problems)
-        for intent in _intents_of(cited, intents):
-            out += [s for s in _intent_rule(raw, intent, ids) if s not in out]
+        for topic in sorted(_topics(cited, intents) - covered):
+            rules = (
+                ask_calc.computed_rules(raw, question)
+                if topic == "calc"
+                else _intent_rule(raw, topic, ids)
+            )
+            out += [r for r in rules if r not in out]
     source = "llm" if passed == len(items) else "rule" if passed == 0 else "mixed"
     return out, source
+
+
+SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+CITATION = re.compile(r"\(\s*(?:facts\s*:\s*)?F\d[\w-]*(?:\s*,\s*F\d[\w-]*)*\s*\)")
+HANGUL = re.compile(r"[가-힣]")
+
+
+def parse_plain(reply: str) -> list[str]:
+    """JSON 이 아닌 답 → 문장 목록 (HCX-005 가 형식 지시를 자주 무시한다, 2026-11-13 실측).
+    끝에 붙는 근거 표시 (F8-1) · (facts: …) 와 감싼 따옴표는 지우고, 한글이 없는 조각은 버린다."""
+    text = CITATION.sub("", reply)
+    out = []
+    for t in SENTENCE_END.split(text.strip()):
+        t = t.strip().strip('"“”').strip()
+        if HANGUL.search(t):
+            out.append(t)
+    return out
+
+
+def _items(reply: str, facts: list[Fact]) -> list[tuple[str, list[str]]]:
+    """JSON 이면 문장별 인용 그대로, 일반 문장이면 근거 = 넘긴 사실 전체 (숫자 검증은 그대로)."""
+    try:
+        return brief.parse_reply(reply, SENTENCES)
+    except ValueError:
+        sentences = parse_plain(reply)
+        if len(sentences) not in SENTENCES:
+            raise
+        ids = [f.id for f in facts]
+        return [(t, ids) for t in sentences]
 
 
 def answer(
@@ -357,21 +419,21 @@ def answer(
 ) -> Answer:
     """답할 수 있는 의도 1~2개 → 답. chat(system, user) 이 None(키 없음)이거나 실패하면 규칙 문장.
     서비스 요청 중이라 다시 시도하지 않는다."""
-    facts = facts_for(raw, intents)
+    facts = facts_for(raw, intents, question)
     digest = prompt_hash(facts, question)
-    rules = rule_answer(raw, intents, facts)
+    rules = rule_answer(raw, intents, facts, question)
     if chat is None or not facts:
         return Answer(rules, "rule", None, digest)
     system, user = build_prompt(raw, facts, question)
     try:
-        items = brief.parse_reply(chat(system, user), SENTENCES)
+        items = _items(chat(system, user), facts)
     except ClovaError as ex:
         logger.warning("질문 답 생성 실패: %s", ex)
         return Answer(rules, "rule", None, digest)
     except ValueError as ex:
         logger.warning("질문 답 응답 파싱 실패: %s", ex)
         return Answer(rules, "rule", None, digest)
-    sentences, source = compose(raw, intents, items, facts)
+    sentences, source = compose(raw, intents, items, facts, question)
     return Answer(sentences, source, None if source == "rule" else CHAT_MODEL, digest)
 
 

@@ -149,7 +149,7 @@ class DongAsk(APIView):
     ) -> tuple[list[str], str]:
         """Redis → dong_answer → 생성·저장 (스펙 §4 ⑥~⑧)."""
         joined = "+".join(intents)
-        digest = ask.prompt_hash(ask.facts_for(raw, intents), question)
+        digest = ask.prompt_hash(ask.facts_for(raw, intents, question), question)
         key = f"explore:ask:a:{dong_id}:{joined}:{digest}"
         hit = cache.get(key)
         if hit is not None:
