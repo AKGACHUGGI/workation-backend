@@ -12,14 +12,14 @@ PINS_REC = {  # PINS Cypher 결과 한 행
         {
             "code": "5115037000", "name": "연곡면", "lat": 37.85, "lng": 128.8,
             "tags": [[6, "beach"], [0, "coast"], [2, "cafe"]],
-            "top": [["장기체류형", 61]], "near": ["place:coast"], "life": ["관광지"],
+            "top": [["몰입형", 50]], "near": ["place:coast"], "life": ["관광지"],
             "grades": [["quiet", "A"], ["peer", "C"], ["evening", "B"]],
         },
         {
             "code": "5115025000", "name": "주문진읍", "lat": 37.88818, "lng": 128.75354,
             "tags": [[11, "market"], [0, "coast"], [5, "resort"], [2, "cafe"], [6, "beach"],
                      [7, "park"]],
-            "top": [["장기체류형", 61]], "near": ["place:coast"], "life": ["생활권"],
+            "top": [["로컬살이형", 60]], "near": ["place:coast"], "life": ["생활권"],
             "grades": [["quiet", "B"], ["peer", "B"], ["evening", "A"]],
         },
         {
@@ -40,8 +40,8 @@ def test_shape_pins():
         "name": "주문진읍",
         "center": {"lat": 37.88818, "lng": 128.75354},
         "tags": ["coast", "cafe", "resort", "beach", "park", "market"],
-        "topType": "장기체류형",
-        "topScore": 61,
+        "topType": "로컬살이형",
+        "topScore": 60,
         "coastal": True,
         "life": "생활권",
         "grades": {"quiet": "B", "evening": "A"},
@@ -61,7 +61,7 @@ def test_fact_list_labels_and_degrees():
         "grade:quiet:B": ("조용함 B", 50),
         "grade:peer:B": ("또래 밀도 B", 50),
         "grade:evening:A": ("저녁 활기 A", 51),
-        "type:long_stay": ("1위 장기체류형", 58),
+        "type:local": ("1위 로컬살이형", 72),
         "quiet:weekday:9": ("평일 9시 한산", 108),
         "quiet:weekend:3": ("주말 3시 한산", 102),
         "place:coast": ("바닷가", 97),
@@ -75,7 +75,7 @@ def test_common_facts_rare_first():
     mine = queries.fact_list(raw["facts"]["5115025000"])
     nohak = queries.fact_list(raw["facts"]["5121057000"])
     assert [label for _, label in queries.common_facts(mine, nohak)] == [
-        "조용함 B", "1위 장기체류형", "바닷가", "주말 3시 한산", "생활권", "평일 9시 한산",
+        "조용함 B", "1위 로컬살이형", "바닷가", "주말 3시 한산", "생활권", "평일 9시 한산",
     ]  # fmt: skip
 
 
@@ -94,9 +94,9 @@ def test_shape_dong_jumunjin():
     assert body["sigungu"] == {"id": "51150", "name": "강릉시"}
     assert body["sido"] == "강원특별자치도" and body["coastKm"] == 0.0
     assert [(t["name"], t["score"]) for t in body["types"]] == [
-        ("장기체류형", 61), ("로컬살이형", 60), ("네트워킹형", 50), ("몰입형", 36),
+        ("로컬살이형", 60), ("네트워킹형", 50), ("몰입형", 36),
     ]  # fmt: skip
-    assert body["types"][0]["reason"] == "숙박 성향 64 · 한산한 달 7개(성수기보다 20% 이상 적은 달)"
+    assert body["types"][0]["reason"] == "생활권 지수 0.74"
     assert body["grades"] == {
         "quiet": {"grade": "B", "score": 31},
         "peer": {"grade": "B", "score": 39},
@@ -122,7 +122,7 @@ def test_shape_dong_similar():
         ("노학동", "속초시", 6), ("대정읍", "서귀포시", 4), ("영천동", "서귀포시", 5),
     ]  # fmt: skip
     assert similar[0]["id"] == "5121057000"
-    assert similar[0]["commonTop"] == ["조용함 B", "1위 장기체류형", "바닷가"]
+    assert similar[0]["commonTop"] == ["조용함 B", "1위 로컬살이형", "바닷가"]
     assert similar[0]["diff"] == {"quiet": 8, "peer": 13, "evening": -15}
     assert similar[1]["commonTop"] == ["저녁 활기 A", "바닷가", "주말 3시 한산"]
     assert similar[1]["diff"] == {"quiet": 19, "peer": 11, "evening": -3}
@@ -205,3 +205,21 @@ def test_no_meta_is_unavailable(monkeypatch):
         queries.fetch_dong("5115025000")
     with pytest.raises(GraphUnavailable):
         queries.fetch_pins("51150")
+
+
+def test_pins_and_facts_pass_type_min(monkeypatch):
+    raw = jumunjin_raw()
+    tx = FakeTx(
+        {
+            queries.META: [META_ROW],
+            queries.PINS: [PINS_REC],
+            queries.DONG: [raw["rec"]],
+            queries.FACTS: list(raw["facts"].values()),
+        }
+    )
+    monkeypatch.setattr(queries, "read", fake_read(tx))
+    queries.fetch_pins("51150")
+    queries.fetch_dong("5115025000")
+    params = {q: p for q, p in tx.calls}
+    assert params[queries.PINS]["type_min"] == 40
+    assert params[queries.FACTS]["type_min"] == 40

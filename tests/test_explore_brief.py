@@ -6,12 +6,12 @@ import pytest
 
 from core.clova import ClovaError
 from explore import brief
-from tests.explore_samples import jumunjin_raw
+from tests.explore_samples import jumunjin_no_type_raw, jumunjin_raw
 
 RULES = [
     "평일 차량은 12시에 가장 많고, 업무시간엔 9시가 가장 한산해요.",
     "강릉시는 2·4·9월이 가장 한산하고 8월이 가장 붐벼요.",
-    "장기체류형 61점이고, 강릉시 안 저녁 활기 1위예요.",
+    "로컬살이형 60점이고, 강릉시 안 저녁 활기 1위예요.",
 ]
 GOOD = [
     ("평일엔 12시에 차가 가장 많고 9시가 가장 한산해요.", ["F2-1"]),
@@ -37,7 +37,7 @@ def reply(items):
 def test_collect_facts_rare_first():
     assert [f.id for f in facts()] == [
         "F1-evening-sgg", "F3-1", "F1-peer", "F1-quiet", "F1-evening", "F4-1",
-        "F5-1", "F2-2", "F2-1", "F4-2", "F4-3", "F4-4", "F6-1", "F6-2", "F6-3",
+        "F5-1", "F2-2", "F2-1", "F4-2", "F4-3", "F6-1", "F6-2", "F6-3",
     ]  # fmt: skip
 
 
@@ -54,7 +54,7 @@ def test_fact_texts_and_values():
     assert f["F2-2"].values == {"14", "3", "2833", "569"}
     assert f["F3-1"].text == "강릉시 월별 방문: 가장 한산한 달 2·4·9월, 가장 붐비는 달 8월"
     assert f["F3-1"].values == {"2", "4", "9", "8"}
-    assert f["F4-1"].text == "장기체류형 61점 (유형 1위)"
+    assert f["F4-1"].text == "로컬살이형 60점 (유형 1위)"
     assert f["F5-1"].text == "바닷가 (해안선까지 0.0km)"
     assert f["F6-1"].text == "비슷한 동 1: 속초시 노학동" and f["F6-1"].values == frozenset()
     # 시군구 1위가 아닌 지표는 -sgg 사실이 없다
@@ -114,7 +114,7 @@ def test_rule_third_without_sigungu_first_uses_best_grade():
     raw = jumunjin_raw()
     raw["rec"]["grades"][2][5] = 2  # 저녁 활기 강릉 2위로
     third = brief.rule_sentences(raw, brief.collect_facts(raw))[2]
-    assert third == "장기체류형 61점으로, 저녁 활기 A(62점)이에요."
+    assert third == "로컬살이형 60점으로, 저녁 활기 A(62점)이에요."
 
 
 def test_josa():
@@ -206,3 +206,21 @@ def test_prompt_lists_facts_rare_first():
     assert user.startswith(
         "동네: 강원특별자치도 강릉시 주문진읍\n사실 (드문 것부터):\nF1-evening-sgg: "
     )
+
+
+def test_no_type_top_fact_is_not_a_strength():
+    f = {x.id: x for x in brief.collect_facts(jumunjin_no_type_raw())}
+    assert f["F4-1"].text == "로컬살이형 39점 (유형 1위, 기준 40점 미만)"
+    assert f["F4-1"].values == {"39", "1", "40"}
+    assert f["F4-1"].common == 1.0
+    assert f["F4-2"].text == "네트워킹형 35점 (유형 2위)"
+
+
+def test_rule_third_without_type():
+    raw = jumunjin_no_type_raw()
+    third = lambda: brief.rule_sentences(raw, brief.collect_facts(raw))[2]  # noqa: E731
+    assert third() == "강릉시 안 저녁 활기 1위인 동네예요."
+    raw["rec"]["grades"][2][5] = 2  # 저녁 활기 강릉 2위로 → 시군구 1위 사실 없음
+    assert third() == "저녁 활기 A(62점)이 이 동네의 가장 큰 특징이에요."
+    raw["rec"]["grades"] = []
+    assert third() == "뚜렷하게 맞는 워케이션 유형은 없어요."

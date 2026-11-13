@@ -13,7 +13,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         inp = sources.load_derive_input()
-        types = derive.type_scores(inp.dong_metrics, inp.region_metrics, inp.morning, inp.region_of)
+        types = derive.type_scores(inp.dong_metrics, inp.morning)
         year = sources.data_year()
         hours = {}
         for dong_id, days in sources.load_hourly(year).items():
@@ -34,6 +34,6 @@ class Command(BaseCommand):
         n_hours = sum(len(days) for days in hours.values())
         n_similar = sum(len(rows) for rows in similar.values())
         self.stdout.write(
-            f"{year}년 · 동 {len(types)} → dong_type_score {4 * len(types)}"
+            f"{year}년 · 동 {len(types)} → dong_type_score {len(derive.TYPES) * len(types)}"
             f" · dong_hour_stat {n_hours} · dong_similar {n_similar}"
         )

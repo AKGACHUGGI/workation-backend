@@ -40,14 +40,12 @@ def data_year() -> int:
 @dataclass(frozen=True)
 class DeriveInput:
     dong_metrics: dict[int, dict[str, float]]  # derive.type_scores 입력
-    region_metrics: dict[int, dict]
     morning: dict[int, float]
-    region_of: dict[int, int]
     coast_km: dict[int, float | None]
 
 
 def load_derive_input() -> DeriveInput:
-    """연간(month 0) 지표가 모두 있는 동만. 시군구는 숙박 성향(연간)과 ease 원값(1~12월)."""
+    """연간(month 0) 지표 4개와 평일 오전 보행 지수가 모두 있는 동만."""
     metrics: dict[int, dict] = defaultdict(dict)
     for dong_id, key, score, raw in _rows(
         f"""SELECT m.unit_id, m.metric_key, m.score, m.raw_value
@@ -67,30 +65,12 @@ def load_derive_input() -> DeriveInput:
                 GROUP BY dong_id"""
         )
     }
-    regions: dict[int, dict] = defaultdict(lambda: {"ease_raw": {}})
-    for region_id, month, key, score, raw in _rows(
-        """SELECT unit_id, month, metric_key, score, raw_value FROM metric
-            WHERE scope = 'region'
-              AND ((metric_key = 'overnight' AND month = 0)
-                   OR (metric_key = 'ease' AND month BETWEEN 1 AND 12))"""
-    ):
-        if key == "overnight" and score is not None:
-            regions[region_id]["overnight"] = score
-        elif key == "ease" and raw is not None:
-            regions[region_id]["ease_raw"][month] = raw
-    region_metrics = {r: v for r, v in regions.items() if "overnight" in v}
-
-    region_of, coast = {}, {}
-    for dong_id, region_id, km in _rows(
-        f"SELECT dong_id, region_id, coast_dist_km FROM dong d WHERE {DONG_OK}"
-    ):
-        region_of[dong_id], coast[dong_id] = region_id, _float(km)
-    complete = {
-        d: m
-        for d, m in metrics.items()
-        if len(m) == 4 and d in morning and region_of.get(d) in region_metrics
+    coast = {
+        dong_id: _float(km)
+        for dong_id, km in _rows(f"SELECT dong_id, coast_dist_km FROM dong d WHERE {DONG_OK}")
     }
-    return DeriveInput(complete, region_metrics, morning, region_of, coast)
+    complete = {d: m for d, m in metrics.items() if len(m) == 4 and d in morning and d in coast}
+    return DeriveInput(complete, morning, coast)
 
 
 def load_hourly(year: int) -> dict[int, dict[str, list[float | None]]]:

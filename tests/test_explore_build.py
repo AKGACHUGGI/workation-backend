@@ -6,7 +6,7 @@ from io import StringIO
 
 import pytest
 from django.core.management import call_command
-from django.db import DatabaseError, connection
+from django.db import DatabaseError, IntegrityError, connection, transaction
 
 from explore import derive, graph, sources
 from metrics.models import Metric, MetricDef
@@ -20,7 +20,6 @@ from tests.explore_samples import (
 )
 
 KEYS = ("quiet", "peer", "evening", "local_life", "overnight", "ease")
-STAY = "숙박 성향 64 · 한산한 달 7개(성수기보다 20% 이상 적은 달)"
 # dong_id: (region_id, 이름, adm_code, 해안 km, 태그, (quiet, peer, evening) 각 (점수, 등급, 원값),
 #           local_life 원값, 평일 9~11시 보행 지수 index_100)
 DONGS = {
@@ -127,7 +126,7 @@ def fetch(sql):
 
 
 def test_build_explore_counts(explore_data):
-    assert "2025년 · 동 4 → dong_type_score 16 · dong_hour_stat 8 · dong_similar 4" in build()
+    assert "2025년 · 동 4 → dong_type_score 12 · dong_hour_stat 8 · dong_similar 4" in build()
 
 
 def test_type_scores_written(explore_data):
@@ -137,14 +136,18 @@ def test_type_scores_written(explore_data):
     )
     assert rows == [
         ("local", 100, 1, "생활권 지수 0.74"),
-        ("long_stay", 61, 2, STAY),
-        ("networking", 50, 3, "또래 밀도 39 · 저녁 활기 62"),
-        ("immersion", 39, 4, "조용함 31 · 오전 한산 50"),
+        ("networking", 50, 2, "또래 밀도 39 · 저녁 활기 62"),
+        ("immersion", 39, 3, "조용함 31 · 오전 한산 50"),
     ]
-    # 전주 원값 ≤ 80 인 달 3개 → 0.5·27 + 0.5·25 = 26
-    assert fetch(
-        "SELECT score FROM dong_type_score WHERE dong_id = 901 AND type = 'long_stay'"
-    ) == [(26,)]
+    assert fetch("SELECT DISTINCT type FROM dong_type_score ORDER BY type") == [
+        ("immersion",), ("local",), ("networking",),
+    ]  # fmt: skip
+
+
+def test_dongs_scored_without_region_overnight(explore_data):
+    # 장기체류형이 쓰던 시군구 숙박 성향이 없어도 동을 빼지 않는다
+    Metric.objects.filter(scope="region", metric_def_id="overnight").delete()
+    assert "동 4 → dong_type_score 12" in build()
 
 
 def test_hour_stat_written(explore_data):
@@ -173,12 +176,14 @@ def test_similar_written_same_coast_only(explore_data):
 def test_build_explore_rerun_replaces_rows(explore_data):
     build()
     build()
-    assert fetch("SELECT count(*) FROM dong_type_score") == [(16,)]
+    assert fetch("SELECT count(*) FROM dong_type_score") == [(12,)]
     assert fetch("SELECT count(*) FROM dong_similar") == [(4,)]
 
 
-def test_ease_quiet_months_use_raw_not_score(explore_data):
-    ease = sources.load_derive_input().region_metrics[1]["ease_raw"]
+def test_ease_quiet_months_use_raw_not_score(explore_data, monkeypatch):
+    build()
+    monkeypatch.setattr(sources, "load_centers", lambda: {})
+    ease = sources.load_graph_input().ease[1]
     assert derive.quiet_months(ease) == [2, 4, 9]  # 점수 기준이면 1·4·10월
 
 
@@ -220,3 +225,16 @@ def test_fetch_briefing_db_error_is_empty(monkeypatch):
 
     monkeypatch.setattr(sources, "connection", Broken())
     assert sources.fetch_briefing("5115025000") == []
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "UPDATE dong_type_score SET type = 'long_stay' WHERE dong_id = 116 AND rank = 3",
+        "UPDATE dong_type_score SET rank = 4 WHERE dong_id = 116 AND rank = 3",
+    ],
+)
+def test_type_check_allows_three_types_and_ranks(explore_data, sql):
+    build()
+    with pytest.raises(IntegrityError), transaction.atomic(), connection.cursor() as cur:
+        cur.execute(sql)

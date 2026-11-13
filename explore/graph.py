@@ -195,13 +195,14 @@ def build_graph(inp: GraphInput) -> Graph:
                 props = {"rank": rank, "l2": round(l2, 4)}
                 rels.append(Rel("SIMILAR", me, dong_key[other], props))
 
-    # 사실 노드의 degree = 이어진 동 수. 공통점 정렬(스펙 §6-3)과 브리핑 흔함에 쓴다
+    # 사실 노드의 degree = 이어진 동 수. 공통점 정렬(스펙 §6-3)과 브리핑 흔함에 쓴다.
+    # 유형은 대표 유형(1위이면서 TYPE_MIN 이상)인 동만 센다 (유형 3개 스펙 §4-3)
     degree: Counter[str] = Counter()
     for r in rels:
         if not r.src.startswith("dong:"):
             continue
         if r.type in ("IN", "HAS_GRADE", "NEAR", "LIFE") or (
-            r.type == "FITS" and r.props["rank"] == 1
+            r.type == "FITS" and r.props["rank"] == 1 and r.props["score"] >= derive.TYPE_MIN
         ):
             degree[r.dst] += 1
         elif r.type == "QUIET_AT":

@@ -5,6 +5,7 @@ fetch_* 는 Neo4j 레코드를 dict 로 돌려주고, shape_* 는 그 dict 를 �
 
 from __future__ import annotations
 
+from explore import derive
 from explore.graph import METRIC_KO, METRICS
 from explore.graphdb import GraphUnavailable, read
 
@@ -21,7 +22,7 @@ OPTIONAL MATCH (d:Dong)-[:IN]->(r)
 RETURN r.code AS code, collect(d {
   .code, .name, .lat, .lng,
   tags: [(d)-[:HAS_TAG]->(t:PoiTag) | [t.order, t.code]],
-  top: [(d)-[f:FITS {rank: 1}]->(ty:Type) | [ty.name, f.score]],
+  top: [(d)-[f:FITS {rank: 1}]->(ty:Type) WHERE f.score >= $type_min | [ty.name, f.score]],
   near: [(d)-[:NEAR]->(p:Place) | p.id],
   life: [(d)-[:LIFE]->(t:Tag) | t.name],
   grades: [(d)-[:HAS_GRADE]->(g:Grade) | [g.metric, g.grade]]
@@ -42,14 +43,16 @@ RETURN d {.code, .name, .coast_km, .driv_weekday, .driv_weekend} AS dong,
     AS similar
 """
 
-# 공통점이 되는 사실 노드 (스펙 §6-3): 등급 · 1위 유형 · 한산 시각(day 별) · 바닷가 · 생활 · 시군구
+# 공통점이 되는 사실 노드 (스펙 §6-3): 등급 · 대표 유형(1위 · 기준 이상) · 한산 시각(day 별)
+# · 바닷가 · 생활 · 시군구
 FACTS = """
 UNWIND $codes AS c
 MATCH (d:Dong {id: 'dong:' + c})-[:IN]->(r:Region)
 RETURN d.code AS code,
   [(d)-[g:HAS_GRADE]->(x:Grade) |
     {metric: x.metric, grade: x.grade, score: g.score, degree: x.degree}] AS grades,
-  [(d)-[:FITS {rank: 1}]->(t:Type) | {id: t.id, name: t.name, degree: t.degree}] AS top,
+  [(d)-[f:FITS {rank: 1}]->(t:Type) WHERE f.score >= $type_min |
+    {id: t.id, name: t.name, degree: t.degree}] AS top,
   [(d)-[q:QUIET_AT]->(h:Hour) | {day: q.day, h: h.h,
     degree: CASE q.day WHEN 'weekday' THEN h.degree_weekday ELSE h.degree_weekend END}] AS quiet,
   [(d)-[:NEAR]->(p:Place) | {id: p.id, kind: p.kind, degree: p.degree}] AS near,
@@ -69,7 +72,7 @@ def _meta(tx) -> dict:
 
 def _pins_work(tx, code):
     _meta(tx)
-    rec = tx.run(PINS, code=code).single()
+    rec = tx.run(PINS, code=code, type_min=derive.TYPE_MIN).single()
     return None if rec is None else rec.data()
 
 
@@ -80,7 +83,7 @@ def _dong_work(tx, code):
         return None
     rec = rec.data()
     codes = [code] + [row[1] for row in rec["similar"]]
-    facts = {r["code"]: r.data() for r in tx.run(FACTS, codes=codes)}
+    facts = {r["code"]: r.data() for r in tx.run(FACTS, codes=codes, type_min=derive.TYPE_MIN)}
     return {"rec": rec, "facts": facts, **meta}
 
 
