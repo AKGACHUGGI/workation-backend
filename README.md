@@ -24,7 +24,7 @@ curl localhost:8000/api/health            # {"status":"ok","db":"ok"}
 테스트는 Supabase 가 아니라 로컬 Postgres 컨테이너에서 돕니다.
 
 ```bash
-docker compose up -d --wait               # 테스트용 postgres:17 (5432 가 사용 중이면 TEST_DB_PORT=5433 을 앞에)
+docker compose up -d --wait test-db       # 테스트용 postgres:17 (5432 가 사용 중이면 TEST_DB_PORT=5433 을 앞에)
 uv run pytest
 ```
 
