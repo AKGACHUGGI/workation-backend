@@ -50,6 +50,7 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
 | `migrations/20261107_pgvector-dong-feature.sql` + `04_dong_feature.sql` | pgvector 확장, `dong_feature` 테이블 추가와 특징 벡터 2,639행 적재 | 2026-11-07 |
 | `migrations/20261113_explore-v6.sql` | 탐색 v6 파생 표 4개 (`dong_type_score` · `dong_hour_stat` · `dong_similar` · `dong_brief`) + RLS | 2026-11-13 |
 | `05_dong_doc.sql` 한산한 달 원값 기준 (2026-11-13) | `calm_m` · `busy_m` 을 ease 점수 → 원값 순으로. 문장이 바뀐 동만 임베딩을 다시 만든다 | 미적용 |
+| `migrations/20261113_explore-ask.sql` + `build_embeddings.py ask` 출력 | 동네에 물어보기 의도 사전 `ask_vocab`(표현 74개 임베딩) · 답 `dong_answer` + RLS | 미적용 |
 
 ## 지표 (명세 v0.3 변경안 3장)
 
