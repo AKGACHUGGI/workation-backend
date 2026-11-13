@@ -8,7 +8,7 @@ import pytest
 from django.core.management import call_command
 from django.db import connection
 
-from explore import derive, sources
+from explore import derive, graph, sources
 from metrics.models import Metric, MetricDef
 from regions.models import Dong, DongHourly, Region
 from tests.explore_samples import (
@@ -180,3 +180,22 @@ def test_build_explore_rerun_replaces_rows(explore_data):
 def test_ease_quiet_months_use_raw_not_score(explore_data):
     ease = sources.load_derive_input().region_metrics[1]["ease_raw"]
     assert derive.quiet_months(ease) == [2, 4, 9]  # 점수 기준이면 1·4·10월
+
+
+def test_load_graph_input(explore_data, monkeypatch):
+    build()
+    monkeypatch.setattr(sources, "load_centers", lambda: {116: (37.88818, 128.75354)})
+    inp = sources.load_graph_input()
+    assert [r.code for r in inp.regions] == ["51150", "52110"]
+    assert [d.dong_id for d in inp.dongs] == [112, 116, 901, 902]  # 집계 제외 수동면 없음
+    jumunjin = next(d for d in inp.dongs if d.dong_id == 116)
+    assert (jumunjin.lat, jumunjin.lng, jumunjin.coast_km) == (37.88818, 128.75354, 0.0)
+    assert jumunjin.tags == ["beach", "cafe", "food", "coast"] and jumunjin.local_life == 0.7365
+    assert next(d for d in inp.dongs if d.dong_id == 901).coast_km is None
+    assert inp.grades[116]["evening"] == ("A", 62, 0.278)
+    assert inp.types[116][0] == derive.TypeScore("local", 100, 1, "생활권 지수 0.74")
+    assert inp.hours[116]["weekday"][1:] == (12, 9)
+    assert [o for o, _ in inp.similar[116]] == [112]
+    assert inp.ease[1][2] == 69.8 and inp.data_year == 2025
+    counts = graph.expected_counts(graph.build_graph(inp))
+    assert counts["nodes"]["Dong"] == 4 and counts["rels"]["SIMILAR"] == 4

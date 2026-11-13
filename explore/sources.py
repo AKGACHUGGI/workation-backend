@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from django.db import connection, transaction
 
 from explore.derive import TypeScore
+from explore.graph import DongRow, GraphInput, RegionRow
 
 # 집계 제외 동(수동면)과 경계·코드 없는 동은 그래프·API 에서 뺀다
 DONG_OK = "d.is_excluded = false AND d.adm_code IS NOT NULL"
@@ -130,3 +131,78 @@ def write_explore(
                 for rank, (other, l2) in enumerate(rows, start=1)
             ],
         )
+
+
+def load_centers() -> dict[int, tuple[float, float]]:
+    """동 경계 안의 한 점 (lat, lng). 웹 public/geo 의 labelLat/labelLng 와 같은 값 (PostGIS)."""
+    rows = _rows(
+        """SELECT dong_id, extensions.st_y(p), extensions.st_x(p)
+             FROM (SELECT dong_id, extensions.st_pointonsurface(geom) AS p
+                     FROM dong WHERE geom IS NOT NULL) s"""
+    )
+    return {d: (round(lat, 5), round(lng, 5)) for d, lat, lng in rows}
+
+
+def load_graph_input() -> GraphInput:
+    """sync_graph 재료. build_explore 가 만든 파생 표 + 지표 원천."""
+    regions = [
+        RegionRow(*r)
+        for r in _rows(
+            """SELECT region_id, sigungu_code, sigungu_name, sido_name FROM region
+                WHERE sigungu_code IS NOT NULL ORDER BY region_id"""
+        )
+    ]
+    types: dict[int, list[TypeScore]] = defaultdict(list)
+    for d, t, score, rank, reason in _rows(
+        "SELECT dong_id, type, score, rank, reason FROM dong_type_score ORDER BY dong_id, rank"
+    ):
+        types[d].append(TypeScore(t, score, rank, reason))
+    grades: dict[int, dict] = defaultdict(dict)
+    local_life = {}
+    for d, key, grade, score, raw in _rows(
+        """SELECT unit_id, metric_key, grade, score, raw_value FROM metric
+            WHERE scope = 'dong' AND month = 0
+              AND metric_key IN ('quiet', 'peer', 'evening', 'local_life')"""
+    ):
+        if key == "local_life":
+            local_life[d] = raw
+        elif grade is not None and raw is not None:
+            grades[d][key] = (grade, score, raw)
+    centers = load_centers()
+    dongs = []
+    for d, code, name, region_id, km, tags in _rows(
+        f"""SELECT dong_id, adm_code, dong_name, region_id, coast_dist_km, tags
+              FROM dong d WHERE {DONG_OK} ORDER BY dong_id"""
+    ):
+        if d in types and local_life.get(d) is not None:
+            lat, lng = centers.get(d, (None, None))
+            dongs.append(
+                DongRow(d, code, name, region_id, lat, lng, _float(km), list(tags), local_life[d])
+            )
+    hours: dict[int, dict] = defaultdict(dict)
+    for d, day, driv, peak, quiet in _rows(
+        "SELECT dong_id, day_group, driv, peak_hour, quiet_hour FROM dong_hour_stat"
+    ):
+        hours[d][day] = (list(driv), peak, quiet)
+    similar: dict[int, list] = defaultdict(list)
+    for d, other, l2 in _rows(
+        "SELECT dong_id, other_id, l2 FROM dong_similar ORDER BY dong_id, rank"
+    ):
+        similar[d].append((other, l2))
+    ease: dict[int, dict[int, float]] = defaultdict(dict)
+    for r, month, raw in _rows(
+        """SELECT unit_id, month, raw_value FROM metric
+            WHERE scope = 'region' AND metric_key = 'ease' AND month BETWEEN 1 AND 12
+              AND raw_value IS NOT NULL"""
+    ):
+        ease[r][month] = raw
+    return GraphInput(
+        regions,
+        dongs,
+        dict(grades),
+        dict(types),
+        dict(hours),
+        dict(similar),
+        dict(ease),
+        data_year(),
+    )
