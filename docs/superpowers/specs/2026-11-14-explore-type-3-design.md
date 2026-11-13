@@ -62,7 +62,7 @@
 - `easy_months`는 장기체류형 전용이라 삭제(테스트 포함).
 - `explore/sources.py`: `region_metrics`(overnight 있는 시군구만 거름)와, 시군구에 overnight가 없으면 동을 빼던 조건(91행 `region_of.get(d) in region_metrics`)을 없앤다. `DeriveInput`에서 필드 제거. `build_explore.py` 호출부도 맞춘다.
 - 동점 순서: 몰입형 → 네트워킹형 → 로컬살이형.
-- 추가: `TYPE_MIN = 40`, `def top_type(scores: list[TypeScore]) -> TypeScore | None` — 1위가 `TYPE_MIN` 이상이면 1위, 아니면 `None`.
+- 추가: `TYPE_MIN = 40`. 그래프 degree · Cypher · 브리핑 · 질문 답이 이 값 하나를 본다.
 
 ### 4-2. DB (`db/migrations/20261114_explore-type-3.sql` + `db/schema.sql`)
 
@@ -80,15 +80,18 @@ DELETE FROM dong_type_score WHERE type = 'long_stay';
 - `Type` 노드 4 → 3. `FITS`는 모든 동 × 3 유형 그대로(점수·순위·이유). 상세 막대에 필요하다.
 - `Type.degree`(브리핑 흔함 계산): 순위 1이면서 `TYPE_MIN` 이상인 동만 센다.
 - 핀 조회: `FITS {rank: 1}` 중 `f.score >= $type_min`만 `top`으로. 없으면 `topType` · `topScore` = `null`. `$type_min`은 `derive.TYPE_MIN`을 넘긴다.
+- 공통 사실 조회(`FACTS`의 `top`)도 같은 조건. 유형 없는 두 동이 `1위 몰입형`을 공통점으로 갖지 않게 한다.
 - 동 상세 `types`: 그대로 3개.
 - `sync_graph`의 기대 개수: `Type` 3, `FITS` 동 수 × 3.
 
 ### 4-4. 브리핑 (`explore/brief.py`)
 
-- F4 사실: 1위가 `TYPE_MIN` 이상일 때만 `{이름} {점수}점 (유형 1위)`를 강점 사실로 넣는다. 미만이면 F4 강점 사실 없음(2·3위처럼 흔함 1.0으로 뒤에 둔다).
+- F4 사실: 1위가 `TYPE_MIN` 이상일 때만 `{이름} {점수}점 (유형 1위)`를 강점 사실로 넣는다. 미만이면 흔함 1.0으로 뒤에 두고 문구를 `{이름} {점수}점 (유형 1위, 기준 40점 미만)`으로 바꾼다(LLM이 강점으로 쓰지 않게).
 - 규칙 문장 3:
   - 대표 유형 있음: v6 그대로 `{1위 유형} {점수}점으로, {가장 높은 등급 지표} {등급}({점수}점)이에요.`
-  - 없음: `{가장 높은 등급 지표} {등급}({점수}점)이 이 동네의 가장 큰 특징이에요.` 흔함 낮은 사실이 있으면 이어 붙인다.
+  - 없음 + 시군구 1위 지표 있음: `{시군구} 안 {지표} 1위인 동네예요.`
+  - 없음 + 등급만: `{가장 높은 등급 지표} {등급}({점수}점)이 이 동네의 가장 큰 특징이에요.`
+  - 없음 + 등급도 없음: `뚜렷하게 맞는 워케이션 유형은 없어요.`
 - 검증 규칙(§5-4)은 그대로. 유형 없는 동의 생성 문장에 유형 이름이 나오면 사실 목록에 없으므로 실패 → 규칙 문장.
 
 ### 4-5. 동네에 물어보기 (`explore/ask.py`)
@@ -113,7 +116,7 @@ DELETE FROM dong_type_score WHERE type = 'long_stay';
 
 ## 6. 테스트
 
-- `test_explore_derive.py`: 유형 3개, 주문진읍 픽스처 → 로컬살이형 60 1위(`long_stay` 기대값 제거), `top_type` 경계(39 → None, 40 → 유형), 동점 순서.
+- `test_explore_derive.py`: 유형 3개, 주문진읍 픽스처 → 로컬살이형 60 1위(`long_stay` 기대값 제거), 동점 순서.
 - `test_explore_graph.py` · `test_explore_graph_write.py`: `Type` 3, `FITS` 3개/동, `degree`가 기준 미만 동을 세지 않음.
 - `test_explore_queries.py` · `test_explore_api.py`: 기준 미만 동 핀 `topType`/`topScore` null, 상세 `types` 3개.
 - `test_explore_brief.py`: 유형 없는 동 규칙 문장 3, F4 강점 사실 빠짐.
