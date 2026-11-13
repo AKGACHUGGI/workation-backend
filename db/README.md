@@ -13,7 +13,8 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
 | `04_dong_feature.sql` | 동네 특징 벡터 `dong_feature` 계산 (pgvector). 지표 점수 4개 + 24시간 곡선 48칸. 재실행 안전 |
 | `05_dong_doc.sql` | 동네 소개문 `dong_doc.body` 생성 (연간 지표 등급 · 태그 · 붐비는 시간 · 한산한 달). 바뀐 문장만 임베딩을 비운다. 재실행 안전 |
 | `seed/tag_vocab.csv` | 자연어 표현 사전 원본 (표현 → 태그·지표). 팀이 표현을 더하면 `build_embeddings.py vocab` 다시 실행 |
-| `tools/build_embeddings.py` | CLOVA Studio 임베딩 v2(1024차원)로 `tag_vocab` · `dong_doc` 의 embedding 채우는 SQL 생성. `CLOVA_API_KEY` 필요 |
+| `seed/ask_vocab.csv` | 동네에 물어보기 의도 사전 원본 (표현 → 의도 14개, 답할 수 있는 의도마다 대표 질문 1개). 표현을 더하면 `build_embeddings.py ask` 다시 실행 |
+| `tools/build_embeddings.py` | CLOVA Studio 임베딩 v2(1024차원)로 `tag_vocab` · `dong_doc` · `ask_vocab` 의 embedding 채우는 SQL 생성. `CLOVA_API_KEY` 필요 |
 | `tools/build_coast_sql.py` | OSM 해안선 → `dong.coast_dist_km` 와 `coast` 태그(1 km 이내), `region.tags` 의 coast 갱신 SQL 생성 |
 | `tools/build_poi_tags_sql.py` | 관광공사 TourAPI 장소 → 장소 태그(beach · island · surf · cafe · food · library · long_stay · park · market · resort) 갱신 SQL 생성. `TOURAPI_KEY` 필요 |
 | `tools/build_tags_sql.py` | 태그 입력 시트(xlsx) → `city` · `mountain` 태그 갱신 SQL 생성. 시군구 태그는 행정동 태그의 합집합 |
