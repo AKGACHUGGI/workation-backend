@@ -15,7 +15,7 @@ FACT_IDS = {
     "quiet": ["F1-quiet"],
     "peer": ["F1-peer"],
     "evening": ["F1-evening", "F1-evening-sgg"],
-    "type": ["F4-1", "F4-2", "F4-3", "F4-4"],
+    "type": ["F4-1", "F4-2", "F4-3"],
     "coast": ["F5-1"],
     "life": ["F7-1"],
     "similar": ["F6-1", "F6-2", "F6-3"],
@@ -30,7 +30,7 @@ RULES = {
         "저녁 활기는 A등급(62점)으로, 전국 203동 중 78위예요.",
         "강릉시 안에서는 저녁 활기 1위예요.",
     ],
-    "type": ["장기체류형 61점으로 가장 잘 맞고, 다음은 로컬살이형 60점이에요."],
+    "type": ["로컬살이형 60점으로 가장 잘 맞고, 다음은 네트워킹형 50점이에요."],
     "coast": ["해안선까지 0.0km인 바닷가 동네예요."],
     "life": ["생활권 성격이 강한 동네예요."],
     "similar": ["지표가 비슷한 동네는 속초시 노학동, 서귀포시 대정읍, 서귀포시 영천동이에요."],
@@ -140,7 +140,7 @@ def test_anchors():
     facts = facts_of(jumunjin_raw(), list(ask.INTENTS))
     assert ask.anchors(facts["F2-1"]) == {"12", "9", "2064", "1573", "17", "평일"}
     assert ask.anchors(facts["F1-evening-sgg"]) == {"1", "21", "저녁", "활기"}
-    assert ask.anchors(facts["F4-1"]) == {"1", "61", "장기체류형", "장기체류"}
+    assert ask.anchors(facts["F4-1"]) == {"1", "60", "로컬살이형", "로컬살이"}
     assert ask.anchors(facts["F6-1"]) == {"노학동"}
     assert ask.anchors(facts["F7-1"]) == {"0.74", "생활권"}
 

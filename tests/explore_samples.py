@@ -2,7 +2,7 @@
 
 - sample_graph_input(): 시군구 3 · 동 4 (주문진읍·연곡면·노학동 바닷가, 금암동 내륙)
 - jumunjin_raw(): queries.fetch_dong("5115025000") 이 돌려줄 값. 주문진읍 실측(2025)과
-  graph_data/facts.json 으로 센 203동 기준 degree
+  203동 기준 degree (유형은 2026-11-14 Supabase 실측, 기준 40 이상 1위만)
 """
 
 from explore.derive import TypeScore
@@ -23,7 +23,6 @@ JUMUNJIN_WEEKEND = [
     790, 638, 593, 569, 580, 669, 828, 1078, 1408, 1769, 2203, 2623,
     2808, 2824, 2833, 2766, 2548, 2353, 2010, 1659, 1369, 1122, 912, 788,
 ]  # fmt: skip
-STAY = "숙박 성향 64 · 한산한 달 7개(성수기보다 20% 이상 적은 달)"
 
 
 def curve(peak: int, quiet: int) -> list[float]:
@@ -62,32 +61,24 @@ def sample_graph_input() -> GraphInput:
     }
     types = {
         116: [
-            TypeScore("long_stay", 61, 1, STAY),
-            TypeScore("local", 60, 2, "생활권 지수 0.74"),
-            TypeScore("networking", 50, 3, "또래 밀도 39 · 저녁 활기 62"),
-            TypeScore("immersion", 36, 4, "조용함 31 · 오전 한산 44"),
+            TypeScore("local", 60, 1, "생활권 지수 0.74"),
+            TypeScore("networking", 50, 2, "또래 밀도 39 · 저녁 활기 62"),
+            TypeScore("immersion", 36, 3, "조용함 31 · 오전 한산 44"),
         ],
         112: [
-            TypeScore("long_stay", 61, 1, STAY),
-            TypeScore("immersion", 50, 2, "조용함 55 · 오전 한산 42"),
-            TypeScore("local", 40, 3, "생활권 지수 0.65"),
-            TypeScore("networking", 30, 4, "또래 밀도 20 · 저녁 활기 40"),
+            TypeScore("immersion", 50, 1, "조용함 55 · 오전 한산 42"),
+            TypeScore("local", 40, 2, "생활권 지수 0.65"),
+            TypeScore("networking", 30, 3, "또래 밀도 20 · 저녁 활기 40"),
         ],
         403: [
-            TypeScore(
-                "long_stay", 70, 1, "숙박 성향 56 · 한산한 달 10개(성수기보다 20% 이상 적은 달)"
-            ),
-            TypeScore("local", 65, 2, "생활권 지수 0.75"),
-            TypeScore("networking", 50, 3, "또래 밀도 52 · 저녁 활기 47"),
-            TypeScore("immersion", 40, 4, "조용함 39 · 오전 한산 41"),
+            TypeScore("local", 65, 1, "생활권 지수 0.75"),
+            TypeScore("networking", 50, 2, "또래 밀도 52 · 저녁 활기 47"),
+            TypeScore("immersion", 40, 3, "조용함 39 · 오전 한산 41"),
         ],
         901: [
             TypeScore("networking", 96, 1, "또래 밀도 97 · 저녁 활기 94"),
             TypeScore("local", 53, 2, "생활권 지수 0.72"),
-            TypeScore(
-                "long_stay", 26, 3, "숙박 성향 27 · 한산한 달 3개(성수기보다 20% 이상 적은 달)"
-            ),
-            TypeScore("immersion", 18, 4, "조용함 21 · 오전 한산 15"),
+            TypeScore("immersion", 18, 3, "조용함 21 · 오전 한산 15"),
         ],
     }
     geumam_weekday = curve(17, 10)
@@ -130,7 +121,7 @@ def _facts_row(code, scores, grades, top, quiet, coastal, life, region):
 
 def jumunjin_raw() -> dict:
     """주문진읍 실측. 비슷한 동 공통 수는 노학동 6 · 대정읍 4 · 영천동 5 (스펙 §6-3 규칙)."""
-    stay_top = ("long_stay", "장기체류형", 58)
+    local_top = ("local", "로컬살이형", 72)
     local = ("local", "생활권", 107, 0.7365)
     coast_quiet = [("weekday", 9, 108), ("weekend", 3, 102)]
     return {
@@ -145,10 +136,9 @@ def jumunjin_raw() -> dict:
             "region": {"code": "51150", "name": "강릉시"},
             "sido": "강원특별자치도",
             "types": [
-                [1, "장기체류형", 61, STAY],
-                [2, "로컬살이형", 60, "생활권 지수 0.74"],
-                [3, "네트워킹형", 50, "또래 밀도 39 · 저녁 활기 62"],
-                [4, "몰입형", 36, "조용함 31 · 오전 한산 44"],
+                [1, "로컬살이형", 60, "생활권 지수 0.74"],
+                [2, "네트워킹형", 50, "또래 밀도 39 · 저녁 활기 62"],
+                [3, "몰입형", 36, "조용함 31 · 오전 한산 44"],
             ],
             "grades": [
                 ["quiet", "B", 31, 140, 203, 12, 21],
@@ -174,7 +164,7 @@ def jumunjin_raw() -> dict:
                 "5115025000",
                 (31, 39, 62),
                 [("B", 50), ("B", 50), ("A", 51)],
-                stay_top,
+                local_top,
                 coast_quiet,
                 True,
                 local,
@@ -184,7 +174,7 @@ def jumunjin_raw() -> dict:
                 "5121057000",
                 (39, 52, 47),
                 [("B", 50), ("A", 51), ("B", 50)],
-                stay_top,
+                local_top,
                 coast_quiet,
                 True,
                 ("local", "생활권", 107, 0.7228),
@@ -194,7 +184,7 @@ def jumunjin_raw() -> dict:
                 "5013025000",
                 (50, 50, 59),
                 [("A", 51), ("A", 51), ("A", 51)],
-                ("networking", "네트워킹형", 49),
+                ("networking", "네트워킹형", 56),
                 coast_quiet,
                 True,
                 ("tourist", "관광지", 96, 0.6584),
@@ -204,7 +194,7 @@ def jumunjin_raw() -> dict:
                 "5013056000",
                 (41, 59, 67),
                 [("B", 50), ("A", 51), ("A", 51)],
-                ("networking", "네트워킹형", 49),
+                ("networking", "네트워킹형", 56),
                 coast_quiet,
                 True,
                 ("tourist", "관광지", 96, 0.6387),

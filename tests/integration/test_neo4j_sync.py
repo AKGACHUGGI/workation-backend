@@ -60,7 +60,7 @@ def test_pins_with_real_cypher(driver):
     assert [d["name"] for d in pins["dongs"]] == ["연곡면", "주문진읍"]
     jumunjin = pins["dongs"][1]
     assert jumunjin["tags"] == ["coast", "cafe", "resort", "beach", "park", "market"]
-    assert (jumunjin["topType"], jumunjin["topScore"]) == ("장기체류형", 61)
+    assert (jumunjin["topType"], jumunjin["topScore"]) == ("로컬살이형", 60)
     assert (jumunjin["coastal"], jumunjin["life"]) == (True, "생활권")
     assert jumunjin["grades"] == {"quiet": "B", "evening": "A"}
     assert jumunjin["center"] == {"lat": 37.88818, "lng": 128.75354}
@@ -74,21 +74,16 @@ def test_dong_with_real_cypher(driver):
     assert (raw["dong_count"], raw["region_count"]) == (4, 3)
     body = queries.shape_dong(raw, [])
     assert body["sido"] == "강원특별자치도" and body["coastKm"] == 0.0
-    assert [t["name"] for t in body["types"]] == [
-        "장기체류형",
-        "로컬살이형",
-        "네트워킹형",
-        "몰입형",
-    ]
+    assert [t["name"] for t in body["types"]] == ["로컬살이형", "네트워킹형", "몰입형"]
     assert body["grades"]["evening"] == {"grade": "A", "score": 62}
     assert body["hourly"]["weekday"]["peakHour"] == 12
     assert body["hourly"]["weekend"]["quietHour"] == 3
     assert body["months"]["quiet"] == [2, 4, 9] and body["months"]["raw"][7] == 100.0
     nohak, yeongok = body["similar"]
-    # 노학동: 조용함 B · 1위 장기체류형 · 평일 9시 · 주말 3시 · 바닷가 · 생활권
+    # 노학동: 조용함 B · 1위 로컬살이형 · 평일 9시 · 주말 3시 · 바닷가 · 생활권
     assert (nohak["name"], nohak["common"]) == ("노학동", 6)
-    assert nohak["commonTop"] == ["조용함 B", "생활권", "바닷가"]  # degree 2 → 3(key 순)
+    assert nohak["commonTop"] == ["조용함 B", "1위 로컬살이형", "생활권"]  # degree 2 → 3(key 순)
     assert nohak["diff"] == {"quiet": 8, "peer": 13, "evening": -15}
-    # 연곡면: 1위 장기체류형 · 평일 9시 · 주말 3시 · 바닷가 · 같은 강릉시
-    assert (yeongok["name"], yeongok["common"]) == ("연곡면", 5)
+    # 연곡면: 평일 9시 · 주말 3시 · 바닷가 · 같은 강릉시 (1위 유형이 다름)
+    assert (yeongok["name"], yeongok["common"]) == ("연곡면", 4)
     assert queries.fetch_dong("0000000000") is None

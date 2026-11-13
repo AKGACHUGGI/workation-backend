@@ -37,8 +37,8 @@ def test_pins(client, monkeypatch):
     assert res.status_code == 200
     jumunjin = next(d for d in res.json()["dongs"] if d["id"] == "5115025000")
     assert (jumunjin["topType"], jumunjin["topScore"], jumunjin["coastal"]) == (
-        "장기체류형",
-        61,
+        "로컬살이형",
+        60,
         True,
     )
     assert jumunjin["life"] == "생활권" and jumunjin["grades"] == {"quiet": "B", "evening": "A"}
@@ -59,13 +59,9 @@ def test_dong_detail_with_briefing(client, monkeypatch):
     monkeypatch.setattr(sources, "fetch_briefing", lambda code: ["가", "나", "다"])
     body = client.get("/api/explore/dongs/5115025000").json()
     assert body["name"] == "주문진읍" and body["briefing"] == ["가", "나", "다"]
-    assert body["types"][0] == {
-        "name": "장기체류형",
-        "score": 61,
-        "reason": "숙박 성향 64 · 한산한 달 7개(성수기보다 20% 이상 적은 달)",
-    }
+    assert body["types"][0] == {"name": "로컬살이형", "score": 60, "reason": "생활권 지수 0.74"}
     assert body["months"]["quiet"] == [2, 4, 9]
-    assert body["similar"][0]["commonTop"] == ["조용함 B", "1위 장기체류형", "바닷가"]
+    assert body["similar"][0]["commonTop"] == ["조용함 B", "1위 로컬살이형", "바닷가"]
 
 
 def test_dong_without_briefing_row(client, monkeypatch, no_briefing):

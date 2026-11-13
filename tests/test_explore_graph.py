@@ -19,11 +19,11 @@ def rels_of(g, type_, src=None):
 def test_label_counts():
     assert graph.expected_counts(build()) == {
         "nodes": {
-            "Sido": 2, "Region": 3, "Dong": 4, "Grade": 12, "Type": 4, "Hour": 24,
+            "Sido": 2, "Region": 3, "Dong": 4, "Grade": 12, "Type": 3, "Hour": 24,
             "Month": 12, "Place": 1, "Tag": 2, "PoiTag": 12, "Meta": 1,
         },
         "rels": {
-            "IN": 7, "EASE": 36, "HAS_GRADE": 12, "FITS": 16, "QUIET_AT": 8, "PEAK_AT": 8,
+            "IN": 7, "EASE": 36, "HAS_GRADE": 12, "FITS": 12, "QUIET_AT": 8, "PEAK_AT": 8,
             "NEAR": 3, "LIFE": 4, "HAS_TAG": 13, "SIMILAR": 6,
         },
     }  # fmt: skip
@@ -47,15 +47,14 @@ def test_dong_props():
     assert nodes_by_id(build())["dong:5211357500"].props["driv_weekday"][0] == -1
 
 
-def test_fits_four_with_rank():
+def test_fits_three_with_rank():
     fits = rels_of(build(), "FITS", "dong:5115025000")
     assert [(r.dst, r.props["score"], r.props["rank"]) for r in fits] == [
-        ("type:long_stay", 61, 1),
-        ("type:local", 60, 2),
-        ("type:networking", 50, 3),
-        ("type:immersion", 36, 4),
+        ("type:local", 60, 1),
+        ("type:networking", 50, 2),
+        ("type:immersion", 36, 3),
     ]
-    assert fits[0].props["reason"].startswith("숙박 성향 64")
+    assert fits[0].props["reason"] == "생활권 지수 0.74"
 
 
 def test_near_only_coastal_dongs():
@@ -102,8 +101,8 @@ def test_hour_rels_keyed_by_day():
 def test_degree_counts_connected_dongs():
     n = nodes_by_id(build())
     assert n["grade:quiet:B"].props["degree"] == 2  # 주문진읍·노학동
-    assert n["type:long_stay"].props["degree"] == 3  # FITS rank 1 만 센다
-    assert n["type:local"].props["degree"] == 0  # 2위로만 이어져 있음
+    assert n["type:local"].props["degree"] == 2  # 주문진읍·노학동. FITS rank 1 만 센다
+    assert n["type:immersion"].props["degree"] == 1  # 연곡면
     assert n["place:coast"].props["degree"] == 3
     assert n["life:local"].props["degree"] == 3 and n["life:tourist"].props["degree"] == 1
     assert n["region:51150"].props["degree"] == 2
