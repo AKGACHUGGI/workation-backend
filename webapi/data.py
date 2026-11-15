@@ -15,7 +15,9 @@ from statistics import mean
 
 from django.db import DatabaseError, connection, transaction
 
-from regions.models import Dong, Region
+from core.cache import static
+from regions.lookups import active_dongs, regions_by_id  # noqa: F401 (views 가 data. 로 부른다)
+from regions.models import Dong
 from regions.photos import one_per_unit as one_photo_per_unit  # noqa: F401 (views 가 data. 로 부른다)
 
 logger = logging.getLogger(__name__)
@@ -79,12 +81,15 @@ def tag_labels(tags, limit: int | None = None) -> list[str]:
     return out[:limit] if limit else out
 
 
-def regions_by_id() -> dict[int, Region]:
-    return {r.region_id: r for r in Region.objects.all()}
-
-
 def region_monthly(region_id: int, keys: tuple[str, ...]) -> dict[str, dict[int, float]]:
     """시군구 지표의 1~12월 원값을 쿼리 한 번에. {지표: {월: 원값}}, 없는 지표는 빈 dict."""
+    return static(
+        f"region_monthly:{region_id}:{','.join(keys)}",
+        lambda: _load_region_monthly(region_id, keys),
+    )
+
+
+def _load_region_monthly(region_id: int, keys: tuple[str, ...]) -> dict[str, dict[int, float]]:
     from metrics.models import Metric
 
     out: dict[str, dict[int, float]] = {k: {} for k in keys}
@@ -133,37 +138,47 @@ def dong_visits(dong_ids: list[int]) -> dict[int, dict[int, float]]:
 
 
 def dong_bbox(dong_id: int) -> list[float] | None:
+    """행정동 경계의 [서, 남, 동, 북]. 경계는 바뀌지 않아 정적 캐시 (조회 실패는 캐시하지 않음)."""
     try:
-        with transaction.atomic(), connection.cursor() as cur:
-            cur.execute(
-                "SELECT ST_XMin(geom), ST_YMin(geom), ST_XMax(geom), ST_YMax(geom) FROM dong"
-                " WHERE dong_id = %s AND geom IS NOT NULL",
-                [dong_id],
-            )
-            row = cur.fetchone()
+        return static(f"bbox:{dong_id}", lambda: _load_bbox(dong_id))
     except DatabaseError:  # 테스트 DB 에는 PostGIS · geom 이 없다
         return None
+
+
+def _load_bbox(dong_id: int) -> list[float] | None:
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute(
+            "SELECT ST_XMin(geom), ST_YMin(geom), ST_XMax(geom), ST_YMax(geom) FROM dong"
+            " WHERE dong_id = %s AND geom IS NOT NULL",
+            [dong_id],
+        )
+        row = cur.fetchone()
     return [round(float(v), 5) for v in row] if row else None
 
 
 def similar_dongs(dong_id: int, month: int | None, limit: int = 12) -> list[tuple]:
-    """pgvector 지표 벡터가 가까운 동 [(dong_id, adm_code, name, region_id, dist)]. 없으면 []."""
+    """pgvector 지표 벡터가 가까운 동 [(dong_id, adm_code, name, region_id, dist)]. 없으면 [].
+    벡터는 월 배치로만 바뀌어 정적 캐시 (조회 실패는 캐시하지 않음)."""
     m = month or 0
     try:
-        with transaction.atomic(), connection.cursor() as cur:
-            cur.execute(
-                """SELECT d.dong_id, d.adm_code, d.dong_name, d.region_id,
-                          (f.metric_vec <-> me.metric_vec)::float
-                     FROM dong_feature f JOIN dong d USING (dong_id),
-                          (SELECT metric_vec FROM dong_feature WHERE dong_id = %s AND month = %s) me
-                    WHERE f.month = %s AND f.dong_id <> %s AND d.adm_code IS NOT NULL
-                    ORDER BY f.metric_vec <-> me.metric_vec LIMIT %s""",
-                [dong_id, m, m, dong_id, limit],
-            )
-            return cur.fetchall()
+        return static(f"similar:{dong_id}:{m}:{limit}", lambda: _load_similar(dong_id, m, limit))
     except DatabaseError:
         logger.warning("dong_feature 없음: 비슷한 동네를 비운다")
         return []
+
+
+def _load_similar(dong_id: int, m: int, limit: int) -> list[tuple]:
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute(
+            """SELECT d.dong_id, d.adm_code, d.dong_name, d.region_id,
+                      (f.metric_vec <-> me.metric_vec)::float
+                 FROM dong_feature f JOIN dong d USING (dong_id),
+                      (SELECT metric_vec FROM dong_feature WHERE dong_id = %s AND month = %s) me
+                WHERE f.month = %s AND f.dong_id <> %s AND d.adm_code IS NOT NULL
+                ORDER BY f.metric_vec <-> me.metric_vec LIMIT %s""",
+            [dong_id, m, m, dong_id, limit],
+        )
+        return cur.fetchall()
 
 
 def activity_mix(

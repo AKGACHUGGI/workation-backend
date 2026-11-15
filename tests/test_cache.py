@@ -54,3 +54,33 @@ def test_safe_redis_cache_survives_redis_down(caplog):
         assert down.delete("k") is False
         assert down.delete_pattern("explore:ask:a:*") == 0
     assert "Redis 읽기 실패" in caplog.text and "Redis 쓰기 실패" in caplog.text
+
+
+# ───────────── 정적 데이터 캐시 ─────────────
+
+
+def test_static_caches_value_and_none():
+    from core.cache import static
+
+    calls = []
+
+    def load():
+        calls.append(1)
+        return None  # 경계가 없는 동처럼 None 도 결과다
+
+    assert static("t:none", load) is None
+    assert static("t:none", load) is None
+    assert len(calls) == 1
+
+
+def test_static_does_not_cache_failure():
+    import pytest
+
+    from core.cache import static
+
+    def boom():
+        raise RuntimeError("DB 없음")
+
+    with pytest.raises(RuntimeError):
+        static("t:fail", boom)
+    assert static("t:fail", lambda: 3) == 3

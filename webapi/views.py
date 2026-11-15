@@ -67,9 +67,7 @@ def tier(request):
             for rid, r in sorted(regions.items())
         ]
     else:
-        dongs = list(
-            Dong.objects.filter(is_excluded=False, adm_code__isnull=False).order_by("dong_id")
-        )
+        dongs = data.active_dongs()
         merged = scoring.with_region_metrics(
             scoring.unit_scores("dong", month),
             region_scores,
@@ -383,10 +381,11 @@ def dong_detail(request, dong_id: str):
     evening_all = [v for v in evening_all if v]
     surplus = (raw("evening") or 0) / mean(evening_all) if evening_all else 1.0
 
-    my_visits = data.dong_visits([dong.dong_id]).get(dong.dong_id, {})
     my_quiet = mine.get("quiet", {}).get("score")
     cands = data.similar_dongs(dong.dong_id, month)
-    cand_visits = data.dong_visits([c[0] for c in cands])
+    # 나와 후보 동의 방문인구를 한 번에 읽는다
+    cand_visits = data.dong_visits([dong.dong_id, *(c[0] for c in cands)])
+    my_visits = cand_visits.get(dong.dong_id, {})
     twins = []
     for cid, code, name, crid, dist in cands:
         their_quiet = all_scores.get(cid, {}).get("quiet", {}).get("score")

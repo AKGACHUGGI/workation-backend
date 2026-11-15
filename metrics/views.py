@@ -6,7 +6,7 @@ from rest_framework.response import Response
 
 from core.errors import ParamError, bad_request, parse_choice, parse_month
 from metrics import scoring
-from regions.models import Dong, Region
+from regions.lookups import active_dongs, regions_by_id
 from regions.photos import one_per_unit
 
 METRIC_CHOICES = ("value", *scoring.CORE_KEYS)
@@ -31,12 +31,12 @@ def _weights(request, metric: str):
 def _units(level: str, month, metric: str, weights):
     """단위 목록 · 점수 · 등급 · 지표별 점수. 행정동은 집계 제외 · 코드 없는 곳을 뺀다."""
     region_scores = scoring.unit_scores("region", month)
-    regions = {r.region_id: r for r in Region.objects.all()}
+    regions = regions_by_id()
     if level == "region":
         units = [(rid, r.sigungu_code, r.sigungu_name, r.sido_name) for rid, r in regions.items()]
         scores = region_scores
     else:
-        dongs = list(Dong.objects.filter(is_excluded=False, adm_code__isnull=False))
+        dongs = active_dongs()
         units = [
             (d.dong_id, d.adm_code, d.dong_name, regions[d.region_id].sigungu_name) for d in dongs
         ]

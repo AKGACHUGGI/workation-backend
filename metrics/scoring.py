@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 
+from core.cache import static
 from metrics.models import Metric
 
 CORE_KEYS = ("quiet", "ease", "peer", "overnight", "evening")
@@ -35,8 +36,13 @@ GRADE_LABELS = {"S": "상위 25%", "A": "25~50%", "B": "50~75%", "C": "하위 25
 
 
 def unit_scores(scope: str, month: int | None) -> dict[int, dict[str, dict]]:
-    """{unit_id: {metric_key: {"score", "grade", "raw"}}}. 그 달 값, overnight 는 연간 값."""
+    """{unit_id: {metric_key: {"score", "grade", "raw"}}}. 그 달 값, overnight 는 연간 값.
+    월 배치로만 바뀌는 값이라 정적 데이터 캐시에 둔다 (core/cache.py static)."""
     m = month or 0
+    return static(f"scores:{scope}:{m}", lambda: _load_unit_scores(scope, m))
+
+
+def _load_unit_scores(scope: str, m: int) -> dict[int, dict[str, dict]]:
     rows = Metric.objects.filter(scope=scope, month__in={m, 0}).values_list(
         "unit_id", "metric_def_id", "month", "raw_value", "score", "grade"
     )
@@ -44,7 +50,7 @@ def unit_scores(scope: str, month: int | None) -> dict[int, dict[str, dict]]:
     for unit_id, key, mon, raw, score, grade in rows:
         if mon == m or (key == "overnight" and mon == 0):
             out[unit_id][key] = {"score": score, "grade": grade, "raw": raw}
-    return out
+    return dict(out)
 
 
 def weighted(scores: dict[str, dict], weights: dict[str, float]) -> int | None:
