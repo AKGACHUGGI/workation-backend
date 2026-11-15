@@ -61,6 +61,19 @@ def dong_photos(dong_id: int, region_id: int, month: int | None, limit: int = MA
     return {"featured": featured, "totalCount": total}
 
 
-def first_photo(region_id: int, month: int | None) -> dict | None:
-    featured = region_photos(region_id, month, limit=1)["featured"]
-    return featured[0] if featured else None
+def one_per_unit(scope: str, unit_ids: list[int], month: int | None) -> dict[int, dict]:
+    """단위마다 대표 사진 1장을 쿼리 한 번에. {unit_id: {photoId, url, credit}}
+    순서는 같은 달 → 앞뒤 달 → 월 모름 → 나머지, 같은 순위는 랜덤.
+    목록 화면(티어 · 히트맵 · 인기 지역)이 단위마다 따로 부르지 않게 한다."""
+    if not unit_ids:
+        return {}
+    sql = f"""
+        SELECT DISTINCT ON (unit_id) unit_id, photo_id, url, credit FROM photo
+         WHERE status = 'approved' AND scope = %(scope)s AND unit_id = ANY(%(ids)s)
+         ORDER BY unit_id, {_ORDER}, random()"""
+    with connection.cursor() as cur:
+        cur.execute(sql, {"scope": scope, "ids": list(unit_ids), "month": month})
+        return {
+            u: {"photoId": pid, "url": url, "credit": credit}
+            for u, pid, url, credit in cur.fetchall()
+        }

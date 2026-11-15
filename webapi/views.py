@@ -278,13 +278,11 @@ def region_detail(request, sgg_id: str):
     mine = all_scores.get(rid, {})
     raw = lambda k: mine.get(k, {}).get("raw")  # noqa: E731
 
-    crowd = data.monthly_crowd(rid)
+    monthly = data.region_monthly(rid, ("ease", "peer"))
+    crowd = monthly["ease"]
     months = [{"month": m, "crowd": round(crowd[m])} for m in sorted(crowd)]
     by_crowd = sorted(crowd, key=crowd.get)
-    peer_by_month = {
-        m: s.get("peer", {}).get("raw") or 0
-        for m, s in ((m, scoring.unit_scores("region", m).get(rid, {})) for m in range(1, 13))
-    }
+    peer_by_month = {m: v or 0 for m, v in monthly["peer"].items()}
     offpeak = sorted(crowd, key=lambda m: -(peer_by_month.get(m, 0) * (100 - crowd[m])))[:2]
 
     quiet_raw = {u: s.get("quiet", {}).get("raw") for u, s in all_scores.items()}
@@ -294,7 +292,8 @@ def region_detail(request, sgg_id: str):
         if v is not None and raw("quiet") is not None and v < raw("quiet")
     )
 
-    dongs = list(Dong.objects.filter(region_id=rid, is_excluded=False, adm_code__isnull=False))
+    region_dongs = list(Dong.objects.filter(region_id=rid))
+    dongs = [d for d in region_dongs if not d.is_excluded and d.adm_code is not None]
     dong_scores = scoring.unit_scores("dong", month)
     annual = scoring.unit_scores("dong", None) if month else dong_scores
     visits = data.dong_visits([d.dong_id for d in dongs])
@@ -343,7 +342,7 @@ def region_detail(request, sgg_id: str):
             "avoidMonths": sorted(by_crowd[-2:]),
             "peerOffpeakMonths": sorted(offpeak),
             "dongs": dong_items,
-            "excludedDongs": data.excluded_dongs(rid),
+            "excludedDongs": data.excluded_dongs(region_dongs),
             "links": [],
         }
     )

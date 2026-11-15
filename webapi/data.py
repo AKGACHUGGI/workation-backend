@@ -16,6 +16,7 @@ from statistics import mean
 from django.db import DatabaseError, connection, transaction
 
 from regions.models import Dong, Region
+from regions.photos import one_per_unit as one_photo_per_unit  # noqa: F401 (views 가 data. 로 부른다)
 
 logger = logging.getLogger(__name__)
 
@@ -82,32 +83,22 @@ def regions_by_id() -> dict[int, Region]:
     return {r.region_id: r for r in Region.objects.all()}
 
 
-def one_photo_per_unit(scope: str, unit_ids: list[int], month: int | None) -> dict[int, dict]:
-    """단위마다 대표 사진 1장 (같은 달 우선, 같은 순위 안에서 랜덤). {unit_id: {url, credit}}"""
-    if not unit_ids:
-        return {}
-    sql = """
-        SELECT DISTINCT ON (unit_id) unit_id, url, credit FROM photo
-         WHERE status = 'approved' AND scope = %(scope)s AND unit_id = ANY(%(ids)s)
-         ORDER BY unit_id,
-                  CASE WHEN %(m)s::int IS NULL OR month = %(m)s THEN 0
-                       WHEN least(abs(month - %(m)s), 12 - abs(month - %(m)s)) <= 1 THEN 1
-                       WHEN month IS NULL THEN 2 ELSE 3 END,
-                  random()"""
-    with connection.cursor() as cur:
-        cur.execute(sql, {"scope": scope, "ids": unit_ids, "m": month})
-        return {u: {"url": url, "credit": credit} for u, url, credit in cur.fetchall()}
+def region_monthly(region_id: int, keys: tuple[str, ...]) -> dict[str, dict[int, float]]:
+    """시군구 지표의 1~12월 원값을 쿼리 한 번에. {지표: {월: 원값}}, 없는 지표는 빈 dict."""
+    from metrics.models import Metric
+
+    out: dict[str, dict[int, float]] = {k: {} for k in keys}
+    rows = Metric.objects.filter(
+        scope="region", unit_id=region_id, metric_def_id__in=keys, month__gte=1
+    ).values_list("metric_def_id", "month", "raw_value")
+    for key, month, raw in rows:
+        out[key][month] = raw
+    return out
 
 
 def monthly_crowd(region_id: int) -> dict[int, float]:
     """시군구 월 혼잡 지수 (ease 원값, 연중 최대 월 = 100)."""
-    from metrics.models import Metric
-
-    return dict(
-        Metric.objects.filter(
-            scope="region", unit_id=region_id, metric_def_id="ease", month__gte=1
-        ).values_list("month", "raw_value")
-    )
+    return region_monthly(region_id, ("ease",))["ease"]
 
 
 def season_type(crowd: dict[int, float]) -> str:
@@ -196,8 +187,8 @@ def activity_mix(
     return out
 
 
-def excluded_dongs(region_id: int) -> list[dict]:
+def excluded_dongs(region_dongs: list[Dong]) -> list[dict]:
+    """시군구의 동 목록 중 집계 제외 동 (지역 상세가 이미 읽은 목록을 받아 쿼리를 아낀다)."""
     return [
-        {"name": d.dong_name, "reason": "special_facility"}
-        for d in Dong.objects.filter(region_id=region_id, is_excluded=True)
+        {"name": d.dong_name, "reason": "special_facility"} for d in region_dongs if d.is_excluded
     ]

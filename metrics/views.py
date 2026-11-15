@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from core.errors import ParamError, bad_request, parse_choice, parse_month
 from metrics import scoring
 from regions.models import Dong, Region
-from regions.photos import first_photo
+from regions.photos import one_per_unit
 
 METRIC_CHOICES = ("value", *scoring.CORE_KEYS)
 
@@ -92,6 +92,7 @@ def tiers(request):
         )
     else:
         desc = scoring.LABELS[metric]
+    photos = one_per_unit("region", [u[0] for u in units], month) if scope == "region" else {}
     groups = {g: [] for g in ("S", "A", "B", "C")}
     for uid, code, name, parent in units:
         if values[uid] is None or grades[uid] is None:
@@ -101,7 +102,7 @@ def tiers(request):
             "name": name,
             "parentName": parent,
             "score": values[uid],
-            "photo": first_photo(uid, month) if scope == "region" else None,
+            "photo": photos.get(uid) if scope == "region" else None,
         }
         if metric == "value":
             item["grades"] = {
