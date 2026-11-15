@@ -13,16 +13,19 @@ THRESHOLD 근거 (db/README.md): 사전에 없는 표현 25개 중 24개 정답,
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 
+from django.core.cache import cache
 from django.db import connection
 
 from core import clova
 from metrics.scoring import LABELS, REGION_ONLY
-from regions.photos import dong_photos
+from regions.photos import one_per_dong
 from regions.views import TAG_LABELS
 
 logger = logging.getLogger(__name__)
@@ -75,7 +78,21 @@ def parse_rule(question: str) -> dict:
     return {"month": month, "pieces": pieces}
 
 
+# 같은 질문 → 같은 분해 (temperature 0). 프롬프트를 고치면 키가 바뀐다.
+# 규칙 파서 결과(LLM 실패)는 캐시하지 않는다
+PARSE_TTL = 30 * 24 * 60 * 60
+_PARSE_VERSION = hashlib.sha1(f"{clova.CHAT_MODEL}\n{PARSE_PROMPT}".encode()).hexdigest()[:8]
+
+
+def _parse_key(question: str) -> str:
+    return f"nlparse:{_PARSE_VERSION}:{hashlib.sha1(question.encode()).hexdigest()}"
+
+
 def parse(question: str) -> tuple[dict, str]:
+    key = _parse_key(question)
+    hit = cache.get(key)
+    if hit is not None:
+        return hit, "llm"
     try:
         out = clova.chat(PARSE_PROMPT, "질문: " + question)
         found = re.search(r"\{.*\}", out, re.S)
@@ -85,7 +102,9 @@ def parse(question: str) -> tuple[dict, str]:
         month = data.get("month")
         month = int(month) if str(month).isdigit() and 1 <= int(month) <= 12 else None
         pieces = [str(p).strip() for p in data["pieces"] if str(p).strip()]
-        return {"month": month, "pieces": pieces}, "llm"
+        parsed = {"month": month, "pieces": pieces}
+        cache.set(key, parsed, PARSE_TTL)
+        return parsed, "llm"
     except (clova.ClovaError, ValueError) as ex:  # 시연 중 LLM 이 실패해도 검색은 동작해야 한다
         logger.warning("LLM 파싱 실패 → 규칙 파서: %s", ex)
         return parse_rule(question), "rule"
@@ -103,34 +122,35 @@ def match(pieces: list[str]) -> list[dict]:
     if not pieces:
         return []
     try:
-        vectors = [clova.embed(p) for p in pieces]
+        vectors = clova.embed_many(pieces)
     except clova.ClovaError as ex:
         logger.warning("임베딩 실패 → 문자열 매칭: %s", ex)
         return _match_text(pieces)
-    out = []
+    # 조각마다 가장 가까운 사전 표현을 쿼리 한 번에 (조각 순서 = ordinality)
     with connection.cursor() as cur:
-        for piece, v in zip(pieces, vectors, strict=True):
-            cur.execute(
-                """SELECT target_kind, target_key, direction, phrase,
-                          1 - (embedding <=> %s::vector) AS sim
+        cur.execute(
+            """SELECT q.i, t.target_kind, t.target_key, t.direction, t.phrase, t.sim
+                 FROM unnest(%s::text[]) WITH ORDINALITY AS q(vec, i)
+                 CROSS JOIN LATERAL (
+                   SELECT target_kind, target_key, direction, phrase,
+                          1 - (embedding <=> q.vec::vector) AS sim
                      FROM tag_vocab WHERE embedding IS NOT NULL
-                    ORDER BY embedding <=> %s::vector LIMIT 1""",
-                [_vec(v), _vec(v)],
-            )
-            row = cur.fetchone()
-            if row:
-                kind, key, direction, phrase, sim = row
-                out.append(
-                    {
-                        "piece": piece,
-                        "kind": kind,
-                        "key": key,
-                        "direction": direction,
-                        "phrase": phrase,
-                        "sim": float(sim),
-                    }
-                )
-    return out
+                    ORDER BY embedding <=> q.vec::vector LIMIT 1) t
+                ORDER BY q.i""",
+            [[_vec(v) for v in vectors]],
+        )
+        rows = cur.fetchall()
+    return [
+        {
+            "piece": pieces[i - 1],
+            "kind": kind,
+            "key": key,
+            "direction": direction,
+            "phrase": phrase,
+            "sim": float(sim),
+        }
+        for i, kind, key, direction, phrase, sim in rows
+    ]
 
 
 def _match_text(pieces: list[str]) -> list[dict]:
@@ -181,6 +201,24 @@ def understand(question: str) -> Conditions:
 
 
 # ───────────────────────── ③ 순위 · ④ 사유 ─────────────────────────
+
+_warmer = ThreadPoolExecutor(max_workers=2, thread_name_prefix="nl-warm")
+
+
+def warm_question(question: str) -> Future | None:
+    """rank() 가 쓸 질문 전체 임베딩을 미리 받아 캐시에 넣는다.
+    ① 분해(HCX)와 동시에 돌려 기다림을 줄인다. 실패는 조용히 넘긴다: rank() 가 다시 부르거나
+    소개문 유사도 없이 순위를 낸다. 이 스레드는 DB 를 쓰지 않는다."""
+    if not clova.enabled():
+        return None
+
+    def run():
+        try:
+            clova.embed(question)
+        except clova.ClovaError as ex:
+            logger.info("질문 임베딩 미리 받기 실패: %s", ex)
+
+    return _warmer.submit(run)
 
 
 def rank(cond: Conditions, question: str) -> list[dict]:
@@ -245,6 +283,7 @@ def rank(cond: Conditions, question: str) -> list[dict]:
 
     when = f"{cond.month}월" if cond.month else "연간"
     ease_hint = month == 0 and any(k == "ease" for k, _ in cond.metrics)
+    photos = one_per_dong([(r["dong_id"], r["region_id"]) for r in rows], cond.month)
     results = []
     for i, r in enumerate(rows, 1):
         facts = []
@@ -279,9 +318,7 @@ def rank(cond: Conditions, question: str) -> list[dict]:
                 "regionName": r["sigungu_name"],
                 "score": round(float(r["total"]), 1),
                 "reason": " · ".join(facts),
-                "photo": next(
-                    iter(dong_photos(r["dong_id"], r["region_id"], cond.month, 1)["featured"]), None
-                ),
+                "photo": photos.get(r["dong_id"]),
             }
         )
     return results

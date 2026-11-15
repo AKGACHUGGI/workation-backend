@@ -15,9 +15,13 @@ def search_nl(request):
     if not isinstance(query, str) or not query.strip() or len(query) > 200:
         return bad_request("query 는 1~200자 문자열입니다.")
     started = time.monotonic()
-    cond = engine.understand(query.strip())
+    question = query.strip()
+    warming = engine.warm_question(question)  # 분해(HCX)와 동시에 질문 임베딩
+    cond = engine.understand(question)
     found = bool(cond.tags or cond.metrics or cond.month)
-    results = engine.rank(cond, query.strip()) if (cond.tags or cond.metrics) else []
+    if warming is not None:
+        warming.result()
+    results = engine.rank(cond, question) if (cond.tags or cond.metrics) else []
     return Response(
         {
             "query": query,

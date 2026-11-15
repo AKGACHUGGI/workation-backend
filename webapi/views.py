@@ -67,9 +67,7 @@ def tier(request):
             for rid, r in sorted(regions.items())
         ]
     else:
-        dongs = list(
-            Dong.objects.filter(is_excluded=False, adm_code__isnull=False).order_by("dong_id")
-        )
+        dongs = data.active_dongs()
         merged = scoring.with_region_metrics(
             scoring.unit_scores("dong", month),
             region_scores,
@@ -278,13 +276,11 @@ def region_detail(request, sgg_id: str):
     mine = all_scores.get(rid, {})
     raw = lambda k: mine.get(k, {}).get("raw")  # noqa: E731
 
-    crowd = data.monthly_crowd(rid)
+    monthly = data.region_monthly(rid, ("ease", "peer"))
+    crowd = monthly["ease"]
     months = [{"month": m, "crowd": round(crowd[m])} for m in sorted(crowd)]
     by_crowd = sorted(crowd, key=crowd.get)
-    peer_by_month = {
-        m: s.get("peer", {}).get("raw") or 0
-        for m, s in ((m, scoring.unit_scores("region", m).get(rid, {})) for m in range(1, 13))
-    }
+    peer_by_month = {m: v or 0 for m, v in monthly["peer"].items()}
     offpeak = sorted(crowd, key=lambda m: -(peer_by_month.get(m, 0) * (100 - crowd[m])))[:2]
 
     quiet_raw = {u: s.get("quiet", {}).get("raw") for u, s in all_scores.items()}
@@ -294,7 +290,8 @@ def region_detail(request, sgg_id: str):
         if v is not None and raw("quiet") is not None and v < raw("quiet")
     )
 
-    dongs = list(Dong.objects.filter(region_id=rid, is_excluded=False, adm_code__isnull=False))
+    region_dongs = list(Dong.objects.filter(region_id=rid))
+    dongs = [d for d in region_dongs if not d.is_excluded and d.adm_code is not None]
     dong_scores = scoring.unit_scores("dong", month)
     annual = scoring.unit_scores("dong", None) if month else dong_scores
     visits = data.dong_visits([d.dong_id for d in dongs])
@@ -343,7 +340,7 @@ def region_detail(request, sgg_id: str):
             "avoidMonths": sorted(by_crowd[-2:]),
             "peerOffpeakMonths": sorted(offpeak),
             "dongs": dong_items,
-            "excludedDongs": data.excluded_dongs(rid),
+            "excludedDongs": data.excluded_dongs(region_dongs),
             "links": [],
         }
     )
@@ -384,10 +381,11 @@ def dong_detail(request, dong_id: str):
     evening_all = [v for v in evening_all if v]
     surplus = (raw("evening") or 0) / mean(evening_all) if evening_all else 1.0
 
-    my_visits = data.dong_visits([dong.dong_id]).get(dong.dong_id, {})
     my_quiet = mine.get("quiet", {}).get("score")
     cands = data.similar_dongs(dong.dong_id, month)
-    cand_visits = data.dong_visits([c[0] for c in cands])
+    # 나와 후보 동의 방문인구를 한 번에 읽는다
+    cand_visits = data.dong_visits([dong.dong_id, *(c[0] for c in cands)])
+    my_visits = cand_visits.get(dong.dong_id, {})
     twins = []
     for cid, code, name, crid, dist in cands:
         their_quiet = all_scores.get(cid, {}).get("quiet", {}).get("score")

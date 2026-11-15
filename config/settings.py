@@ -72,6 +72,18 @@ ROOT_URLCONF = "config.urls"
 WSGI_APPLICATION = "config.wsgi.application"
 
 # Supabase Session pooler(5432). 비밀번호에 기호가 있어도 되도록 URL 이 아니라 항목별로 받는다.
+# 연결 풀(psycopg_pool): 프로세스마다 연결을 DB_POOL_MAX 개까지 들고 재사용해 요청마다 새 연결
+# (TLS 포함 약 0.1~0.3초)을 맺지 않는다. pooler 동시 연결 한도가 15개라
+# 프로세스 수 × DB_POOL_MAX 가 그 안에 들어가야 한다 (runserver 1개 · Gunicorn 2 워커 → 4 면 8개).
+# 꺼내 줄 때마다 연결을 확인해(CONN_HEALTH_CHECKS) pooler 가 끊은 연결을 쓰지 않는다.
+# 끄려면 DB_POOL=false
+DB_POOL = env.bool("DB_POOL", default=True)
+_POOL_OPTIONS = {
+    "min_size": 1,
+    "max_size": env.int("DB_POOL_MAX", default=4),
+    "timeout": 10,
+    "max_idle": 300,
+}
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
@@ -80,11 +92,13 @@ DATABASES = {
         "NAME": env("DB_NAME", default="postgres"),
         "USER": env("DB_USER", default="postgres"),
         "PASSWORD": env("DB_PASSWORD", default=""),
-        "OPTIONS": {"sslmode": env("DB_SSLMODE", default="prefer")},
-        # Supabase Session pooler 는 동시 연결 15개까지. runserver 는 요청마다 새 스레드라
-        # 연결을 붙잡아 두면 금방 한도를 넘으므로 개발(DEBUG)에서는 요청마다 닫는다.
-        # Gunicorn(2 × 4 스레드)은 재사용이 이득
-        "CONN_MAX_AGE": env.int("DB_CONN_MAX_AGE", default=0 if DEBUG else 60),
+        "OPTIONS": {"sslmode": env("DB_SSLMODE", default="prefer")}
+        | ({"pool": _POOL_OPTIONS} if DB_POOL else {}),
+        # 풀을 쓰면 Django 의 지속 연결(CONN_MAX_AGE)은 0 이어야 한다.
+        # 풀을 끄면 예전처럼: runserver 는 요청마다 새 스레드라 연결을 붙잡아 두면 금방 한도를
+        # 넘으므로 개발(DEBUG)에서는 요청마다 닫고, Gunicorn(2 × 4 스레드)은 재사용한다
+        "CONN_MAX_AGE": 0 if DB_POOL else env.int("DB_CONN_MAX_AGE", default=0 if DEBUG else 60),
+        # 풀이면 꺼낼 때마다, 아니면 재사용할 때마다 연결이 살아 있는지 확인한다
         "CONN_HEALTH_CHECKS": True,
     }
 }

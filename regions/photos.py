@@ -61,6 +61,44 @@ def dong_photos(dong_id: int, region_id: int, month: int | None, limit: int = MA
     return {"featured": featured, "totalCount": total}
 
 
-def first_photo(region_id: int, month: int | None) -> dict | None:
-    featured = region_photos(region_id, month, limit=1)["featured"]
-    return featured[0] if featured else None
+def one_per_unit(scope: str, unit_ids: list[int], month: int | None) -> dict[int, dict]:
+    """단위마다 대표 사진 1장을 쿼리 한 번에. {unit_id: {photoId, url, credit}}
+    순서는 같은 달 → 앞뒤 달 → 월 모름 → 나머지, 같은 순위는 랜덤.
+    목록 화면(티어 · 히트맵 · 인기 지역)이 단위마다 따로 부르지 않게 한다."""
+    if not unit_ids:
+        return {}
+    sql = f"""
+        SELECT DISTINCT ON (unit_id) unit_id, photo_id, url, credit FROM photo
+         WHERE status = 'approved' AND scope = %(scope)s AND unit_id = ANY(%(ids)s)
+         ORDER BY unit_id, {_ORDER}, random()"""
+    with connection.cursor() as cur:
+        cur.execute(sql, {"scope": scope, "ids": list(unit_ids), "month": month})
+        return {
+            u: {"photoId": pid, "url": url, "credit": credit}
+            for u, pid, url, credit in cur.fetchall()
+        }
+
+
+def one_per_dong(pairs: list[tuple[int, int]], month: int | None) -> dict[int, dict]:
+    """[(dong_id, region_id)] 마다 대표 사진 1장을 쿼리 한 번에. {dong_id: {photoId, url, credit}}
+    dong_photos(limit=1) 과 같은 순서: 그 동 사진 먼저, 없으면 소속 시군구 사진."""
+    if not pairs:
+        return {}
+    sql = f"""
+        SELECT DISTINCT ON (t.dong_id) t.dong_id, p.photo_id, p.url, p.credit
+          FROM unnest(%(dongs)s::int[], %(regions)s::int[]) AS t(dong_id, region_id)
+          JOIN photo p ON p.status = 'approved'
+                      AND ((p.scope = 'dong' AND p.unit_id = t.dong_id)
+                        OR (p.scope = 'region' AND p.unit_id = t.region_id))
+         ORDER BY t.dong_id, CASE WHEN p.scope = 'dong' THEN 0 ELSE 1 END, {_ORDER}, random()"""
+    params = {
+        "dongs": [d for d, _ in pairs],
+        "regions": [r for _, r in pairs],
+        "month": month,
+    }
+    with connection.cursor() as cur:
+        cur.execute(sql, params)
+        return {
+            d: {"photoId": pid, "url": url, "credit": credit}
+            for d, pid, url, credit in cur.fetchall()
+        }
