@@ -38,6 +38,8 @@ def test_test_settings_use_locmem_and_throttle_rates():
     assert settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] == {
         "explore_ask_burst": "10/min",
         "explore_ask_day": "200/day",
+        "events_burst": "60/min",
+        "events_day": "2000/day",
     }
 
 

@@ -15,5 +15,6 @@ urlpatterns = [
     path("dongs/<str:dong_id>/poll", views.empty_poll, name="web-dong-poll"),
     path("dongs/<str:dong_id>", views.dong_detail, name="web-dong"),
     path("search/parse", views.search_parse, name="web-search-parse"),
+    path("events", views.events, name="web-events"),
     re_path(r"^(auth|me)(/.*)?$", views.unauthorized, name="web-auth"),
 ]

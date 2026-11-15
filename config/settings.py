@@ -103,8 +103,15 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],
     "UNAUTHENTICATED_USER": None,
-    # 동네에 물어보기 IP 당 한도 (explore ask 뷰의 throttle scope). 카운터는 위 CACHES
-    "DEFAULT_THROTTLE_RATES": {"explore_ask_burst": "10/min", "explore_ask_day": "200/day"},
+    # IP 당 한도 (뷰의 throttle scope). 카운터는 위 CACHES
+    # explore_ask_*: 동네에 물어보기. events_*: 개인화 랭킹 행동 기록
+    # (화면 이동마다 많아야 한 건이라 사람은 닿지 않고 스크립트 남용만 막는다)
+    "DEFAULT_THROTTLE_RATES": {
+        "explore_ask_burst": "10/min",
+        "explore_ask_day": "200/day",
+        "events_burst": "60/min",
+        "events_day": "2000/day",
+    },
     # 프록시 뒤에서 X-Forwarded-For 의 몇 번째를 IP 로 볼지. Traefik 뒤면 1, 없으면 REMOTE_ADDR
     "NUM_PROXIES": env.int("DRF_NUM_PROXIES", default=None),
 }

@@ -8,12 +8,16 @@ NMF 계절 · 활동 유형과 저녁 잔차는 DB 에 없어 월별 혼잡과 2
 
 from __future__ import annotations
 
+import json
 import re
+import uuid
 from datetime import date
 from statistics import mean
 
-from rest_framework.decorators import api_view
+from django.db import connection
+from rest_framework.decorators import api_view, throttle_classes
 from rest_framework.response import Response
+from rest_framework.throttling import AnonRateThrottle
 
 from core.errors import bad_request, error, not_found
 from metrics import scoring
@@ -21,6 +25,7 @@ from regions.models import DayGroup, Dong, DongHourly, Region
 from regions.photos import dong_photos, region_photos
 from search import engine
 from webapi import data
+from webapi.models import UserEvent
 
 
 def _month(request):
@@ -98,6 +103,7 @@ def popular(request):
     regions = data.regions_by_id()
     scores = scoring.unit_scores("region", month)
     photos = data.one_photo_per_unit("region", list(regions), month)
+    views = _view_counts()
     items = [
         {
             "id": r.sigungu_code,
@@ -107,12 +113,95 @@ def popular(request):
             "tags": data.tag_labels(r.tags, 3),
             "terrain": data.terrain_of(r.tags),
             "scores": data.web_scores(scores.get(rid, {})),
-            "favoriteCount": 0,  # 즐겨찾기 · 조회 집계는 로그인 · 조회 로그가 생기면 채운다
-            "viewCount": 0,
+            "favoriteCount": 0,  # 즐겨찾기 집계는 로그인이 생기면 채운다
+            "viewCount": views.get(r.sigungu_code, 0),
         }
         for rid, r in sorted(regions.items())
     ]
     return Response({"month": month_str, "asOf": date.today().isoformat(), "items": items})
+
+
+def _view_counts() -> dict[str, int]:
+    """시군구 코드 → 최근 30일 region_view 를 남긴 서로 다른 익명 ID 수."""
+    with connection.cursor() as cur:
+        cur.execute(
+            "SELECT target, COUNT(DISTINCT anon_id) FROM user_event"
+            " WHERE kind = 'region_view' AND created_at >= now() - interval '30 days'"
+            " GROUP BY target"
+        )
+        return dict(cur.fetchall())
+
+
+# ───────────────────────── 개인화 랭킹 행동 기록 ─────────────────────────
+
+# kind → target 형식. search 는 target 이 없다 (null)
+EVENT_TARGET = {
+    "search": None,
+    "region_view": re.compile(r"[0-9]{5}"),  # 시군구 코드
+    "dong_view": re.compile(r"[0-9]{10}"),  # 행정동 코드
+}
+PAYLOAD_MAX_BYTES = 2048
+
+
+class EventsBurstThrottle(AnonRateThrottle):
+    scope = "events_burst"
+
+
+class EventsDayThrottle(AnonRateThrottle):
+    scope = "events_day"
+
+
+def _is_uuid4(value) -> bool:
+    """하이픈 넣은 표준 표기의 UUID v4 인지 (crypto.randomUUID() 형식)."""
+    if not isinstance(value, str):
+        return False
+    try:
+        parsed = uuid.UUID(value)
+    except ValueError:
+        return False
+    return parsed.version == 4 and str(parsed) == value.lower()
+
+
+def _event_error(body) -> str | None:
+    """POST /api/events 본문 검증. 문제가 있으면 400 메시지, 없으면 None."""
+    if not isinstance(body, dict):
+        return "본문은 JSON 객체입니다."
+    if not _is_uuid4(body.get("anonId")):
+        return "anonId 는 UUID v4 문자열입니다."
+    kind = body.get("kind")
+    if not isinstance(kind, str) or kind not in EVENT_TARGET:
+        return "kind 는 search · region_view · dong_view 중 하나입니다."
+    target, pattern = body.get("target"), EVENT_TARGET[kind]
+    if pattern is None and target is not None:
+        return "search 의 target 은 null 입니다."
+    if pattern is not None and not (isinstance(target, str) and pattern.fullmatch(target)):
+        return "region_view 는 숫자 5자리, dong_view 는 숫자 10자리 target 이 필요합니다."
+    payload = body.get("payload")
+    if payload is not None and not isinstance(payload, dict):
+        return "payload 는 객체 또는 null 입니다."
+    text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    if len(text.encode()) > PAYLOAD_MAX_BYTES:
+        return f"payload 는 {PAYLOAD_MAX_BYTES}바이트 이하입니다."
+    if "\\u0000" in text:  # PostgreSQL jsonb 는 NUL 문자를 받지 않는다 (저장 단계 500 방지)
+        return "payload 에 NUL 문자를 넣을 수 없습니다."
+    return None
+
+
+@api_view(["POST"])
+@throttle_classes([EventsBurstThrottle, EventsDayThrottle])
+def events(request):
+    """개인화 랭킹 행동 기록. 웹은 응답을 기다리지 않고 실패도 무시한다."""
+    body = request.data
+    message = _event_error(body)
+    if message:
+        return bad_request(message)
+    UserEvent.objects.create(
+        anon_id=body["anonId"],
+        kind=body["kind"],
+        target=body.get("target"),
+        payload=body.get("payload"),
+    )
+    return Response(status=204)
 
 
 # ───────────────────────── W-03 지역 상세 ─────────────────────────
