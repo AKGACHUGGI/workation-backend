@@ -14,6 +14,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 from django.conf import settings
 from django.core.cache import cache
@@ -21,6 +22,7 @@ from django.core.cache import cache
 BASE = "https://clovastudio.stream.ntruss.com"
 CHAT_MODEL = "HCX-005"
 EMBED_MODEL = "clova-embedding-v2"
+MAX_PARALLEL = 4
 
 
 class ClovaError(RuntimeError):
@@ -67,6 +69,15 @@ def embed(text: str) -> list[float]:
         vec = _post("/v1/api-tools/embedding/v2", {"text": text}, timeout=10)["embedding"]
         cache.set(key, vec, None)
     return vec
+
+
+def embed_many(texts: list[str]) -> list[list[float]]:
+    """여러 문장 임베딩. 캐시에 없는 것만 동시에 부른다 (문장마다 약 0.1초라 순서대로면 합이 된다).
+    하나라도 실패하면 ClovaError. 분당 60회 한도라 한 번에 MAX_PARALLEL 개까지만."""
+    if len(texts) <= 1:
+        return [embed(t) for t in texts]
+    with ThreadPoolExecutor(max_workers=min(MAX_PARALLEL, len(texts))) as pool:
+        return list(pool.map(embed, texts))
 
 
 def chat(

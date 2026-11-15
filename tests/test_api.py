@@ -403,3 +403,46 @@ def test_tiers_item_photo(client, photos):
     body = client.get("/api/v1/tiers?metric=quiet&month=10").json()
     items = {i["name"]: i for t in body["tiers"] for i in t["items"]}
     assert items["강릉시"]["photo"]["url"] == "https://r2.example/d.webp"
+
+
+# ───────────── 검색 속도 (분해 캐시 · 미리 받기) ─────────────
+
+
+def test_parse_caches_llm_result_only(monkeypatch):
+    from django.core.cache import cache
+
+    from core import clova
+
+    cache.clear()
+    calls = []
+
+    def chat(system, user):
+        calls.append(user)
+        return '{"month": 10, "pieces": ["바다 근처"]}'
+
+    monkeypatch.setattr(clova, "chat", chat)
+    assert engine.parse("10월 바다") == ({"month": 10, "pieces": ["바다 근처"]}, "llm")
+    assert engine.parse("10월 바다") == ({"month": 10, "pieces": ["바다 근처"]}, "llm")
+    assert len(calls) == 1
+
+    def down(system, user):
+        raise clova.ClovaError("CLOVA HTTP 500")
+
+    monkeypatch.setattr(clova, "chat", down)
+    assert engine.parse("가을에 조용한 곳")[1] == "rule"
+    monkeypatch.setattr(clova, "chat", chat)
+    assert engine.parse("가을에 조용한 곳")[1] == "llm"  # 규칙 파서 결과는 캐시하지 않았다
+
+
+def test_warm_question_off_without_key():
+    assert engine.warm_question("질문") is None  # 테스트 설정은 CLOVA 키가 없다
+
+
+def test_warm_question_fills_embedding_cache(settings, monkeypatch):
+    from core import clova
+
+    settings.CLOVA_API_KEY = "test-key"
+    got = []
+    monkeypatch.setattr(clova, "embed", lambda text: got.append(text))
+    engine.warm_question("10월 바다").result()
+    assert got == ["10월 바다"]

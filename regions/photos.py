@@ -77,3 +77,28 @@ def one_per_unit(scope: str, unit_ids: list[int], month: int | None) -> dict[int
             u: {"photoId": pid, "url": url, "credit": credit}
             for u, pid, url, credit in cur.fetchall()
         }
+
+
+def one_per_dong(pairs: list[tuple[int, int]], month: int | None) -> dict[int, dict]:
+    """[(dong_id, region_id)] 마다 대표 사진 1장을 쿼리 한 번에. {dong_id: {photoId, url, credit}}
+    dong_photos(limit=1) 과 같은 순서: 그 동 사진 먼저, 없으면 소속 시군구 사진."""
+    if not pairs:
+        return {}
+    sql = f"""
+        SELECT DISTINCT ON (t.dong_id) t.dong_id, p.photo_id, p.url, p.credit
+          FROM unnest(%(dongs)s::int[], %(regions)s::int[]) AS t(dong_id, region_id)
+          JOIN photo p ON p.status = 'approved'
+                      AND ((p.scope = 'dong' AND p.unit_id = t.dong_id)
+                        OR (p.scope = 'region' AND p.unit_id = t.region_id))
+         ORDER BY t.dong_id, CASE WHEN p.scope = 'dong' THEN 0 ELSE 1 END, {_ORDER}, random()"""
+    params = {
+        "dongs": [d for d, _ in pairs],
+        "regions": [r for _, r in pairs],
+        "month": month,
+    }
+    with connection.cursor() as cur:
+        cur.execute(sql, params)
+        return {
+            d: {"photoId": pid, "url": url, "credit": credit}
+            for d, pid, url, credit in cur.fetchall()
+        }

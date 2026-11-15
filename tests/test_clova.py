@@ -53,3 +53,26 @@ def test_embed_failure_is_not_cached(monkeypatch, embed_calls):
         clova.embed("조용한 동네")
     key = "emb:clova-embedding-v2:" + hashlib.sha1("조용한 동네".encode()).hexdigest()
     assert cache.get(key) is None
+
+
+def test_embed_many_keeps_order_and_uses_cache(monkeypatch, embed_calls):
+    def fake_post(path, payload, timeout):
+        embed_calls.append(payload["text"])
+        return {"embedding": [float(len(payload["text"]))]}
+
+    monkeypatch.setattr(clova, "_post", fake_post)
+    clova.embed("가")
+    out = clova.embed_many(["가", "나다", "라마바"])
+    assert out == [[1.0], [2.0], [3.0]]
+    assert sorted(embed_calls) == ["가", "나다", "라마바"]  # "가" 는 캐시라 한 번만
+
+
+def test_embed_many_raises_if_any_fails(monkeypatch, embed_calls):
+    def fake_post(path, payload, timeout):
+        if payload["text"] == "실패":
+            raise clova.ClovaError("CLOVA HTTP 500")
+        return {"embedding": [0.0]}
+
+    monkeypatch.setattr(clova, "_post", fake_post)
+    with pytest.raises(clova.ClovaError):
+        clova.embed_many(["성공", "실패"])
