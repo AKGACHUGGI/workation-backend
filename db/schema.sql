@@ -596,3 +596,26 @@ COMMENT ON COLUMN dong_answer.facts_hash IS '프롬프트(사실 + 정규화한 
 COMMENT ON COLUMN dong_answer.source     IS 'llm(전부 생성 통과) · mixed(일부 규칙 문장) · rule(전부 규칙 문장)';
 
 ALTER TABLE dong_answer            ENABLE ROW LEVEL SECURITY;
+
+-- ───────────────────────── 개인화 랭킹 행동 기록 (2026-11-15) ─────────────────────────
+-- migrations/20261115_user-event.sql 과 같은 DDL. 계산은 웹이 하고 서버는 기록과 viewCount 집계만 한다.
+
+CREATE TABLE IF NOT EXISTS user_event (
+  id          BIGSERIAL    PRIMARY KEY,
+  anon_id     UUID         NOT NULL,
+  user_id     UUID         REFERENCES app_user (user_id) ON DELETE SET NULL,
+  kind        VARCHAR(16)  NOT NULL,
+  target      VARCHAR(10),
+  payload     JSONB,
+  created_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  CHECK (kind IN ('search', 'region_view', 'dong_view'))
+);
+CREATE INDEX IF NOT EXISTS user_event_anon_idx   ON user_event (anon_id, created_at);
+CREATE INDEX IF NOT EXISTS user_event_target_idx ON user_event (kind, target, created_at);
+COMMENT ON TABLE  user_event         IS '사용자 행동 기록 (개인화 랭킹). 계산은 웹, 서버는 기록과 viewCount 집계';
+COMMENT ON COLUMN user_event.anon_id IS '브라우저 익명 ID (localStorage)';
+COMMENT ON COLUMN user_event.user_id IS '로그인 뒤 연결. 지금은 NULL';
+COMMENT ON COLUMN user_event.target  IS 'region_view: 시군구 코드 5자리, dong_view: 행정동 코드 10자리, search: NULL';
+COMMENT ON COLUMN user_event.payload IS 'search: {q, preset, terrain, month}, view: {sigunguId, snapshot}';
+
+ALTER TABLE user_event             ENABLE ROW LEVEL SECURITY;

@@ -2,18 +2,26 @@
 
 화면 데이터는 /api/v1 과 같은 DB · 같은 점수 계산(metrics/scoring.py)을 쓰고
 모양만 웹 계약에 맞춘다.
-아직 데이터가 없는 것(랜드마크 · 접근 안내 · 팁 · 투표 · 즐겨찾기 · 조회수 · 로그인)은 빈 값이다.
+아직 데이터가 없는 것(랜드마크 · 접근 안내 · 팁 · 투표 · 즐겨찾기 · 로그인)은 빈 값이다.
 NMF 계절 · 활동 유형과 저녁 잔차는 DB 에 없어 월별 혼잡과 24시간 곡선으로 만든 근사값이다.
 """
 
 from __future__ import annotations
 
+import json
+import logging
 import re
+import uuid
 from datetime import date
 from statistics import mean
 
+from django.db import connection, transaction
+from django.db.utils import ProgrammingError
 from rest_framework.decorators import api_view
+from rest_framework.exceptions import ParseError, Throttled
 from rest_framework.response import Response
+from rest_framework.throttling import AnonRateThrottle
+from rest_framework.views import APIView
 
 from core.errors import bad_request, error, not_found
 from metrics import scoring
@@ -21,6 +29,9 @@ from regions.models import DayGroup, Dong, DongHourly, Region
 from regions.photos import dong_photos, region_photos
 from search import engine
 from webapi import data
+from webapi.models import UserEvent
+
+logger = logging.getLogger(__name__)
 
 
 def _month(request):
@@ -98,6 +109,7 @@ def popular(request):
     regions = data.regions_by_id()
     scores = scoring.unit_scores("region", month)
     photos = data.one_photo_per_unit("region", list(regions), month)
+    views = _view_counts()
     items = [
         {
             "id": r.sigungu_code,
@@ -107,12 +119,146 @@ def popular(request):
             "tags": data.tag_labels(r.tags, 3),
             "terrain": data.terrain_of(r.tags),
             "scores": data.web_scores(scores.get(rid, {})),
-            "favoriteCount": 0,  # 즐겨찾기 · 조회 집계는 로그인 · 조회 로그가 생기면 채운다
-            "viewCount": 0,
+            "favoriteCount": 0,  # 즐겨찾기 집계는 로그인이 생기면 채운다
+            "viewCount": views.get(r.sigungu_code, 0),
         }
         for rid, r in sorted(regions.items())
     ]
     return Response({"month": month_str, "asOf": date.today().isoformat(), "items": items})
+
+
+def _view_counts() -> dict[str, int]:
+    """시군구 코드 → 최근 30일 region_view 를 남긴 서로 다른 익명 ID 수.
+
+    user_event 표가 아직 없는 DB(Supabase 에 migration 적용 전)에서도 인기 지역이 깨지지 않게
+    세이브포인트 안에서 읽고, 표가 없으면 경고만 남기고 빈 집계(모두 0)를 돌려준다.
+    """
+    try:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute(
+                "SELECT target, COUNT(DISTINCT anon_id) FROM user_event"
+                " WHERE kind = 'region_view' AND created_at >= now() - interval '30 days'"
+                " GROUP BY target"
+            )
+            return dict(cur.fetchall())
+    except ProgrammingError as ex:
+        logger.warning("조회수 집계 실패 (user_event 표 확인 필요): %s", ex)
+        return {}
+
+
+# ───────────────────────── 개인화 랭킹 행동 기록 ─────────────────────────
+
+# kind → target 형식. search 는 target 이 없다 (null)
+EVENT_TARGET = {
+    "search": None,
+    "region_view": re.compile(r"[0-9]{5}"),  # 시군구 코드
+    "dong_view": re.compile(r"[0-9]{10}"),  # 행정동 코드
+}
+PAYLOAD_MAX_BYTES = 2048
+
+
+class EventsBurstThrottle(AnonRateThrottle):
+    scope = "events_burst"
+
+
+class EventsDayThrottle(AnonRateThrottle):
+    scope = "events_day"
+
+
+def _is_uuid4(value) -> bool:
+    """하이픈 넣은 표준 표기의 UUID v4 인지 (crypto.randomUUID() 형식)."""
+    if not isinstance(value, str):
+        return False
+    try:
+        parsed = uuid.UUID(value)
+    except ValueError:
+        return False
+    return parsed.version == 4 and str(parsed) == value.lower()
+
+
+def _has_nul(value) -> bool:
+    """키·문자열 값 어딘가에 NUL 문자가 있는지. PostgreSQL jsonb 는 NUL 을 받지 않는다."""
+    if isinstance(value, str):
+        return "\x00" in value
+    if isinstance(value, dict):
+        return any(_has_nul(k) or _has_nul(v) for k, v in value.items())
+    if isinstance(value, list):
+        return any(_has_nul(v) for v in value)
+    return False
+
+
+def _payload_error(payload) -> str | None:
+    """payload 는 객체 또는 null, 직렬화 2048바이트 이하, 저장 가능한 값만."""
+    if payload is None:
+        return None
+    if not isinstance(payload, dict):
+        return "payload 는 객체 또는 null 입니다."
+    try:
+        text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    except ValueError:  # 1e999 같은 inf · nan
+        return "payload 의 숫자는 유한한 값이어야 합니다."
+    try:
+        size = len(text.encode())
+    except UnicodeEncodeError:  # 짝 없는 서로게이트 (\ud800 등)
+        return "payload 에 UTF-8 로 쓸 수 없는 문자가 있습니다."
+    if size > PAYLOAD_MAX_BYTES:
+        return f"payload 는 {PAYLOAD_MAX_BYTES}바이트 이하입니다."
+    if _has_nul(payload):
+        return "payload 에 NUL 문자를 넣을 수 없습니다."
+    return None
+
+
+def _event_error(body) -> str | None:
+    """POST /api/events 본문 검증. 문제가 있으면 400 메시지, 없으면 None."""
+    if not isinstance(body, dict):
+        return "본문은 JSON 객체입니다."
+    if not _is_uuid4(body.get("anonId")):
+        return "anonId 는 UUID v4 문자열입니다."
+    kind = body.get("kind")
+    if not isinstance(kind, str) or kind not in EVENT_TARGET:
+        return "kind 는 search · region_view · dong_view 중 하나입니다."
+    target, pattern = body.get("target"), EVENT_TARGET[kind]
+    if pattern is None and target is not None:
+        return "search 의 target 은 null 입니다."
+    if pattern is not None and not (isinstance(target, str) and pattern.fullmatch(target)):
+        return "region_view 는 숫자 5자리, dong_view 는 숫자 10자리 target 이 필요합니다."
+    return _payload_error(body.get("payload"))
+
+
+class EventsView(APIView):
+    """POST /api/events. 개인화 랭킹 행동 기록. 웹은 응답을 기다리지 않고 실패도 무시한다.
+
+    429 · 잘못된 JSON 을 공통 오류 모양({"error": {...}})으로 내려고 클래스 뷰
+    (explore ask 와 같은 방식).
+    """
+
+    throttle_classes = [EventsBurstThrottle, EventsDayThrottle]
+
+    def handle_exception(self, exc):
+        if isinstance(exc, Throttled):
+            res = error(429, "TOO_MANY_REQUESTS", "잠시 후 다시 시도해 주세요.")
+            if exc.wait is not None:
+                res["Retry-After"] = str(int(exc.wait))
+            return res
+        if isinstance(exc, ParseError):
+            return bad_request("본문은 JSON 객체입니다.")
+        return super().handle_exception(exc)
+
+    def post(self, request):
+        body = request.data
+        message = _event_error(body)
+        if message:
+            return bad_request(message)
+        UserEvent.objects.create(
+            anon_id=body["anonId"],
+            kind=body["kind"],
+            target=body.get("target"),
+            payload=body.get("payload"),
+        )
+        return Response(status=204)
+
+
+events = EventsView.as_view()
 
 
 # ───────────────────────── W-03 지역 상세 ─────────────────────────
@@ -335,7 +481,9 @@ def empty_poll(request, **kwargs):
 
 @api_view(["POST"])
 def record_view(request, **kwargs):
-    """W-03 조회 기록. 인기 지역 조회수 집계 테이블이 생기기 전까지는 받기만 한다."""
+    """예전 W-03 조회 기록 엔드포인트. 웹은 이제 POST /api/events 로 조회를 기록하고
+    viewCount 도 그 기록(user_event)으로 센다. 이 엔드포인트는 이전 클라이언트 호환용으로
+    받기만 한다."""
     return Response(status=204)
 
 
