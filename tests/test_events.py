@@ -7,7 +7,7 @@ from django.db import connection
 
 from tests.test_api import data  # noqa: F401
 from webapi.models import UserEvent
-from webapi.views import EventsBurstThrottle
+from webapi.views import EventsBurstThrottle, EventsDayThrottle, events
 
 AID = "9b2f6c1e-3d4a-4c5b-8e7f-0a1b2c3d4e5f"
 AID_B = "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f"
@@ -80,6 +80,9 @@ def test_region_target_must_be_five_digits(client, data):  # noqa: F811
     assert post(client, view(target="5182a")).status_code == 400
     assert post(client, view(target="５１８２０")).status_code == 400  # 전각 숫자
     assert post(client, view(target=51820)).status_code == 400
+    assert post(client, view(target="5182025300")).status_code == 400  # region_view 에 10자리
+    dong_five = view() | {"kind": "dong_view", "target": "51820"}  # dong_view 에 5자리
+    assert post(client, dong_five).status_code == 400
     assert UserEvent.objects.count() == 0
 
 
@@ -100,7 +103,40 @@ def test_payload_size_limit_is_inclusive(client, data):  # noqa: F811
 def test_payload_nul_rejected(client, data):  # noqa: F811
     body = {"anonId": AID, "kind": "search", "target": None, "payload": {"q": "a\u0000b"}}
     assert post(client, body).status_code == 400
+    in_key = body | {"payload": {"a\u0000": 1}}
+    assert post(client, in_key).status_code == 400
+    nested = body | {"payload": {"q": ["ok", {"x": "\u0000"}]}}
+    assert post(client, nested).status_code == 400
     assert UserEvent.objects.count() == 0
+
+
+def test_payload_literal_backslash_u0000_ok(client, data):  # noqa: F811
+    # 사용자가 글자 그대로 친 백슬래시 u0000 은 NUL 이 아니다
+    body = {"anonId": AID, "kind": "search", "target": None, "payload": {"q": "a\\u0000b"}}
+    assert post(client, body).status_code == 204
+    assert UserEvent.objects.get().payload == {"q": "a\\u0000b"}
+
+
+def raw_post(client, text):
+    return client.post("/api/events", text, content_type="application/json")
+
+
+def test_payload_lone_surrogate_rejected(client, data):  # noqa: F811
+    text = f'{{"anonId":"{AID}","kind":"search","target":null,"payload":{{"q":"\\ud800"}}}}'
+    assert raw_post(client, text).status_code == 400
+    assert UserEvent.objects.count() == 0
+
+
+def test_payload_infinite_number_rejected(client, data):  # noqa: F811
+    text = f'{{"anonId":"{AID}","kind":"search","target":null,"payload":{{"x":1e999}}}}'
+    assert raw_post(client, text).status_code == 400
+    assert UserEvent.objects.count() == 0
+
+
+def test_malformed_json_is_common_bad_request(client, data):  # noqa: F811
+    r = raw_post(client, '{"anonId": ')
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "BAD_REQUEST"
 
 
 def test_payload_must_be_object_or_null(client, data):  # noqa: F811
@@ -122,9 +158,29 @@ def test_popular_view_count(client, data):  # noqa: F811
     assert all(it["viewCount"] == 0 for k, it in items.items() if k != "51820")
 
 
+def test_popular_without_user_event_table(client, data):  # noqa: F811
+    # Supabase 에 migration 적용 전: 표가 없어도 인기 지역은 200, viewCount 0
+    # (테스트 트랜잭션이 끝나면 이름 바꾼 것도 되돌아간다)
+    with connection.cursor() as cur:
+        cur.execute("ALTER TABLE user_event RENAME TO user_event_missing")
+    r = client.get("/api/regions/popular")
+    assert r.status_code == 200
+    assert {it["viewCount"] for it in r.json()["items"]} == {0}
+
+
 def test_events_throttled(client, data, monkeypatch):  # noqa: F811
     # DRF 는 한도 표를 클래스 로드 때 묶어 두므로 settings 대신 클래스 속성 rate 를 둔다
     # (SimpleRateThrottle 은 rate 가 있으면 scope 한도를 읽지 않는다)
     monkeypatch.setattr(EventsBurstThrottle, "rate", "2/min", raising=False)
-    codes = [post(client, view()).status_code for _ in range(3)]
-    assert codes == [204, 204, 429]
+    responses = [post(client, view()) for _ in range(3)]
+    assert [r.status_code for r in responses] == [204, 204, 429]
+    # explore ask 와 같은 공통 오류 모양 + Retry-After
+    assert responses[2].json()["error"]["code"] == "TOO_MANY_REQUESTS"
+    assert int(responses[2]["Retry-After"]) > 0
+
+
+def test_events_has_burst_and_day_throttles(client, data, monkeypatch):  # noqa: F811
+    assert events.cls.throttle_classes == [EventsBurstThrottle, EventsDayThrottle]
+    monkeypatch.setattr(EventsDayThrottle, "rate", "1/day", raising=False)
+    codes = [post(client, view()).status_code for _ in range(2)]
+    assert codes == [204, 429]
