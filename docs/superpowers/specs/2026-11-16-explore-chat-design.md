@@ -3,7 +3,7 @@
 - 작성일: 2026-11-16
 - 상태: 초안 (브레인스토밍 결과, 사용자 검토 대기)
 - 바탕 문서: [탐색 v6.1 동네에 물어보기](./2026-11-13-explore-ask-design.md) — 의도 사전·사실·검증·캐시·throttle 을 그대로 쓴다
-- 바탕 코드: `main` 의 PR #14 (`69bb214`, `explore/ask.py` · `ask_match.py` · `ask_calc.py`). `chore/remove-explore-ask` 브랜치(질문 API 제거)는 합치지 않는다
+- 바탕 코드: `main` 의 PR #14 (`69bb214`, `explore/ask.py` · `ask_match.py` · `ask_calc.py`). PR #20(질문 API 제거)이 먼저 `main` 에 합쳐져서, 채팅이 쓰는 내부 코드(`ask.py` · `ask_match.py` · `ask_calc.py` · `sources` 의 의도 사전·답 저장 · `clear_answers` · throttle 설정)만 되살리고 `/dongs/{id}/ask` API 와 질문 기록(`log_question`)은 지운 채 둔다(2026-11-17)
 - 근거 실측: `_notes/2026-11-16-compare-summary/` (팀 분석 보고서, `bench/proto_personal*.md`, LangChain·체크포인터 확인)
 - 웹 짝 문서: 이 문서 §9 를 바탕으로 workation-web 에 따로 쓴다
 

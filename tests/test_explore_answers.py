@@ -2,8 +2,6 @@
 ask_vocab 은 vector 컬럼이라 테스트 DB 에 없다 → vector 를 뺀 같은 표를 테스트 안에서 만든다.
 nearest_vocab(pgvector)은 여기서 확인하지 않는다 (질문 답 테스트에서 바꿔 끼운다)."""
 
-import json
-
 import pytest
 from django.db import connection
 
@@ -67,17 +65,6 @@ def test_load_answer_failure_returns_none(jumunjin, caplog):
         cur.execute("ALTER TABLE dong_answer RENAME TO dong_answer_x")
     assert sources.load_answer("5115025000", "quiet", H1) is None
     assert "dong_answer 조회 실패" in caplog.text
-
-
-def test_log_question(db, caplog):
-    parsed = {"scope": "dong_ask", "dong": "5115025000", "intents": ["quiet"], "top_sim": 0.84}
-    sources.log_question("이 동네 조용해?" + "요" * 400, parsed)
-    ((query, saved),) = rows("SELECT query, parsed::text FROM nl_search_log")
-    assert len(query) == 300 and json.loads(saved) == parsed
-    with connection.cursor() as cur:
-        cur.execute("ALTER TABLE nl_search_log RENAME TO nl_search_log_x")
-    sources.log_question("또 물어봐요", parsed)  # 예외 없이 지나간다
-    assert "nl_search_log 기록 실패" in caplog.text
 
 
 def test_delete_old_answers(jumunjin):

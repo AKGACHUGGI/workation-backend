@@ -352,18 +352,6 @@ def save_answer(
         logger.warning("dong_answer 저장 실패: %s", ex)
 
 
-def log_question(question: str, parsed: dict) -> None:
-    """nl_search_log 에 질문과 해석 결과 (사전 보강용). 실패는 무시한다."""
-    try:
-        with transaction.atomic(), connection.cursor() as cur:
-            cur.execute(
-                "INSERT INTO nl_search_log (query, parsed) VALUES (%s, %s::jsonb)",
-                [question[:300], json.dumps(parsed, ensure_ascii=False)],
-            )
-    except DatabaseError as ex:
-        logger.warning("nl_search_log 기록 실패: %s", ex)
-
-
 def delete_old_answers(days: int = 60) -> int:
     """만든 지 days 일이 지난 답을 지운다 (그래프가 바뀌면 쓰이지 않는 행). 지운 행 수."""
     with connection.cursor() as cur:

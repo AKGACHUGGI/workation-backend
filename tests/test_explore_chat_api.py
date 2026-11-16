@@ -3,7 +3,7 @@
 
 import pytest
 
-from explore import ask_match, sources, views
+from explore import ask_match, views
 from explore.chat import arrange, flow, llm
 from explore.chat import data as chat_data
 from explore.graphdb import GraphUnavailable
@@ -27,11 +27,6 @@ def world(settings, monkeypatch):
     )
     monkeypatch.setattr(views, "answer_one", lambda *a: (["한 동 답이에요."], "llm"))
     monkeypatch.setattr(llm, "enabled", lambda: False)
-
-    def no_log(*a):
-        raise AssertionError("채팅은 질문 원문을 기록하지 않는다")
-
-    monkeypatch.setattr(sources, "log_question", no_log)
 
 
 def post(client, question="여의동이랑 비교하면?", **body):
@@ -111,3 +106,11 @@ def test_burst_throttle(client):
     assert res.status_code == 429
     assert res.json()["error"]["code"] == "TOO_MANY_REQUESTS"
     assert int(res["Retry-After"]) > 0
+
+
+def test_old_ask_endpoint_is_gone(client):
+    # PR #20 대로 동네에 물어보기 API 는 없다. 채팅이 대신한다
+    res = client.post(
+        f"/api/explore/dongs/{HYOJA}/ask", {"question": "조용해?"}, "application/json"
+    )
+    assert res.status_code == 404
