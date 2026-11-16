@@ -174,7 +174,7 @@ def test_events_throttled(client, data, monkeypatch):  # noqa: F811
     monkeypatch.setattr(EventsBurstThrottle, "rate", "2/min", raising=False)
     responses = [post(client, view()) for _ in range(3)]
     assert [r.status_code for r in responses] == [204, 204, 429]
-    # explore ask 와 같은 공통 오류 모양 + Retry-After
+    # 공통 오류 모양 + Retry-After
     assert responses[2].json()["error"]["code"] == "TOO_MANY_REQUESTS"
     assert int(responses[2]["Retry-After"]) > 0
 

@@ -44,7 +44,7 @@ class SafeRedisCache(RedisCache):
             return False
 
     def delete_pattern(self, pattern: str) -> int:
-        """`explore:ask:a:*` 처럼 앞부분이 같은 키를 지운다. 지운 개수, Redis 가 죽었으면 0."""
+        """`static:*` 처럼 앞부분이 같은 키를 지운다. 지운 개수, Redis 가 죽었으면 0."""
         client = self._cache.get_client(write=True)
         try:
             keys = list(client.scan_iter(match=self.make_key(pattern), count=500))
