@@ -13,6 +13,7 @@ from rest_framework.views import APIView
 from core import clova
 from core.errors import error
 from explore import ask, ask_match, queries, sources
+from explore.chat import data as chat_data
 from explore.graphdb import GraphUnavailable
 
 logger = logging.getLogger(__name__)
@@ -78,17 +79,6 @@ def _chat(system: str, user: str) -> str:
     return clova.chat(system, user, max_tokens=300, temperature=0.3, timeout=CHAT_TIMEOUT)
 
 
-def _raw(dong_id: str) -> dict | None:
-    """fetch_dong 원재료 1시간 캐시. 없는 동(None)은 캐시하지 않는다. GraphUnavailable 은 위로."""
-    key = f"explore:dong:raw:{dong_id}"
-    raw = cache.get(key)
-    if raw is None:
-        raw = queries.fetch_dong(dong_id)
-        if raw is not None:
-            cache.set(key, raw, TTL)
-    return raw
-
-
 class DongAsk(APIView):
     """POST /api/explore/dongs/{id}/ask {"question"}. 429 를 공통 오류 모양으로 내려고 클래스 뷰."""
 
@@ -111,7 +101,7 @@ class DongAsk(APIView):
         if not 1 <= len(question) <= MAX_QUESTION:
             return error(400, "QUESTION_INVALID", "질문은 1~100자로 적어 주세요.")
         try:
-            raw = _raw(dong_id)
+            raw = chat_data.dong_raw(dong_id)
         except GraphUnavailable as ex:
             logger.warning("탐색 그래프 조회 실패 ask %s: %s", dong_id, ex)
             return error(503, "GRAPH_UNAVAILABLE", "탐색 데이터를 불러오지 못했어요.")

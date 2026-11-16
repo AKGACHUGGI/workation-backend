@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 from django.db import DatabaseError, connection, transaction
 
+from explore import derive
 from explore.derive import TypeScore
 from explore.graph import DongRow, GraphInput, RegionRow
 
@@ -199,6 +200,42 @@ def load_brief_targets() -> list[tuple[int, str]]:
               JOIN dong_type_score t ON t.dong_id = d.dong_id
              WHERE {DONG_OK} ORDER BY d.dong_id"""
     )
+
+
+def load_dong_names() -> list[tuple[str, str, str, str]]:
+    """채팅 동 이름 사전 (adm_code, 동 이름, 시군구 코드, 시군구 이름). 탐색 대상 동만."""
+    return _rows(
+        f"""SELECT d.adm_code, d.dong_name, r.sigungu_code, r.sigungu_name
+              FROM dong d JOIN region r ON r.region_id = d.region_id
+             WHERE {DONG_OK}
+               AND EXISTS (SELECT 1 FROM dong_type_score t WHERE t.dong_id = d.dong_id)
+             ORDER BY d.dong_id"""
+    )
+
+
+def load_metric_vecs() -> dict[str, tuple[tuple[float, ...], bool]]:
+    """adm_code → (연간 metric_vec, 바닷가 여부). 채팅 닮음 백분위용.
+
+    derive.metric_vec 와 같은 정의다.
+    """
+    values: dict[int, dict[str, float]] = defaultdict(dict)
+    for d, key, score, raw in _rows(
+        """SELECT unit_id, metric_key, score, raw_value FROM metric
+            WHERE scope = 'dong' AND month = 0
+              AND metric_key IN ('quiet', 'peer', 'evening', 'local_life')"""
+    ):
+        value = raw if key == "local_life" else score
+        if value is not None:
+            values[d][key] = value
+    out = {}
+    for d, code, km in _rows(
+        f"SELECT dong_id, adm_code, coast_dist_km FROM dong d WHERE {DONG_OK}"
+    ):
+        v = values.get(d, {})
+        if all(k in v for k in ("quiet", "peer", "evening", "local_life")):
+            vec = derive.metric_vec(v["quiet"], v["peer"], v["evening"], v["local_life"])
+            out[code] = (vec, derive.is_coastal(_float(km)))
+    return out
 
 
 def load_brief_hashes() -> dict[int, str]:
