@@ -226,8 +226,7 @@ def _event_error(body) -> str | None:
 class EventsView(APIView):
     """POST /api/events. 개인화 랭킹 행동 기록. 웹은 응답을 기다리지 않고 실패도 무시한다.
 
-    429 · 잘못된 JSON 을 공통 오류 모양({"error": {...}})으로 내려고 클래스 뷰
-    (explore ask 와 같은 방식).
+    429 · 잘못된 JSON 을 공통 오류 모양({"error": {...}})으로 내려고 클래스 뷰.
     """
 
     throttle_classes = [EventsBurstThrottle, EventsDayThrottle]

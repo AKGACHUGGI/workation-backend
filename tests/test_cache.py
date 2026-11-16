@@ -36,8 +36,6 @@ def test_redis_url_selects_safe_redis_cache():
 def test_test_settings_use_locmem_and_throttle_rates():
     assert settings.CACHES["default"]["BACKEND"] == LOCMEM
     assert settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] == {
-        "explore_ask_burst": "10/min",
-        "explore_ask_day": "200/day",
         "events_burst": "60/min",
         "events_day": "2000/day",
     }
@@ -52,7 +50,7 @@ def test_safe_redis_cache_survives_redis_down(caplog):
         down.set("k", 1)
         assert down.add("k", 1) is False
         assert down.delete("k") is False
-        assert down.delete_pattern("explore:ask:a:*") == 0
+        assert down.delete_pattern("static:*") == 0
     assert "Redis 읽기 실패" in caplog.text and "Redis 쓰기 실패" in caplog.text
 
 
