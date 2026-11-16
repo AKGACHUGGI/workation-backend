@@ -31,10 +31,11 @@ services:
       timeout: 5s
       retries: 30
 
-  # 캐시 (홈 검색 · 탐색 · throttle 공용). 앱은 REDIS_URL=redis://localhost:6379/0
-  # 단위 테스트는 Redis 없이 돈다 (settings_test 는 메모리 캐시)
+  # 캐시 (홈 검색 · 탐색 · throttle 공용) + 탐색 채팅 대화 기억(LangGraph 체크포인터).
+  # 체크포인터가 RedisJSON · RediSearch 를 써서 8 이상이 필요하다 (7 은 FT.INFO 없음으로 시작 실패)
+  # 앱은 REDIS_URL=redis://localhost:6379/0. 단위 테스트는 Redis 없이 돈다 (settings_test 는 메모리 캐시)
   redis:
-    image: redis:7
+    image: redis:8
     command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
     ports:
       - "127.0.0.1:6379:6379"
