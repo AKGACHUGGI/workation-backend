@@ -61,11 +61,12 @@ class Deps:
 
 
 def settle_intents(found: list[str], prev: list[str], named: bool, count: int) -> list[str]:
-    """의도를 못 찾았고(unknown_other) 질문에 동 이름이 있으면 직전 의도를 잇는다.
-    직전 의도도 없거나 답할 수 없는 의도였으면, 비교 중일 때 compare_summary."""
-    if found != ["unknown_other"] or not named:
+    """의도를 못 찾았고(unknown_other) 질문에 동 이름이 있으면 직전 의도를 잇는다("교1동은?").
+    그 밖에 비교 중(동 2개 이상)이면 compare_summary — "뭐가 달라?"처럼 사전에 없는 말투도
+    안내 대신 기준 비교로 답한다. 식당·숙소·교통(unknown_place 등)은 그대로 안내."""
+    if found != ["unknown_other"]:
         return found
-    if prev and prev[0] not in ask.UNKNOWN:
+    if named and prev and prev[0] not in ask.UNKNOWN:
         return prev
     return ["compare_summary"] if count >= 2 else found
 

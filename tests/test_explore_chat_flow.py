@@ -55,8 +55,21 @@ def test_settle_intents():
     assert flow.settle_intents(["unknown_other"], ["quiet"], True, 2) == ["quiet"]
     assert flow.settle_intents(["unknown_other"], [], True, 2) == ["compare_summary"]
     assert flow.settle_intents(["unknown_other"], ["unknown_place"], True, 2) == ["compare_summary"]
-    assert flow.settle_intents(["unknown_other"], ["quiet"], False, 2) == ["unknown_other"]
+    # 비교 중이면 동 이름이 없어도("뭐가 달라?") 안내 대신 기준 비교
+    assert flow.settle_intents(["unknown_other"], ["quiet"], False, 2) == ["compare_summary"]
+    assert flow.settle_intents(["unknown_other"], ["quiet"], False, 1) == ["unknown_other"]
+    assert flow.settle_intents(["unknown_place"], ["quiet"], False, 2) == ["unknown_place"]
     assert flow.settle_intents(["weekend_hours"], ["quiet"], True, 2) == ["weekend_hours"]
+
+
+def test_unknown_follow_up_in_comparison_compares():
+    graph = flow.build(deps())
+    cid, _ = ask_(graph, "여의동이랑 비교해 줘")
+    _, state = ask_(graph, "뭐가 달라?", cid)
+    assert state["intents"] == ["compare_summary"]
+    assert state["dongs"] == [HYOJA, YEOUI]
+    assert state.get("guide") is None
+    assert state["sentences"]
 
 
 def test_three_turns_carry_dongs_and_intent():
