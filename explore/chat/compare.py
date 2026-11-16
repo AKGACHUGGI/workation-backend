@@ -1,7 +1,7 @@
 """비교 답 (스펙 §6). 순수 함수 — 구조화 생성 함수는 인자로 받는다.
 
 축별 순서(코드 계산)만 프롬프트에 넣고 LLM 은 상황 고르기와 문장만 맡는다.
-문장마다 방향(pick 이 그 축 단독 1등) · 이름 · 숫자 · 금지어 · 모양을 검사하고,
+문장마다 방향(문장 속 동 이름이 그 축 단독 1등) · 이름 · 숫자 · 금지어 · 모양을 검사하고,
 걸린 문장은 그 축의 규칙 문장으로 바꾼다. 근거 줄은 코드가 만든다.
 시각 · 달 · 닮음 비교는 상황을 고를 게 없어 규칙 문장만 쓴다.
 """
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 Generate = Callable[[str, str, type[BaseModel]], BaseModel]
 
-PROMPT_VERSION = "c1"  # 프롬프트 · 검사를 고치면 올린다 (캐시 키에 들어간다)
+PROMPT_VERSION = "c2"  # 프롬프트 · 검사를 고치면 올린다 (캐시 키에 들어간다)
 CACHE_TTL = 24 * 60 * 60  # 비교 답 캐시 1일 (스펙 §7-2)
 JARGON = ("지표", "벡터", "거리", "백분위", "노드", "그래프", "데이터")
 NO_CONCLUSION = ("모두", "둘 다", "셋 다")
@@ -35,8 +35,7 @@ SYSTEM = "\n".join(
         "너는 워케이션 지도 서비스의 동네 비교 안내자다. 사용자가 준 축별 순서만 근거로 쓴다.",
         "- 문장마다 '…을 원한다면 ○○이 맞아요'처럼 상황 하나와 동네 하나를 고른다.",
         "- 존댓말 해요체, 문장마다 60자 이내.",
-        "- 문장마다 다른 axis 를 쓴다. "
-        "pick 은 그 축 순서의 맨 앞 동네이고, 문장 안에 그 이름을 쓴다.",
+        "- 문장마다 다른 axis 를 쓰고, 그 축 순서의 맨 앞 동네 이름 하나만 문장에 쓴다.",
         "- 순서가 '='로 같은 축은 쓰지 않는다.",
         "- 동네 이름에서 받는 인상(읍·면은 시골이라 조용하다 등)이나 상식으로 판단하지 않는다.",
         "- 숫자와 등급 글자(S·A·B·C)를 쓰지 않는다.",
@@ -47,13 +46,14 @@ SYSTEM = "\n".join(
 )
 
 
-def answer_model(axes: list[str], names: list[str]) -> type[BaseModel]:
-    """이번 턴 축 · 동 이름만 고를 수 있는 응답 스키마. direction 은 받지 않는다(스펙 §6-1)."""
+def answer_model(axes: list[str]) -> type[BaseModel]:
+    """이번 턴 축만 고를 수 있는 응답 스키마. direction · pick 은 받지 않는다.
+    고른 동은 문장 속 이름으로 본다(HCX-007 이 문장은 맞게 쓰고 pick 칸만 틀리는 일이 잦았다,
+    2026-11-17 로컬 확인)."""
     sentence = create_model(
         "Sentence",
         text=(str, Field(description="상황별 안내 한 문장. 해요체, 60자 이내, 숫자 없이")),
         axis=(Literal[tuple(axes)], Field(description="이 문장이 쓰는 축")),
-        pick=(Literal[tuple(names)], Field(description="그 축 순서의 맨 앞 동네")),
     )
     return create_model(
         "CompareAnswer",
@@ -80,16 +80,33 @@ def build_prompt(
     return "\n".join(lines)
 
 
+def names_in(text: str, names: list[str]) -> list[str]:
+    """문장에 나온 비교 동 이름, 나온 순서대로.
+    긴 이름부터 찾고 지워서 '신교동' 안의 '교동'을 따로 잡지 않는다."""
+    hits: list[tuple[int, str]] = []
+    for name in sorted(names, key=len, reverse=True):
+        start = text.find(name)
+        while start >= 0:
+            hits.append((start, name))
+            text = text[:start] + "\0" * len(name) + text[start + len(name) :]
+            start = text.find(name, start + len(name))
+    return [name for _, name in sorted(hits)]
+
+
 def problems(s: dict, by_axis: dict[str, Order], names: list[str], seen: set[str]) -> list[str]:
-    """문제 목록. 비어 있으면 통과 (스펙 §6-2)."""
-    text, axis, pick = s["text"], s["axis"], s["pick"]
+    """문제 목록. 비어 있으면 통과 (스펙 §6-2). 문장 속 비교 동 이름이 정확히 하나여야 하고,
+    그 동이 그 축의 단독 1등이어야 한다."""
+    text, axis = s["text"], s["axis"]
     out = []
+    named = list(dict.fromkeys(names_in(text, names)))
     order = by_axis.get(axis)
-    if order is None or order.top != pick:
-        top = order.top if order else None
-        out.append(f"방향: {axis} 1등 {top}, 고른 동 {pick}")
-    if pick not in text:
-        out.append("이름: 문장에 고른 동 이름 없음")
+    top = order.top if order else None
+    if not named:
+        out.append("이름: 문장에 비교 동 이름 없음")
+    elif len(named) > 1:
+        out.append(f"이름: 동 이름 여러 개 {named}")
+    elif top != named[0]:
+        out.append(f"방향: {axis} 1등 {top}, 문장 속 동 {named[0]}")
     if axis in seen:
         out.append("같은 축 중복")
     plain = text
@@ -133,7 +150,7 @@ def compose(
     items: list[dict] = []
     if generate is not None:
         try:
-            reply = generate(SYSTEM, user, answer_model(list(by_axis), names))
+            reply = generate(SYSTEM, user, answer_model(list(by_axis)))
             items = [s.model_dump() for s in reply.sentences]
         except Exception as ex:  # HCX 오류 · 시간 초과 · 스키마 불일치 모두 규칙 문장으로
             logger.warning("비교 답 생성 실패: %s", ex)

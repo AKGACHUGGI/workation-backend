@@ -139,11 +139,7 @@ def test_compare_uses_criteria_and_cache():
     def generate(system, user, schema):
         calls.append(user)
         return schema.model_validate(
-            {
-                "sentences": [
-                    {"text": "바다 가까이라면 여의동이 맞아요.", "axis": "coast", "pick": "여의동"}
-                ]
-            }
+            {"sentences": [{"text": "바다 가까이라면 여의동이 맞아요.", "axis": "coast"}]}
         )
 
     graph = flow.build(deps(generate=generate))

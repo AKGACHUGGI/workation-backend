@@ -12,8 +12,8 @@ H, Y, G = (a.dong_of(RAWS[x]) for x in (HYOJA, YEOUI, GYO))
 NAMES = ["효자2동", "여의동"]
 ORDERS = a.orders([H, Y], ["quiet", "coast"])
 BY_AXIS = {o.axis: o for o in ORDERS}
-GOOD = {"text": "조용한 환경이 우선이면 효자2동이 맞아요.", "axis": "quiet", "pick": "효자2동"}
-COAST = {"text": "바다 가까이 머물고 싶다면 여의동이 맞아요.", "axis": "coast", "pick": "여의동"}
+GOOD = {"text": "조용한 환경이 우선이면 효자2동이 맞아요.", "axis": "quiet"}
+COAST = {"text": "바다 가까이 머물고 싶다면 여의동이 맞아요.", "axis": "coast"}
 
 
 def fake(*sentences, calls=None):
@@ -25,13 +25,12 @@ def fake(*sentences, calls=None):
     return generate
 
 
-def test_answer_model_limits_axis_and_pick():
-    model = c.answer_model(["quiet", "coast"], NAMES)
+def test_answer_model_limits_axis_without_pick():
+    model = c.answer_model(["quiet", "coast"])
+    assert set(model.model_json_schema()["$defs"]["Sentence"]["properties"]) == {"text", "axis"}
     model.model_validate({"sentences": [GOOD]})
     with pytest.raises(pydantic.ValidationError):
         model.model_validate({"sentences": [{**GOOD, "axis": "peer"}]})
-    with pytest.raises(pydantic.ValidationError):
-        model.model_validate({"sentences": [{**GOOD, "pick": "교1동"}]})
     with pytest.raises(pydantic.ValidationError):
         model.model_validate({"sentences": [GOOD, COAST, GOOD]})  # 축 수보다 많음
 
@@ -52,13 +51,14 @@ def test_build_prompt_has_orders_not_user_words():
     ("sentence", "expected"),
     [
         (GOOD, []),
-        ({**GOOD, "text": "조용한 곳을 원하면 여의동이 맞아요.", "pick": "여의동"}, ["방향"]),
+        ({**GOOD, "text": "조용한 곳을 원하면 여의동이 맞아요."}, ["방향"]),
         ({**GOOD, "text": "조용한 곳을 원하면 그쪽이 맞아요."}, ["이름"]),
         ({**GOOD, "text": "조용함 지표로 보면 효자2동이 맞아요."}, ["금지어"]),
         ({**GOOD, "text": "조용함 73점인 효자2동이 맞아요."}, ["숫자"]),
         ({**GOOD, "text": "S등급인 효자2동이 맞아요."}, ["숫자"]),
         ({**GOOD, "text": "조용한 곳은 효자2동"}, ["해요체"]),
         ({**GOOD, "text": "두 곳 모두 효자2동처럼 조용해요."}, ["금지어"]),
+        ({**GOOD, "text": "효자2동이 여의동보다 조용해서 맞아요."}, ["이름"]),
     ],
 )
 def test_problems(sentence, expected):
@@ -67,9 +67,15 @@ def test_problems(sentence, expected):
     assert all(p.startswith(e) for p, e in zip(got, expected, strict=True))
 
 
+def test_names_in_matches_longest_first():
+    assert c.names_in("신교동이 맞아요", ["교동", "신교동"]) == ["신교동"]
+    assert c.names_in("여의동보다 효자2동이 맞아요", NAMES) == ["여의동", "효자2동"]
+    assert c.names_in("그쪽이 맞아요", NAMES) == []
+
+
 def test_problems_tie_and_duplicate():
     (evening,) = a.orders([Y, G], ["evening"])
-    tie = {"text": "저녁 활기를 원하면 여의동이 맞아요.", "axis": "evening", "pick": "여의동"}
+    tie = {"text": "저녁 활기를 원하면 여의동이 맞아요.", "axis": "evening"}
     assert c.problems(tie, {"evening": evening}, ["여의동", "교1동"], set())[0].startswith("방향")
     assert "같은 축 중복" in c.problems(GOOD, BY_AXIS, NAMES, {"quiet"})
 
@@ -102,7 +108,7 @@ def test_compose_all_pass():
 
 
 def test_compose_replaces_wrong_and_fills_missing():
-    wrong = {**GOOD, "text": "조용한 곳을 원하면 여의동이 맞아요.", "pick": "여의동"}
+    wrong = {**GOOD, "text": "조용한 곳을 원하면 여의동이 맞아요."}
     sentences, source = c.compose(fake(wrong), "u", [H, Y], ORDERS)
     assert source == "rule"
     assert [s["text"] for s in sentences] == [
