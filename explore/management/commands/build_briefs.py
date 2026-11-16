@@ -1,4 +1,5 @@
 """동네 브리핑 3문장 생성 (월 배치 ④). sync_graph 다음에 실행한다.
+끝에 60일 지난 동네에 물어보기 답(dong_answer)을 지운다 (그래프가 바뀌어 더는 안 쓰이는 행).
 
 uv run python manage.py build_briefs [--force]
 CLOVA_API_KEY 가 없으면 규칙 문장만 만든다(로컬 개발).
@@ -53,6 +54,7 @@ class Command(BaseCommand):
             f"llm {counts['llm']} · mixed {counts['mixed']} · rule {counts['rule']}"
             f" · 건너뜀 {counts['skip']}"
         )
+        self.stdout.write(f"60일 지난 질문 답 {sources.delete_old_answers()}개 지움")
         if made and counts["rule"] / made > RULE_WARN:
             self.stdout.write(
                 self.style.WARNING(f"규칙 문장만 쓴 동이 {counts['rule']}/{made} (20% 초과)")

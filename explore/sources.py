@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 from django.db import DatabaseError, connection, transaction
 
+from explore import derive
 from explore.derive import TypeScore
 from explore.graph import DongRow, GraphInput, RegionRow
 
@@ -201,6 +202,42 @@ def load_brief_targets() -> list[tuple[int, str]]:
     )
 
 
+def load_dong_names() -> list[tuple[str, str, str, str]]:
+    """채팅 동 이름 사전 (adm_code, 동 이름, 시군구 코드, 시군구 이름). 탐색 대상 동만."""
+    return _rows(
+        f"""SELECT d.adm_code, d.dong_name, r.sigungu_code, r.sigungu_name
+              FROM dong d JOIN region r ON r.region_id = d.region_id
+             WHERE {DONG_OK}
+               AND EXISTS (SELECT 1 FROM dong_type_score t WHERE t.dong_id = d.dong_id)
+             ORDER BY d.dong_id"""
+    )
+
+
+def load_metric_vecs() -> dict[str, tuple[tuple[float, ...], bool]]:
+    """adm_code → (연간 metric_vec, 바닷가 여부). 채팅 닮음 백분위용.
+
+    derive.metric_vec 와 같은 정의다.
+    """
+    values: dict[int, dict[str, float]] = defaultdict(dict)
+    for d, key, score, raw in _rows(
+        """SELECT unit_id, metric_key, score, raw_value FROM metric
+            WHERE scope = 'dong' AND month = 0
+              AND metric_key IN ('quiet', 'peer', 'evening', 'local_life')"""
+    ):
+        value = raw if key == "local_life" else score
+        if value is not None:
+            values[d][key] = value
+    out = {}
+    for d, code, km in _rows(
+        f"SELECT dong_id, adm_code, coast_dist_km FROM dong d WHERE {DONG_OK}"
+    ):
+        v = values.get(d, {})
+        if all(k in v for k in ("quiet", "peer", "evening", "local_life")):
+            vec = derive.metric_vec(v["quiet"], v["peer"], v["evening"], v["local_life"])
+            out[code] = (vec, derive.is_coastal(_float(km)))
+    return out
+
+
 def load_brief_hashes() -> dict[int, str]:
     return dict(_rows("SELECT dong_id, facts_hash FROM dong_brief"))
 
@@ -235,3 +272,100 @@ def fetch_briefing(adm_code: str) -> list[str]:
         return []
     # Django 의 psycopg 백엔드는 jsonb 를 문자열로 돌려준다 → ::text 로 읽어 직접 푼다
     return json.loads(row[0]) if row else []
+
+
+# ───────────────────────── 동네에 물어보기 (v6.1) ─────────────────────────
+# ask_vocab 은 vector 컬럼이라 테스트 DB 에 없다. pgvector SQL 은 nearest_vocab 하나에만 둔다.
+# 답 저장·질문 기록이 실패해도 답은 내려간다 → savepoint 안에서 실행하고 경고만 남긴다.
+
+
+def _vector(v: list[float]) -> str:
+    return "[" + ",".join(f"{x:.6f}" for x in v) + "]"
+
+
+def nearest_vocab(vec: list[float], k: int = 5) -> list[tuple[str, str, float]]:
+    """질문 임베딩에 가까운 사전 표현 k개 (intent, phrase, 코사인 유사도), 가까운 순. pgvector."""
+    q = _vector(vec)
+    return [
+        (intent, phrase, float(sim))
+        for intent, phrase, sim in _rows(
+            """SELECT intent, phrase, 1 - (embedding <=> %s::vector) AS sim
+                 FROM ask_vocab WHERE embedding IS NOT NULL
+                ORDER BY embedding <=> %s::vector LIMIT %s""",
+            [q, q, k],
+        )
+    ]
+
+
+def load_vocab() -> list[tuple[str, str, bool]]:
+    """문자열 매칭용 사전 전체 (intent, phrase, canonical). 임베딩이 없어도 읽는다."""
+    return _rows("SELECT intent, phrase, canonical FROM ask_vocab ORDER BY intent, phrase")
+
+
+def vocab_version() -> str:
+    """사전 버전 = max(updated_at) 의 epoch 초 문자열. 비어 있으면 "0". 캐시 키에 쓴다."""
+    sql = "SELECT coalesce(extract(epoch FROM max(updated_at))::bigint, 0) FROM ask_vocab"
+    return str(_rows(sql)[0][0])
+
+
+def load_answer(adm_code: str, intents: str, facts_hash: str) -> tuple[list[str], str] | None:
+    """저장된 답 (sentences, source). 없거나 조회가 실패하면 None (새로 만든다)."""
+    try:
+        with transaction.atomic():
+            rows = _rows(
+                """SELECT a.sentences::text, a.source FROM dong_answer a
+                     JOIN dong d ON d.dong_id = a.dong_id
+                    WHERE d.adm_code = %s AND a.intents = %s AND a.facts_hash = %s""",
+                [adm_code, intents, facts_hash],
+            )
+    except DatabaseError as ex:
+        logger.warning("dong_answer 조회 실패: %s", ex)
+        return None
+    return (json.loads(rows[0][0]), rows[0][1]) if rows else None
+
+
+def save_answer(
+    adm_code: str,
+    intents: str,
+    facts_hash: str,
+    sentences: list[str],
+    source: str,
+    model: str | None,
+) -> None:
+    """같은 (동, 의도, 사실) 행이 있으면 그대로 둔다 (동시에 같은 첫 질문이 와도 안전)."""
+    try:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute(
+                """INSERT INTO dong_answer (dong_id, intents, facts_hash, sentences, source, model)
+                   SELECT d.dong_id, %s, %s, %s::jsonb, %s, %s FROM dong d WHERE d.adm_code = %s
+                   ON CONFLICT (dong_id, intents, facts_hash) DO NOTHING""",
+                [
+                    intents,
+                    facts_hash,
+                    json.dumps(sentences, ensure_ascii=False),
+                    source,
+                    model,
+                    adm_code,
+                ],
+            )
+    except DatabaseError as ex:
+        logger.warning("dong_answer 저장 실패: %s", ex)
+
+
+def delete_old_answers(days: int = 60) -> int:
+    """만든 지 days 일이 지난 답을 지운다 (그래프가 바뀌면 쓰이지 않는 행). 지운 행 수."""
+    with connection.cursor() as cur:
+        cur.execute(
+            "DELETE FROM dong_answer WHERE created_at < now() - make_interval(days => %s)", [days]
+        )
+        return cur.rowcount
+
+
+def clear_answers(source: str | None = None) -> int:
+    """manage.py clear_answers. source 가 있으면 그 출처 행만 지운다. 지운 행 수."""
+    with connection.cursor() as cur:
+        if source is None:
+            cur.execute("DELETE FROM dong_answer")
+        else:
+            cur.execute("DELETE FROM dong_answer WHERE source = %s", [source])
+        return cur.rowcount

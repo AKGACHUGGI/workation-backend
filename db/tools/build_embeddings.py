@@ -135,9 +135,9 @@ def doc(src: Path, prefix: str) -> None:
     write_chunks(prefix, head, rows, [])
 
 
-# 동네에 물어보기 의도. 앞 10개는 답할 수 있는 의도(대표 질문 1개), 뒤 4개는 고정 안내 (스펙 §3)
+# 동네에 물어보기 의도. 앞 11개는 대표 질문이 1개 있는 의도(compare_summary 는 v7 채팅), 뒤 4개는 고정 안내
 ASK_ANSWERABLE = ("weekday_hours", "weekend_hours", "months", "quiet", "peer", "evening",
-                  "type", "coast", "life", "similar")
+                  "type", "coast", "life", "similar", "compare_summary")
 ASK_UNKNOWN = ("unknown_place", "unknown_stay", "unknown_transport", "unknown_other")
 
 

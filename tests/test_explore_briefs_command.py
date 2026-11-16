@@ -29,6 +29,7 @@ def saved(monkeypatch):
     monkeypatch.setattr(sources, "load_brief_hashes", lambda: {})
     monkeypatch.setattr(sources, "save_brief", lambda *args: rows.append(args))
     monkeypatch.setattr(queries, "fetch_dong", lambda code: jumunjin_raw())
+    monkeypatch.setattr(sources, "delete_old_answers", lambda: 2)
     return rows
 
 
@@ -43,6 +44,7 @@ def test_with_clova(settings, monkeypatch, saved):
     monkeypatch.setattr(build_briefs, "chat", lambda s, u: json.dumps(GOOD, ensure_ascii=False))
     text = run()
     assert "llm 1 · mixed 0 · rule 0" in text
+    assert "60일 지난 질문 답 2개 지움" in text
     dong_id, sentences, source, model, digest = saved[0]
     assert (dong_id, source, model) == (116, "llm", "HCX-005")
     assert sentences[1] == "강릉시는 2·4·9월이 가장 한산하고 8월이 가장 붐벼요."

@@ -118,9 +118,11 @@ REST_FRAMEWORK = {
     "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],
     "UNAUTHENTICATED_USER": None,
     # IP 당 한도 (뷰의 throttle scope). 카운터는 위 CACHES
-    # events_*: 개인화 랭킹 행동 기록
+    # explore_ask_*: 동네에 물어보기. events_*: 개인화 랭킹 행동 기록
     # (화면 이동마다 많아야 한 건이라 사람은 닿지 않고 스크립트 남용만 막는다)
     "DEFAULT_THROTTLE_RATES": {
+        "explore_ask_burst": "10/min",
+        "explore_ask_day": "200/day",
         "events_burst": "60/min",
         "events_day": "2000/day",
     },
