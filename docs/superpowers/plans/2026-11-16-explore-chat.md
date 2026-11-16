@@ -506,7 +506,10 @@ def test_likeness_percentile_and_bucket():
     assert len(pairs.same) == 3 and len(pairs.every) == 6
     assert a.likeness("a", "b", VECS, pairs) == (34, "보통 정도로 닮은 편")
     assert a.likeness("a", "c", VECS, pairs) == (100, "꽤 다른 편")
-    assert a.likeness("a", "d", VECS, pairs) == (50, "보통 정도로 닮은 편")  # 바닷가가 다르면 전체 쌍
+    assert a.likeness("a", "d", VECS, pairs) == (
+        50,
+        "보통 정도로 닮은 편",
+    )  # 바닷가가 다르면 전체 쌍
     assert a.likeness("a", "zz", VECS, pairs) is None
 
 
@@ -546,9 +549,11 @@ def test_choose_axes_priority():
         "peer",
     ]
     # 웹 키 vibe → evening, crowd 는 동 축이 없어 버림, 남은 자리는 등급 차 큰 축
-    assert a.choose_axes(
-        crit(metric={"crowd": 0.9, "vibe": 0.5, "quiet": 0.2}), [H, Y], False
-    ) == ["evening", "quiet", "peer"]
+    assert a.choose_axes(crit(metric={"crowd": 0.9, "vibe": 0.5, "quiet": 0.2}), [H, Y], False) == [
+        "evening",
+        "quiet",
+        "peer",
+    ]
     # 바다 관심 > 최근 본 동 연결 > 등급 차
     assert a.choose_axes(crit(terrain={"coast": 0.5, "city": 0.2}), [H, Y], True) == [
         "coast",
@@ -1023,7 +1028,9 @@ def test_hours_months_similarity_link():
     )
     vecs = {HYOJA: ((0.1, 0.1, 0.1, 0.5), False), YEOUI: ((0.2, 0.1, 0.1, 0.5), False),
             GYO: ((0.9, 0.9, 0.9, 0.1), False)}  # fmt: skip
-    got = c.similarity_sentences(raws, ["평일 9시 한산", "저녁 활기 S"], vecs, a.pair_distances(vecs))
+    got = c.similarity_sentences(
+        raws, ["평일 9시 한산", "저녁 활기 S"], vecs, a.pair_distances(vecs)
+    )
     assert got[0]["text"] == "효자2동과 여의동은 분위기가 보통 정도로 닮은 편이에요."
     assert got[0]["evidence"] == "두 동네 닮음: 전국 동네 쌍 중 가까운 쪽 34%"
     assert got[1]["text"] == "공통점은 평일 9시 한산 · 저녁 활기 S예요."
@@ -1292,7 +1299,9 @@ def months_sentences(raws: list[dict]) -> list[dict]:
         return [_rule(ask.NO_DATA)]
     sgg = rec["region"]["name"]
     names = "·".join(r["rec"]["dong"]["name"] for r in raws)
-    text = f"{josa(names)} 같은 {josa(sgg, '이라/라')} {'·'.join(map(str, quiet))}월이 가장 한산해요."
+    text = (
+        f"{josa(names)} 같은 {josa(sgg, '이라/라')} {'·'.join(map(str, quiet))}월이 가장 한산해요."
+    )
     return [_rule(text, f"월별 붐빔은 {sgg} 단위 값이에요")]
 
 
@@ -1601,7 +1610,9 @@ def load_metric_vecs() -> dict[str, tuple[tuple[float, ...], bool]]:
         if value is not None:
             values[d][key] = value
     out = {}
-    for d, code, km in _rows(f"SELECT dong_id, adm_code, coast_dist_km FROM dong d WHERE {DONG_OK}"):
+    for d, code, km in _rows(
+        f"SELECT dong_id, adm_code, coast_dist_km FROM dong d WHERE {DONG_OK}"
+    ):
         v = values.get(d, {})
         if all(k in v for k in ("quiet", "peer", "evening", "local_life")):
             vec = derive.metric_vec(v["quiet"], v["peer"], v["evening"], v["local_life"])
@@ -1796,9 +1807,7 @@ def ask_(graph, question, cid=None, panel=HYOJA, criteria=None):
 def test_settle_intents():
     assert flow.settle_intents(["unknown_other"], ["quiet"], True, 2) == ["quiet"]
     assert flow.settle_intents(["unknown_other"], [], True, 2) == ["compare_summary"]
-    assert flow.settle_intents(["unknown_other"], ["unknown_place"], True, 2) == [
-        "compare_summary"
-    ]
+    assert flow.settle_intents(["unknown_other"], ["unknown_place"], True, 2) == ["compare_summary"]
     assert flow.settle_intents(["unknown_other"], ["quiet"], False, 2) == ["unknown_other"]
     assert flow.settle_intents(["weekend_hours"], ["quiet"], True, 2) == ["weekend_hours"]
 
@@ -2075,7 +2084,9 @@ def build(deps: Deps) -> StateGraph:
             sentences = [*sentences, compare.link_sentence(recent_links[0])]
         if not sentences:
             sentences = _sentences([ask.NO_DATA], "rule")
-        logger.info("비교 답 dongs=%s intent=%s axes=%s source=%s", s["dongs"], intent, axes, source)
+        logger.info(
+            "비교 답 dongs=%s intent=%s axes=%s source=%s", s["dongs"], intent, axes, source
+        )
         return {"sentences": sentences, "source": source}
 
     def finish(s: ChatState) -> dict:
@@ -2291,7 +2302,10 @@ def test_unknown_question_guides(client):
         ({"panel": HYOJA, "question": ""}, "QUESTION_INVALID"),
         ({"panel": HYOJA, "question": "가" * 101}, "QUESTION_INVALID"),
         ({"question": "주말엔?"}, "PANEL_INVALID"),
-        ({"panel": HYOJA, "question": "주말엔?", "criteria": {"chips": ["cheap"]}}, "CRITERIA_INVALID"),
+        (
+            {"panel": HYOJA, "question": "주말엔?", "criteria": {"chips": ["cheap"]}},
+            "CRITERIA_INVALID",
+        ),
     ],
 )
 def test_bad_request(client, payload, code):
