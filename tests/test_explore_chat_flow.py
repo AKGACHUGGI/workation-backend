@@ -2,6 +2,7 @@
 
 import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
+from redisvl.exceptions import RedisSearchError
 
 from explore import ask
 from explore.chat import arrange, flow
@@ -118,9 +119,17 @@ def test_other_panel_starts_new_conversation():
     assert state["dongs"] == [YEOUI]
 
 
-def test_redis_error_runs_without_memory(monkeypatch):
+@pytest.mark.parametrize(
+    "error",
+    [
+        RedisConnectionError("down"),
+        # search 모듈 없는 Redis (Homebrew redis 등): 체크포인터 setup 이 FT.INFO 에서 실패
+        RedisSearchError("unknown command 'FT.INFO'"),
+    ],
+)
+def test_redis_error_runs_without_memory(monkeypatch, error):
     def broken():
-        raise RedisConnectionError("down")
+        raise error
 
     monkeypatch.setattr(flow, "saver", broken)
     cid, state = ask_(flow.build(deps()), "여의동이랑 비교해 줘")

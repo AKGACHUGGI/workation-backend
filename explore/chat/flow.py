@@ -23,6 +23,7 @@ from django.core.cache import cache
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from redis.exceptions import RedisError
+from redisvl.exceptions import RedisVLError
 
 from explore import ask
 from explore.chat import arrange, compare
@@ -188,7 +189,8 @@ _lock = threading.Lock()
 
 def saver():
     """REDIS_URL 이 있으면 RedisSaver(redis:8), 없으면 메모리. 처음 쓸 때 한 번 만들고 setup 한다.
-    Redis 가 죽어 있으면 RedisError 가 나고, 다음 요청에서 다시 만든다."""
+    Redis 가 죽어 있으면 RedisError, search · JSON 모듈이 없는 Redis(Homebrew redis 등)면
+    RedisVLError 가 나고, 다음 요청에서 다시 만든다."""
     global _saver
     with _lock:
         if _saver is None:
@@ -210,7 +212,8 @@ def run(
     graph: StateGraph, conversation_id: str | None, panel: str, question: str, criteria: dict
 ) -> tuple[str, dict]:
     """(대화 id, 끝난 상태). 없는 대화이거나 패널이 다르면 새 id.
-    체크포인터(Redis) 오류면 기억 없이 한 번 더 실행한다 (스펙 §7-1)."""
+    체크포인터(Redis) 오류면 기억 없이 한 번 더 실행한다 (스펙 §7-1).
+    모듈 없는 Redis 도 여기로 온다 — 답은 하고 대화만 이어지지 않는다."""
     inp = {"question": question, "panel": panel, "criteria": criteria}
     try:
         app = graph.compile(checkpointer=saver())
@@ -222,7 +225,7 @@ def run(
         cid = cid or uuid.uuid4().hex
         state = app.invoke(inp, {"configurable": {"thread_id": cid}}, durability="exit")
         return cid, state
-    except RedisError as ex:
+    except (RedisError, RedisVLError) as ex:
         logger.warning("채팅 대화 기억(Redis) 실패 → 기억 없이 답함: %s", ex)
         return conversation_id or uuid.uuid4().hex, graph.compile().invoke(inp)
 
