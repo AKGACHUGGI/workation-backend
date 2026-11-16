@@ -22,6 +22,7 @@ CANONICAL = {
     "coast": "바다가 가까워?",
     "life": "생활권이야, 관광지야?",
     "similar": "비슷한 동네는 어디야?",
+    "compare_summary": "두 동네를 비교해 줘",
 }
 
 
@@ -50,6 +51,8 @@ def test_seed_follows_spec(tool):
     assert phrases["방값 비싸?"] == "unknown_stay"
     assert phrases["주차 돼?"] == "unknown_transport"
     assert phrases["치안 괜찮아?"] == "unknown_other"
+    assert phrases["둘 중 어디가 나아?"] == "compare_summary"
+    assert phrases["둘이 비슷해?"] == "similar"
 
 
 def test_read_ask_rejects_bad_csv(tool, tmp_path):

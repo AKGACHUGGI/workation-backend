@@ -59,6 +59,16 @@ similar,여기랑 닮은 동네 있어?,false
 similar,분위기 비슷한 곳 추천해 줘,false
 similar,여기 말고 비슷한 데는?,false
 similar,이런 느낌 다른 동네 알려 줘,false
+similar,둘이 비슷해?,false
+similar,두 동네 닮았어?,false
+compare_summary,두 동네를 비교해 줘,true
+compare_summary,비교해 줘,false
+compare_summary,둘 중 어디가 나아?,false
+compare_summary,뭐가 달라?,false
+compare_summary,어디가 더 나아?,false
+compare_summary,차이가 뭐야?,false
+compare_summary,셋 중엔 어디가 맞아?,false
+compare_summary,나한테는 어디가 맞아?,false
 unknown_place,밥먹기 좋아?,false
 unknown_place,맛집 있어?,false
 unknown_place,카페 많아?,false

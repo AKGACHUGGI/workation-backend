@@ -67,6 +67,11 @@ GUIDE = {
         f"{_SEES} 그 질문엔 아직 답하기 어려워요. 이런 건 알려 드릴 수 있어요.",
         [CANONICAL["quiet"], CANONICAL["months"], CANONICAL["similar"]],
     ),
+    # 동 1개에서 비교를 물으면 (탐색 v7 채팅 스펙 §5-1). 동 2~3개면 채팅이 비교 답을 만든다
+    "compare_summary": (
+        "다른 동네 이름과 함께 물어봐 주세요. 같은 시군구 안의 동네끼리 비교할 수 있어요.",
+        [CANONICAL["quiet"], CANONICAL["type"], CANONICAL["similar"]],
+    ),
 }
 
 # 의도 → 쓰는 사실 id 앞부분 (스펙 §3-1 표)

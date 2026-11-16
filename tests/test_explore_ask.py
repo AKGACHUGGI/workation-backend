@@ -50,7 +50,7 @@ def facts_of(raw, intents):
 def test_intent_tables_match_spec():
     assert len(ask.INTENTS) == 10 and len(ask.UNKNOWN) == 4
     assert set(ask.CANONICAL) == set(ask.INTENTS) == set(ask.INTENT_FACTS)
-    assert set(ask.GUIDE) == set(ask.UNKNOWN)
+    assert set(ask.GUIDE) == set(ask.UNKNOWN) | {"compare_summary"}
     assert all(len(examples) == 3 for _, examples in ask.GUIDE.values())
     assert ask.GUIDE["unknown_place"][0] == (
         "이 지도는 동네의 붐빔과 분위기를 보고 있어서 식당·카페는 아직 몰라요. "
@@ -271,3 +271,9 @@ def test_type_rule_without_representative_type():
         "뚜렷하게 맞는 유형은 없어요.",
         "몰입형 20점 · 네트워킹형 35점 · 로컬살이형 39점이에요.",
     ]
+
+
+def test_compare_summary_is_a_guide_for_one_dong():
+    text, examples = ask.GUIDE["compare_summary"]
+    assert "다른 동네 이름과 함께" in text
+    assert ask.examples_for(["compare_summary"]) == examples
