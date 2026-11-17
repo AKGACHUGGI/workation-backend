@@ -49,7 +49,7 @@
 START
   → load_context      체크포인트에서 패널 동·비교 동네·직전 의도를 읽는다 (LangGraph 가 자동)
   → resolve_dongs     질문 속 동 이름 → 패널 동과 같은 시군구 사전에서 찾기 (§4)
-  → find_intent       임베딩 → ask_vocab (v6.1). 못 찾았고 동 이름이 있으면 직전 의도 이어받기, 그 밖에 비교 중이면 compare_summary
+  → find_intent       임베딩 → ask_vocab (v6.1). 못 찾았고 동 이름이 있으면 직전 의도 이어받기(없으면 비교 중 compare_summary), 동 이름이 없으면 안내
   → route ─┬─ guide           unknown_* · 다른 시군구 · 동 1개에 compare_summary → 안내 문구 → END
            └─ fetch_graph     동마다 fetch_dong + 공통점·축별 순서·닮음 정리 (§5)
                 → route_mode ─┬─ single_answer   동 1개: v6.1 ask.answer 그대로
@@ -255,7 +255,7 @@ v6.1 의도 14개(답할 수 있는 10 + `unknown_*` 4)에 둘을 더한다. `as
 HCX·Redis·Neo4j 없이(가짜 채팅 함수·`InMemorySaver`·고정 그래프 결과).
 
 - 동네 찾기: 같은 시군구 이름, 띄어쓰기 변형, 다른 시군구 → guide, 시군구 이름만 → guide, 이름 없음 → 직전 동 이어받기, 4개 이상 → 3개
-- 의도: 못 찾음 + 동 이름 → 직전 의도, 못 찾음 + 비교 중 → compare_summary, 동 1개 + `compare_summary` → guide
+- 의도: 못 찾음 + 동 이름 → 직전 의도(없으면 비교 중 compare_summary), 못 찾음 + 동 이름 없음 → 안내(비교 중이어도), 동 1개 + `compare_summary` → guide
 - 축 고르기: 칩 > 지표 관심 > 지형 > 최근 본 동 > 등급 차 순서, 중복 없음
 - 축별 순서·동점, 공통점 n개, 닮음 백분위 구간
 - 검사: 문장 속 동 ≠ 1등 → 규칙, 문장 속 동 이름 없음·여러 개 → 규칙, 전문 용어 → 규칙, 끊긴 문장 → 규칙, 동점 축 규칙 문장
