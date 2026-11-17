@@ -119,7 +119,7 @@ def build(deps: Deps) -> StateGraph:
             if intent == "months":
                 out = compare.months_sentences(raws)
             elif intent == "similar":
-                common = arrange.common(raws)
+                common = arrange.common_items(raws)
                 out = compare.similarity_sentences(raws, common, deps.vecs(), deps.pairs())
             else:
                 out = compare.hours_sentences(raws, intent.split("_")[0])
@@ -152,7 +152,7 @@ def build(deps: Deps) -> StateGraph:
         return {"sentences": sentences, "source": source}
 
     def finish(s: ChatState) -> dict:
-        sentences = s.get("sentences") or []
+        sentences = [{**x, "text": compare.tidy(x["text"])} for x in s.get("sentences") or []]
         if s.get("note"):
             sentences = [*_sentences([s["note"]], "rule"), *sentences]
         return {

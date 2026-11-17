@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 from collections.abc import Callable
 from typing import Literal
 
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 Generate = Callable[[str, str, type[BaseModel]], BaseModel]
 
-PROMPT_VERSION = "c2"  # 프롬프트 · 검사를 고치면 올린다 (캐시 키에 들어간다)
+PROMPT_VERSION = "c3"  # 프롬프트 · 검사를 고치면 올린다 (캐시 키에 들어간다)
 CACHE_TTL = 24 * 60 * 60  # 비교 답 캐시 1일 (스펙 §7-2)
 JARGON = ("지표", "벡터", "거리", "백분위", "노드", "그래프", "데이터")
 NO_CONCLUSION = ("모두", "둘 다", "셋 다")
@@ -33,7 +34,11 @@ QUESTION = {"compare_summary": "어느 동네가 나한테 맞아?"}
 SYSTEM = "\n".join(
     [
         "너는 워케이션 지도 서비스의 동네 비교 안내자다. 사용자가 준 축별 순서만 근거로 쓴다.",
-        "- 문장마다 '…을 원한다면 ○○이 맞아요'처럼 상황 하나와 동네 하나를 고른다.",
+        "- 문장마다 상황 하나와 그 상황에 맞는 동네 하나를 고른다.",
+        "- 문장마다 문형을 다르게 쓴다. 예: '조용히 일하고 싶다면 ○○이 맞아요', "
+        "'저녁에 활기를 찾는다면 ○○ 쪽이 나아요', '또래가 많은 곳은 ○○이에요'. "
+        "예시를 그대로 베끼지 말고 상황에 맞게 바꿔 쓴다.",
+        "- 앞 문장과 다른 동네를 고른 문장은 '반면', '대신'으로 시작해도 된다.",
         "- 존댓말 해요체, 문장마다 60자 이내.",
         "- 문장마다 다른 axis 를 쓰고, 그 축 순서의 맨 앞 동네 이름 하나만 문장에 쓴다.",
         "- 순서가 '='로 같은 축은 쓰지 않는다.",
@@ -125,6 +130,29 @@ def problems(s: dict, by_axis: dict[str, Order], names: list[str], seen: set[str
     return out
 
 
+# 문장 끝 합쇼체 → 해요체. 단일 동 답(HCX-005)이 '조용한 편입니다' 처럼 끝나는 일이 있다
+HAEYO = (
+    ("있습니다", "있어요"), ("없습니다", "없어요"), ("많습니다", "많아요"), ("적습니다", "적어요"),
+    ("같습니다", "같아요"), ("좋습니다", "좋아요"), ("합니다", "해요"), ("됩니다", "돼요"),
+)  # fmt: skip
+END = re.compile(r"[.!?]+$")
+
+
+def tidy(text: str) -> str:
+    """답 문장 끝 맞추기: 합쇼체는 해요체로, 마침표가 없으면 붙인다."""
+    body = END.sub("", text.rstrip())
+    mark = text.rstrip()[len(body) :] or "."
+    for formal, haeyo in HAEYO:
+        if body.endswith(formal):
+            body = body[: -len(formal)] + haeyo
+            break
+    else:
+        if body.endswith("입니다") and len(body) > 3:
+            stem = body[:-3]
+            body = josa(stem, "이에요/예요")
+    return body + mark
+
+
 def rule_sentence(o: Order) -> str:
     ko = AXIS_KO[o.axis]
     if o.top is None:
@@ -168,33 +196,67 @@ def compose(
         else:
             done[o.axis] = _item(s["text"], o, by_name, "llm")
     out = [done.get(o.axis) or _item(rule_sentence(o), o, by_name, "rule") for o in orders]
+    out = _fix_contrast(out, names)
     passed = sum(s["source"] == "llm" for s in out)
     source = "llm" if passed == len(out) else "rule" if passed == 0 else "mixed"
     return out, source
+
+
+CONTRAST = ("반면 ", "반면에 ", "대신 ", "하지만 ")
+
+
+def _fix_contrast(items: list[dict], names: list[str]) -> list[dict]:
+    """'반면'·'대신' 은 앞 문장과 다른 동네를 말할 때만 남긴다. 문장은 축 순서로 다시 놓이므로
+    LLM 이 쓴 이음말이 첫 문장이나 같은 동네 뒤에 올 수 있다."""
+    out, prev = [], None
+    for item in items:
+        text = item["text"]
+        named = names_in(text, names)
+        head = next((c for c in CONTRAST if text.startswith(c)), None)
+        if head and (prev is None or named[:1] == prev[:1]):
+            item = {**item, "text": text[len(head) :]}
+        out.append(item)
+        prev = named
+    return out
 
 
 def _rule(text: str, evidence: str | None = None) -> dict:
     return {"text": text, "evidence": evidence, "source": "rule"}
 
 
+def _each(pairs: list[tuple[str, int]], pair: str) -> str:
+    """[(동, 시)] → 'A·B 모두 14시' (모두 같을 때) 또는 'A가 11시, B가 14시'."""
+    if len(pairs) > 1 and len({h for _, h in pairs}) == 1:
+        return f"{'·'.join(n for n, _ in pairs)} 모두 {pairs[0][1]}시"
+    return ", ".join(f"{josa(n, pair)} {h}시" for n, h in pairs)
+
+
 def hours_sentences(raws: list[dict], day: str) -> list[dict]:
-    """동별 나란히: 평일은 붐비는 시각 · 업무시간 한산 시각, 주말은 붐비는 시각만(스펙 §11)."""
+    """동들을 한 문장에 견준다.
+    평일은 붐비는 시각 · 업무시간 한산 시각, 주말은 붐비는 시각만(스펙 §11)."""
     ko = "평일" if day == "weekday" else "주말"
-    out = []
+    peaks, quiets, shown = [], [], []
     for r in raws:
         rec = r["rec"]
         hours = brief._hours(rec)
         peak, quiet = hours.get(("PEAK_AT", day)), hours.get(("QUIET_AT", day))
         if peak is None:
             continue
-        name = josa(rec["dong"]["name"])
-        if day == "weekday" and quiet is not None:
-            text = f"{name} 평일 {peak}시에 가장 붐비고, 업무시간엔 {quiet}시가 한산해요."
-        else:
-            text = f"{name} {ko} {peak}시에 차가 가장 많아요."
-        driv = rec["dong"][f"driv_{day}"][peak]
-        out.append(_rule(text, f"{ko} 차량 이동 인구 가장 많은 시각: {peak}시 {driv}명"))
-    return out or [_rule(ask.NO_DATA)]
+        name = rec["dong"]["name"]
+        peaks.append((name, peak))
+        if quiet is not None:
+            quiets.append((name, quiet))
+        shown.append(f"{name} {peak}시 {rec['dong'][f'driv_{day}'][peak]}명")
+    if not peaks:
+        return [_rule(ask.NO_DATA)]
+    if day == "weekday" and len(quiets) == len(peaks):
+        same = len(quiets) > 1 and len({h for _, h in quiets}) == 1
+        who = ("둘 다" if len(quiets) == 2 else "모두") if same else ""
+        calm = f"{who} {quiets[0][1]}시" if same else _each(quiets, "은/는")
+        text = f"평일엔 {_each(peaks, '이/가')}에 가장 붐비고, 업무시간엔 {calm}가 한산해요."
+    else:
+        text = f"{ko}엔 {_each(peaks, '이/가')}에 차가 가장 많아요."
+    return [_rule(text, f"{ko} 차량 이동 인구 가장 많은 시각: {' · '.join(shown)}")]
 
 
 def months_sentences(raws: list[dict]) -> list[dict]:
@@ -212,7 +274,7 @@ def months_sentences(raws: list[dict]) -> list[dict]:
 
 def similarity_sentences(
     raws: list[dict],
-    common: list[str],
+    common: list[tuple[str, str]],
     vecs: dict[str, tuple[tuple[float, ...], bool]],
     pairs: Pairs,
 ) -> list[dict]:
@@ -232,10 +294,36 @@ def similarity_sentences(
                 f"두 동네 닮음: 전국 동네 쌍 중 가까운 쪽 {pct}%",
             )
         )
-    if common:
-        labels = " · ".join(common[:3])
-        out.append(_rule(f"공통점은 {josa(labels, '이에요/예요')}."))
+    text = common_sentence(common, len(raws))
+    if text:
+        out.append(_rule(text))
     return out or [_rule(ask.NO_DATA)]
+
+
+def common_sentence(items: list[tuple[str, str]], count: int) -> str | None:
+    """공통 사실 [(key, 문구)] → '둘 다 바닷가에 있고, 조용함 수준이 같아요.'
+    등급 글자는 쓰지 않고, 시각별 한산(quiet:*)은 뺀다. 마디는 3개까지."""
+    clauses: list[tuple[str, str]] = []
+    metrics = []
+    for key, label in items:
+        if key.startswith("place:"):
+            clauses.append((f"{label}에 있고", f"{label}에 있어요"))
+        elif key.startswith("life:"):
+            clauses.append((f"{label} 성격이 강하고", f"{label} 성격이 강해요"))
+        elif key.startswith("type:"):
+            name = josa(label.removeprefix("1위 "), "이/가")
+            clauses.append((f"{name} 가장 잘 맞고", f"{name} 가장 잘 맞아요"))
+        elif key.startswith("grade:"):
+            metrics.append(label.rsplit(" ", 1)[0])
+    if metrics:
+        what = "·".join(metrics[:2])
+        clauses.append((f"{what} 수준이 같고", f"{what} 수준이 같아요"))
+    clauses = clauses[:3]
+    if not clauses:
+        return None
+    who = "둘 다" if count == 2 else "셋 다"
+    parts = [c[0] for c in clauses[:-1]] + [clauses[-1][1]]
+    return f"{who} {', '.join(parts)}."
 
 
 def link_sentence(link: Link) -> dict:

@@ -98,8 +98,7 @@ def test_three_turns_carry_dongs_and_intent():
     _, s3 = ask_(graph, "주말엔?", cid)  # 동 이름 없음 → 두 동 이어받기
     assert s3["dongs"] == [HYOJA, YEOUI]
     assert [x["text"] for x in s3["sentences"]] == [
-        "효자2동은 주말 14시에 차가 가장 많아요.",
-        "여의동은 주말 14시에 차가 가장 많아요.",
+        "주말엔 효자2동·여의동 모두 14시에 차가 가장 많아요."
     ]
     assert len(s3["turns"]) == 3
 
