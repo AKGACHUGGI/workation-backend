@@ -11,6 +11,9 @@ from django.conf import settings
 
 AUDIENCE = "authenticated"
 ASYMMETRIC_ALGORITHMS = ["ES256", "RS256"]
+# 서버 간 시계 오차 허용. 이 서버가 Supabase 보다 느리면 갓 발급된 토큰의 iat 가 미래로 보인다.
+# 같은 값이 exp 에도 적용돼 토큰이 30초 늦게 만료된다
+LEEWAY_SECONDS = 30
 
 _jwks_client: jwt.PyJWKClient | None = None
 
@@ -45,6 +48,7 @@ def verify(token: str) -> dict:
             key,
             algorithms=algorithms,
             audience=AUDIENCE,
+            leeway=LEEWAY_SECONDS,
             issuer=f"{settings.SUPABASE_URL}/auth/v1",
             options={"require": ["exp", "sub", "aud", "iss"]},
         )

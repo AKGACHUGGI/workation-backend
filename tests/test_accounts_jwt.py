@@ -25,7 +25,7 @@ def test_valid_token(supabase):  # noqa: F811
 @pytest.mark.parametrize(
     "over",
     [
-        {"exp": int(time.time()) - 10},
+        {"exp": int(time.time()) - 60},  # 허용 오차(30초)를 넘겨 만료
         {"aud": "anon"},
         {"iss": "https://evil.supabase.co/auth/v1"},
     ],
@@ -67,3 +67,13 @@ def test_not_configured(settings):
     settings.SUPABASE_URL = ""
     with pytest.raises(InvalidToken):
         verify(make_token())
+
+
+def test_small_clock_skew_allowed(supabase):  # noqa: F811
+    """이 서버 시계가 Supabase 보다 몇 초 느려도 갓 발급된 토큰(iat 가 미래)을 받는다."""
+    assert verify(make_token(iat=int(time.time()) + 10))["sub"] == USER_ID
+
+
+def test_large_clock_skew_rejected(supabase):  # noqa: F811
+    with pytest.raises(InvalidToken):
+        verify(make_token(iat=int(time.time()) + 120))
