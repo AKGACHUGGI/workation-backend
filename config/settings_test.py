@@ -26,3 +26,9 @@ CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"
 # .env 에 CLOVA 키가 있어도 단위 테스트는 실제 CLOVA 를 부르지 않는다 (CI 와 같게).
 # 키가 필요한 테스트는 settings 픽스처로 직접 켠다
 CLOVA_API_KEY = ""
+
+# .env 에 Supabase 키가 있어도 단위 테스트는 실제 Supabase 를 부르지 않는다.
+# 필요한 테스트는 tests/supabase_tokens.py 의 supabase 픽스처로 켠다
+SUPABASE_URL = ""
+SUPABASE_JWT_SECRET = ""
+SUPABASE_SERVICE_ROLE_KEY = ""
