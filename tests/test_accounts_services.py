@@ -92,7 +92,8 @@ def test_provider_uid_falls_back_to_sub():
 
 @pytest.mark.django_db
 def test_orphan_row_with_same_social_account_replaced():
-    """Supabase 에서만 지워진 옛 계정 행이 같은 (provider, provider_uid) 를 쥐고 있으면 지우고 새로 만든다."""
+    """Supabase 에서만 지워진 옛 계정 행이 같은 (provider, provider_uid) 를 쥐고 있으면
+    지우고 새로 만든다."""
     AppUser.objects.create(
         user_id="00000000-0000-4000-8000-000000000001",
         provider="kakao",
@@ -154,7 +155,11 @@ def test_delete_auth_user_404_is_ok(supabase, monkeypatch):  # noqa: F811
 
 @pytest.mark.parametrize(
     "exc",
-    [urllib.error.HTTPError("u", 500, "err", {}, None), urllib.error.URLError("down"), TimeoutError()],
+    [
+        urllib.error.HTTPError("u", 500, "err", {}, None),
+        urllib.error.URLError("down"),
+        TimeoutError(),
+    ],
     ids=["500", "network", "timeout"],
 )
 def test_delete_auth_user_failure(supabase, monkeypatch, exc):  # noqa: F811

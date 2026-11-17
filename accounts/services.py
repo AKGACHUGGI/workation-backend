@@ -1,4 +1,7 @@
-"""로그인 사용자 관리. 토큰 검증이 끝난 claims 로 app_user 를 만들고, 계정 삭제 때 Supabase 사용자도 지운다."""
+"""로그인 사용자 관리.
+
+토큰 검증이 끝난 claims 로 app_user 를 만들고, 계정 삭제 때 Supabase 사용자도 지운다.
+"""
 
 from __future__ import annotations
 
@@ -53,14 +56,16 @@ def get_or_create_user(claims: dict) -> AppUser:
     provider_uid = str(meta.get("provider_id") or meta.get("sub") or user_id)[:100]
     avatar_url = meta.get("avatar_url") or meta.get("picture")
     with transaction.atomic(), connection.cursor() as cursor:
-        # Supabase 에서만 지워진 옛 계정 행이 같은 소셜 계정을 쥐고 있으면 UNIQUE 충돌이 나므로 지운다
+        # Supabase 에서만 지워진 옛 계정 행이 같은 소셜 계정을 쥐고 있으면
+        # UNIQUE 충돌이 나므로 지운다
         cursor.execute(
             "DELETE FROM app_user WHERE provider = %s AND provider_uid = %s AND user_id <> %s",
             [provider, provider_uid, user_id],
         )
         # 같은 사용자의 첫 요청이 동시에 와도 한 행만 생긴다
         cursor.execute(
-            "INSERT INTO app_user (user_id, provider, provider_uid, nickname, avatar_url, email_masked)"
+            "INSERT INTO app_user"
+            " (user_id, provider, provider_uid, nickname, avatar_url, email_masked)"
             " VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (user_id) DO NOTHING",
             [
                 user_id,

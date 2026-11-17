@@ -489,7 +489,8 @@ def record_view(request, **kwargs):
 
 @api_view(["GET", "PATCH", "DELETE", "POST", "PUT"])
 def unauthorized(request, *args, **kwargs):
-    """로그인 기능 전까지는 항상 로그아웃 상태로 응답한다 (웹은 401 을 로그아웃으로 처리)."""
+    """/api/me/* (마이페이지 W-08) 는 아직 없고 /api/auth/* 는 Supabase 로그인으로 없어졌다.
+    웹은 401 을 로그아웃으로 처리한다."""
     return error(401, "UNAUTHORIZED", "로그인이 필요합니다.")
 
 
