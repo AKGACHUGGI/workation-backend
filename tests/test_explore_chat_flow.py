@@ -56,21 +56,23 @@ def test_settle_intents():
     assert flow.settle_intents(["unknown_other"], ["quiet"], True, 2) == ["quiet"]
     assert flow.settle_intents(["unknown_other"], [], True, 2) == ["compare_summary"]
     assert flow.settle_intents(["unknown_other"], ["unknown_place"], True, 2) == ["compare_summary"]
-    # 비교 중이면 동 이름이 없어도("뭐가 달라?") 안내 대신 기준 비교
-    assert flow.settle_intents(["unknown_other"], ["quiet"], False, 2) == ["compare_summary"]
+    # 비교 중이어도 동 이름이 없으면("안녕") 직전 비교를 되풀이하지 않고 안내
+    assert flow.settle_intents(["unknown_other"], ["quiet"], False, 2) == ["unknown_other"]
+    prev = ["compare_summary"]
+    assert flow.settle_intents(["unknown_other"], prev, False, 2) == ["unknown_other"]
     assert flow.settle_intents(["unknown_other"], ["quiet"], False, 1) == ["unknown_other"]
     assert flow.settle_intents(["unknown_place"], ["quiet"], False, 2) == ["unknown_place"]
     assert flow.settle_intents(["weekend_hours"], ["quiet"], True, 2) == ["weekend_hours"]
 
 
-def test_unknown_follow_up_in_comparison_compares():
+def test_unknown_follow_up_in_comparison_guides():
     graph = flow.build(deps())
     cid, _ = ask_(graph, "여의동이랑 비교해 줘")
-    _, state = ask_(graph, "뭐가 달라?", cid)
-    assert state["intents"] == ["compare_summary"]
+    _, state = ask_(graph, "안녕", cid)
+    assert state["intents"] == ["unknown_other"]
     assert state["dongs"] == [HYOJA, YEOUI]
-    assert state.get("guide") is None
-    assert state["sentences"]
+    assert state["guide"] == ask.GUIDE["unknown_other"][0]
+    assert state["sentences"] == []
 
 
 def test_three_turns_carry_dongs_and_intent():
@@ -96,8 +98,7 @@ def test_three_turns_carry_dongs_and_intent():
     _, s3 = ask_(graph, "주말엔?", cid)  # 동 이름 없음 → 두 동 이어받기
     assert s3["dongs"] == [HYOJA, YEOUI]
     assert [x["text"] for x in s3["sentences"]] == [
-        "효자2동은 주말 14시에 차가 가장 많아요.",
-        "여의동은 주말 14시에 차가 가장 많아요.",
+        "주말엔 효자2동·여의동 모두 14시에 차가 가장 많아요."
     ]
     assert len(s3["turns"]) == 3
 

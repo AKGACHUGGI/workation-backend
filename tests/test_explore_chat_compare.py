@@ -130,30 +130,87 @@ def test_compose_without_llm_or_on_error():
     assert source == "rule" and len(sentences) == 2
 
 
-def test_hours_months_similarity_link():
+def test_hours_sentences_compare_in_one_sentence(monkeypatch):
     raws = [RAWS[HYOJA], RAWS[YEOUI]]
-    assert c.hours_sentences(raws, "weekday")[0] == {
-        "text": "효자2동은 평일 12시에 가장 붐비고, 업무시간엔 9시가 한산해요.",
-        "evidence": "평일 차량 이동 인구 가장 많은 시각: 12시 100명",
-        "source": "rule",
-    }
-    assert c.hours_sentences(raws, "weekend")[1]["text"] == "여의동은 주말 14시에 차가 가장 많아요."
+    assert c.hours_sentences(raws, "weekday") == [
+        {
+            "text": (
+                "평일엔 효자2동·여의동 모두 12시에 가장 붐비고, 업무시간엔 둘 다 9시가 한산해요."
+            ),
+            "evidence": (
+                "평일 차량 이동 인구 가장 많은 시각: 효자2동 12시 100명 · 여의동 12시 100명"
+            ),
+            "source": "rule",
+        }
+    ]
+    assert c.hours_sentences(raws, "weekend")[0]["text"] == (
+        "주말엔 효자2동·여의동 모두 14시에 차가 가장 많아요."
+    )
+    hours = {HYOJA: (11, 9), YEOUI: (14, 10), GYO: (12, 9)}
+
+    def fake_hours(rec):
+        peak, quiet = hours[rec["dong"]["code"]]
+        return {("PEAK_AT", d): peak for d in ("weekday", "weekend")} | {
+            ("QUIET_AT", "weekday"): quiet
+        }
+
+    monkeypatch.setattr(c.brief, "_hours", fake_hours)
+    three = [RAWS[HYOJA], RAWS[YEOUI], RAWS[GYO]]
+    assert c.hours_sentences(three, "weekend")[0]["text"] == (
+        "주말엔 효자2동이 11시, 여의동이 14시, 교1동이 12시에 차가 가장 많아요."
+    )
+    assert c.hours_sentences(raws, "weekday")[0]["text"] == (
+        "평일엔 효자2동이 11시, 여의동이 14시에 가장 붐비고, "
+        "업무시간엔 효자2동은 9시, 여의동은 10시가 한산해요."
+    )
+
+
+def test_months_similarity_link():
+    raws = [RAWS[HYOJA], RAWS[YEOUI]]
     assert c.months_sentences(raws)[0]["text"] == (
         "효자2동·여의동은 같은 전주시라 1·2·8월이 가장 한산해요."
     )
     vecs = {HYOJA: ((0.1, 0.1, 0.1, 0.5), False), YEOUI: ((0.2, 0.1, 0.1, 0.5), False),
             GYO: ((0.9, 0.9, 0.9, 0.1), False)}  # fmt: skip
-    got = c.similarity_sentences(
-        raws, ["평일 9시 한산", "저녁 활기 S"], vecs, a.pair_distances(vecs)
-    )
+    got = c.similarity_sentences(raws, a.common_items(raws), vecs, a.pair_distances(vecs))
     assert got[0]["text"] == "효자2동과 여의동은 분위기가 보통 정도로 닮은 편이에요."
     assert got[0]["evidence"] == "두 동네 닮음: 전국 동네 쌍 중 가까운 쪽 34%"
-    assert got[1]["text"] == "공통점은 평일 9시 한산 · 저녁 활기 S예요."
+    # 시각별 한산은 빼고, 등급 글자 없이 문장으로
+    assert (
+        got[1]["text"]
+        == "둘 다 로컬살이형이 가장 잘 맞고, 생활권 성격이 강하고, 저녁 활기 수준이 같아요."
+    )
     assert c.link_sentence(a.Link("효자2동", "여의동", 2)) == {
         "text": "최근 보신 여의동과 비슷한 쪽은 효자2동이에요.",
         "evidence": "효자2동의 비슷한 동 2위: 여의동",
         "source": "rule",
     }
+
+
+def test_common_sentence():
+    items = [
+        ("quiet:weekend:3", "주말 3시 한산"),
+        ("place:coast", "바닷가"),
+        ("grade:quiet:B", "조용함 B"),
+    ]
+    assert c.common_sentence(items, 2) == "둘 다 바닷가에 있고, 조용함 수준이 같아요."
+    assert c.common_sentence(items, 3) == "셋 다 바닷가에 있고, 조용함 수준이 같아요."
+    assert c.common_sentence([("quiet:weekend:3", "주말 3시 한산")], 2) is None
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("이 동네는 조용한 편입니다.", "이 동네는 조용한 편이에요."),
+        ("바닷가 동네입니다", "바닷가 동네예요."),
+        ("차가 많습니다.", "차가 많아요."),
+        ("주말엔 한산합니다!", "주말엔 한산해요!"),
+        ("조용함을 원한다면 효자2동이 맞아요", "조용함을 원한다면 효자2동이 맞아요."),
+        ("이미 괜찮아요.", "이미 괜찮아요."),
+    ],
+)
+def test_tidy(text, expected):
+    assert c.tidy(text) == expected
 
 
 def test_cache_key_changes_with_prompt_version(monkeypatch):
@@ -170,3 +227,22 @@ def test_llm_client_settings(settings):
     settings.CLOVA_API_KEY = "test-key"
     assert llm.enabled()
     assert llm.client().model_name == "HCX-007"
+
+
+def test_fix_contrast_keeps_connector_only_after_other_dong():
+    def item(text):
+        return {"text": text, "evidence": None, "source": "llm"}
+
+    got = c._fix_contrast(
+        [
+            item("반면 조용히 일하려면 효자2동이 맞아요."),
+            item("반면 또래가 많은 곳은 효자2동이에요."),
+            item("대신 저녁 활기는 여의동이 나아요."),
+        ],
+        NAMES,
+    )
+    assert [x["text"] for x in got] == [
+        "조용히 일하려면 효자2동이 맞아요.",
+        "또래가 많은 곳은 효자2동이에요.",
+        "대신 저녁 활기는 여의동이 나아요.",
+    ]

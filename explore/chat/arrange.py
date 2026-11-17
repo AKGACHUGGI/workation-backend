@@ -151,14 +151,19 @@ def evidence(o: Order, by_name: dict[str, Dong]) -> str:
     return f"{AXIS_KO[o.axis]}: " + " · ".join(show(n, v) for n, v in o.ranked)
 
 
-def common(raws: list[dict]) -> list[str]:
-    """모든 동이 함께 가진 사실 문구. 이어진 동이 적은(드문) 것부터.
+def common_items(raws: list[dict]) -> list[tuple[str, str]]:
+    """모든 동이 함께 가진 사실 [(key, 문구)]. 이어진 동이 적은(드문) 것부터.
     시군구는 뺀다(같은 시군구끼리라 늘 같다)."""
     lists = [queries.fact_list(r["facts"][r["rec"]["dong"]["code"]]) for r in raws]
     keys = set(lists[0]).intersection(*lists[1:])
     keys = {k for k in keys if not k.startswith("region:")}
     first = lists[0]
-    return [first[k][0] for k in sorted(keys, key=lambda k: (first[k][1], k))]
+    return [(k, first[k][0]) for k in sorted(keys, key=lambda k: (first[k][1], k))]
+
+
+def common(raws: list[dict]) -> list[str]:
+    """모든 동이 함께 가진 사실 문구 (LLM 입력용)."""
+    return [label for _, label in common_items(raws)]
 
 
 def links(raws: list[dict], codes: list[str]) -> list[Link]:
