@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 THRESHOLD = 0.68  # 1위 유사도가 이보다 낮으면 unknown_other (홈 검색과 같은 값에서 시작)
 GAP = 0.05  # 2위 의도를 같이 고르는 유사도 차이
 SENTENCES = range(1, 4)  # 생성 문장 수 1~3
-ANSWER_VERSION = 3  # 답 캐시 키에 들어간다. 생성 모델·프롬프트·검사 규칙을 바꾸면 올린다
+ANSWER_VERSION = 4  # 답 캐시 키에 들어간다. 생성 모델·프롬프트·검사 규칙을 바꾸면 올린다
 
 # 답할 수 있는 의도 (스펙 §3-1 표 순서 = 예시 질문 순서)
 INTENTS = (
@@ -116,6 +116,7 @@ LATIN = re.compile(r"[A-Za-z]{2,}")
 TIMES = re.compile(r"\d+(?:\.\d+)?\s*배")  # 배수는 사실에 없는 계산이다
 NORMALIZE = re.compile(r"[\s?.!~]")
 DIGIT = re.compile(r"\d")
+IDIOMS = ("1년",)  # 숫자가 사실 값이 아닌 관용 표현 ('1년 중'). 2026-11-17 실측 오탐 5건
 
 SYSTEM = "\n".join(
     [
@@ -307,10 +308,10 @@ def _clock_problems(text: str, known: list[Fact]) -> list[str]:
 def check_sentence(
     text: str, cited: list[str], facts: dict[str, Fact], names: frozenset[str] = frozenset()
 ) -> list[str]:
-    """문제 목록. 비어 있으면 통과 (스펙 §6). names 속 숫자는 숫자·등급 검사에서만 뺀다.
+    """문제 목록. 비어 있으면 통과 (스펙 §6). names · IDIOMS 속 숫자는 숫자·등급 검사에서만 뺀다.
     숫자를 '#' 로 바꿔 글자 수를 그대로 둔다(60자 검사). 이름 글자 검사(F6 근거어)는 원문으로."""
     masked = text
-    for name in names:
+    for name in (*names, *IDIOMS):
         masked = masked.replace(name, DIGIT.sub("#", name))
     problems = brief.validate_sentence(masked, cited, facts)
     plain = brief.THOUSANDS.sub("", masked)

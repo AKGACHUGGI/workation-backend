@@ -253,6 +253,8 @@ def test_prompt_hash_depends_on_question():
         ("평일엔 10시가 가장 한산해요.", ["F2-1"], "사실에 없는 값: ['10']"),
         ("생활권 성격이 강한 동네예요.", ["F7-1"], None),
         ("관광지 성격이 강해요.", ["F7-1"], "근거어 없음"),
+        ("강릉시는 1년 중 2·4·9월이 가장 한산해요.", ["F3-1"], None),  # 관용 표현
+        ("강릉시는 1월이 가장 한산해요.", ["F3-1"], "사실에 없는 값: ['1']"),
     ],
 )
 def test_check_sentence(text, cited, problem):
@@ -445,6 +447,6 @@ def test_prompt_hash_changes_with_answer_version(monkeypatch):
     assert ask.prompt_hash(facts, "q") != before
 
 
-def test_answer_version_is_3():
-    # 시각 사실 문구와 검사 규칙을 바꿨다 (2026-11-17)
-    assert ask.ANSWER_VERSION == 3
+def test_answer_version_is_4():
+    # 시각 사실 문구와 검사 규칙(시각 · 동 이름 · '1년')을 바꿨다 (2026-11-17)
+    assert ask.ANSWER_VERSION == 4
