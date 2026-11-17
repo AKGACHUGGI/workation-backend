@@ -116,7 +116,19 @@ def test_delete_admin_failure_502_keeps_row(client, supabase, monkeypatch):  # n
     assert AppUser.objects.count() == 1
 
 
-def test_me_subpaths_still_401(client, supabase):  # noqa: F811
-    """즐겨찾기 등 /api/me/* 는 아직 없다 (W-08). 예전 /api/auth/* 도 401."""
-    assert_unauthorized(client.get("/api/me/favorites", **auth()))
+def test_me_subpaths_401_without_login(client, supabase):  # noqa: F811
+    """/api/me/* 는 토큰이 없거나 틀리면 401. 예전 /api/auth/* 도 401."""
+    assert_unauthorized(client.get("/api/me/summary"))
+    assert_unauthorized(client.get("/api/me/summary", **auth(make_token(key=OTHER_KEY))))
     assert_unauthorized(client.get("/api/auth/me"))
+
+
+def test_me_subpaths_501_when_logged_in(client, supabase):  # noqa: F811
+    """즐겨찾기 등 /api/me/* 는 아직 없다 (W-08).
+    로그인 상태면 501 이라 웹이 로그아웃하지 않는다."""
+    get_me(client, **auth())
+    for path in ("/api/me/favorites/ids", "/api/me/summary"):
+        r = client.get(path, **auth())
+        assert r.status_code == 501
+        assert r.json()["error"]["code"] == "NOT_IMPLEMENTED"
+    assert_unauthorized(client.get("/api/auth/me", **auth()))

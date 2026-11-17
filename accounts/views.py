@@ -38,7 +38,9 @@ def serialize_me(user: AppUser) -> dict:
     }
 
 
-class MeView(APIView):
+class LoginAPIView(APIView):
+    """Supabase JWT 로 인증하는 뷰. request.user 는 AppUser 또는 None."""
+
     authentication_classes = [SupabaseJWTAuthentication]
     permission_classes = []
 
@@ -48,6 +50,8 @@ class MeView(APIView):
             return unauthorized()
         return super().handle_exception(exc)
 
+
+class MeView(LoginAPIView):
     def get(self, request):
         if request.auth is None:
             return unauthorized()
@@ -102,3 +106,17 @@ class MeView(APIView):
         # 즐겨찾기 · 팁 등은 DB 의 ON DELETE CASCADE / SET NULL 이 정리한다
         AppUser.objects.filter(user_id=user.user_id).delete()
         return Response(status=204)
+
+
+class MeNotReadyView(LoginAPIView):
+    """아직 없는 /api/me/* (마이페이지 W-08).
+
+    로그인 상태면 501 이라 웹이 세션 만료(401)로 보고 로그아웃하지 않는다.
+    """
+
+    def handle(self, request, *args, **kwargs):
+        if request.user is None:
+            return unauthorized()
+        return error(501, "NOT_IMPLEMENTED", "아직 준비 중인 기능입니다.")
+
+    get = post = put = patch = delete = handle

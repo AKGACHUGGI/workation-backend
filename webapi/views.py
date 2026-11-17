@@ -484,13 +484,12 @@ def record_view(request, **kwargs):
     return Response(status=204)
 
 
-# ───────────────────────── 로그인 · 마이페이지 (미구현) ─────────────────────────
+# ───────────────────────── 예전 로그인 경로 ─────────────────────────
 
 
 @api_view(["GET", "PATCH", "DELETE", "POST", "PUT"])
 def unauthorized(request, *args, **kwargs):
-    """/api/me/* (마이페이지 W-08) 는 아직 없고 /api/auth/* 는 Supabase 로그인으로 없어졌다.
-    웹은 401 을 로그아웃으로 처리한다."""
+    """/api/auth/* 는 Supabase 로그인으로 없어졌다. 웹은 401 을 로그아웃으로 처리한다."""
     return error(401, "UNAUTHORIZED", "로그인이 필요합니다.")
 
 

@@ -16,6 +16,6 @@ urlpatterns = [
     path("dongs/<str:dong_id>", views.dong_detail, name="web-dong"),
     path("search/parse", views.search_parse, name="web-search-parse"),
     path("events", views.events, name="web-events"),
-    # 예전 쿠키 로그인 경로와 아직 없는 마이페이지 하위 API (W-08)
-    re_path(r"^(auth(/.*)?|me/.+)$", views.unauthorized, name="web-auth"),
+    # 예전 쿠키 로그인 경로. /api/me/* 는 accounts 가 받는다
+    re_path(r"^auth(/.*)?$", views.unauthorized, name="web-auth"),
 ]
