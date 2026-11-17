@@ -53,7 +53,7 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
 | `migrations/20261113_explore-ask.sql` + `build_embeddings.py ask` 출력 | 동네에 물어보기 의도 사전 `ask_vocab`(표현 81개 임베딩) · 답 `dong_answer` + RLS | 2026-11-13 |
 | `migrations/20261114_explore-type-3.sql` | 워케이션 유형 3개: `dong_type_score` 장기체류형 행 삭제, CHECK 3유형 · 순위 1~3 | (적용 전) |
 | `migrations/20261115_user-event.sql` | 개인화 랭킹 행동 기록 `user_event` | 미적용 |
-| `migrations/20261117_drop-dong-answer.sql` | 동네에 물어보기 답 `dong_answer` 삭제 (답은 Redis 7일만) | 미적용 |
+| `migrations/20261117_drop-dong-answer.sql` | 동네에 물어보기 답 `dong_answer` 삭제 (답은 Redis 7일만) | 2026-11-17 |
 
 ## 지표 (명세 v0.3 변경안 3장)
 
