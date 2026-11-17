@@ -24,6 +24,7 @@ INSTALLED_APPS = [
     "search",
     "webapi",
     "explore",
+    "accounts",
 ]
 
 MIDDLEWARE = [
@@ -41,6 +42,13 @@ CORS_ALLOWED_ORIGINS = env.list(
 
 # 자연어 검색(HyperCLOVA X · CLOVA 임베딩). 비어 있으면 규칙 파서 · 문자열 매칭으로 동작한다.
 CLOVA_API_KEY = env("CLOVA_API_KEY", default="")
+
+# 로그인 (Supabase Auth). 웹·앱이 Supabase 로 로그인하고 백엔드는 JWT 만 검증한다.
+# SUPABASE_JWT_SECRET 은 레거시 HS256 프로젝트일 때만. 비어 있으면 JWKS(공개키)로 검증
+# SUPABASE_SERVICE_ROLE_KEY 는 계정 삭제(Admin API)에만 쓴다. 프론트에 두지 않는다
+SUPABASE_URL = env("SUPABASE_URL", default="").rstrip("/")
+SUPABASE_JWT_SECRET = env("SUPABASE_JWT_SECRET", default="")
+SUPABASE_SERVICE_ROLE_KEY = env("SUPABASE_SERVICE_ROLE_KEY", default="")
 
 # 탐색 그래프 (Neo4j, Postgres 의 읽기 전용 복사본). 비어 있으면 /api/explore/* 가 503
 NEO4J_URI = env("NEO4J_URI", default="")

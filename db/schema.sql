@@ -335,6 +335,8 @@ CREATE TABLE app_user (
   provider_uid  VARCHAR(100) NOT NULL,
   nickname      VARCHAR(20)  NOT NULL,
   avatar_url    TEXT,
+  email_masked  VARCHAR(100),
+  agreed_at     TIMESTAMPTZ,
   created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
   UNIQUE (provider, provider_uid),
   CHECK (provider IN ('kakao', 'google', 'apple'))
@@ -344,6 +346,8 @@ COMMENT ON COLUMN app_user.provider     IS 'kakao, google, apple';
 COMMENT ON COLUMN app_user.provider_uid IS '소셜 제공자 측 사용자 ID';
 COMMENT ON COLUMN app_user.nickname     IS '닉네임 (공개)';
 COMMENT ON COLUMN app_user.avatar_url   IS '아바타 URL (공개)';
+COMMENT ON COLUMN app_user.email_masked IS '마스킹한 이메일 (du***@kakao.com). 원본은 Supabase auth.users 에만';
+COMMENT ON COLUMN app_user.agreed_at    IS '약관 동의 시각. NULL 이면 온보딩 필요';
 
 CREATE TABLE favorite (
   user_id       UUID         NOT NULL REFERENCES app_user(user_id) ON DELETE CASCADE,
