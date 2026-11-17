@@ -23,9 +23,113 @@ MAX_LEN = 60
 RETRIES = 3  # 첫 호출이 실패하면 3번 더
 COMMON_LATER = 0.3  # 이보다 흔한 사실은 목록 뒤로
 BANNED = ("추천", "최고", "가장 좋", "최적", "강추", "핫플")
+OFF_DATA = ("소음",)  # 지도에 없는 지표. '162위로 낮은 소음도' 같은 말이 붙지 않게
+# 등급 자리. 순위만 주면 LLM 이 '162위'를 좋은 쪽으로 읽는다 (2026-11-17 승주읍 C등급이 '조용한 편')
+GRADE_POS = {
+    "S": "4개 등급 중 가장 높음",
+    "A": "4개 등급 중 두 번째",
+    "B": "4개 등급 중 세 번째",
+    "C": "4개 등급 중 가장 낮음",
+}
+TOP_IS = {"quiet": "가장 조용함", "peer": "또래가 가장 많음", "evening": "저녁 활기가 가장 큼"}
+# 등급마다 결론 하나 (에어코리아 좋음·보통·나쁨처럼 등급 ↔ 라벨 1:1). 판단은 코드가 하고
+# LLM 은 이 문구를 옮기기만 한다. 사실 문구 끝과 규칙 문장에 그대로 쓴다
+LABEL = {
+    "quiet": {"S": "아주 조용한 편", "A": "조용한 편", "B": "보통 수준", "C": "조용하지 않은 편"},
+    "peer": {
+        "S": "또래가 아주 많은 편",
+        "A": "또래가 많은 편",
+        "B": "보통 수준",
+        "C": "또래가 적은 편",
+    },
+    "evening": {
+        "S": "저녁에 아주 활기 있는 편",
+        "A": "저녁에 활기 있는 편",
+        "B": "보통 수준",
+        "C": "저녁 활기가 적은 편",
+    },
+}
+# 브리핑 문장이 F1 을 인용하면 이 표현 중 하나가 있어야 통과한다 (등급 → 높음·보통·낮음).
+# 라벨을 그대로 옮기라고 해도 HCX 는 '또래 밀도가 높은 편'처럼 바꿔 쓴다
+# (2026-11-17 실측 25답 중 24답 탈락)
+SAYS = {
+    ("quiet", "high"): ("조용한 편",),
+    ("quiet", "mid"): ("보통",),
+    ("quiet", "low"): ("조용하지 않은 편", "조용한 편은 아니", "조용한 편이 아니"),
+    ("peer", "high"): ("또래가 많은 편", "또래 밀도가 높은 편"),
+    ("peer", "mid"): ("보통",),
+    ("peer", "low"): ("또래가 적은 편", "또래 밀도가 낮은 편"),
+    ("evening", "high"): (
+        "활기 있는 편",
+        "활기가 있는 편",
+        "활기가 많은 편",
+        "활기가 높은 편",
+        "활기찬 편",
+    ),
+    ("evening", "mid"): ("보통",),
+    ("evening", "low"): ("활기가 적은 편", "활기가 낮은 편"),
+}
+LEVEL = {"S": "high", "A": "high", "B": "mid", "C": "low"}
+# 표현 바로 뒤가 이러면 뜻이 뒤집힌다: '조용한 편은 아니에요' · '보통보다 시끄러워요'
+FLIPPED = re.compile(r"^\s*(?:은|는|이|가)?\s*아니|^보다")
+# 표현 앞(이유 자리)의 말은 인용한 사실 문구에 있어야 한다.
+# '야경 명소가 많아서' 같은 지어낸 이유를 막는다
+WORD = re.compile(r"[가-힣A-Za-z0-9.]+")
+JOSA = re.compile(
+    r"(?:이라서|라서|이어서|여서|이라|라|이고|이며|이지만|지만|이니|으로|로|에서|에선|에는|엔|"
+    r"은|는|이|가|을|를|의|에|도|만|과|와)$"
+)
+FILLER = {
+    "전반적으로", "대체로", "비교적", "꽤", "다소", "조금", "아주", "약간", "그래서", "따라서",
+    "점수", "순위", "이", "이곳", "여기", "동네", "지역", "이는", "참고로",
+}  # fmt: skip
+PLACE = re.compile(r"[가-힣0-9]{2,}[읍면동시군구도]$")  # 중화산2동 · 제주특별자치도
+BECAUSE = ("때문", "덕분", "해서", "라서", "니까")
+
+
+def label(metric: str, grade: str) -> str:
+    return LABEL[metric][grade]
+
+
+def _stray_words(part: str, source: str) -> list[str]:
+    """part 의 말 중 사실 문구(source)에 없는 것. 조사를 떼고 보고, 꾸밈말·지명은 받는다."""
+    out = []
+    for w in WORD.findall(part):
+        stem = JOSA.sub("", w)
+        if w in FILLER or stem in FILLER:
+            continue
+        if PLACE.fullmatch(w) or PLACE.fullmatch(stem):  # '…자치도'의 '도'는 조사가 아니다
+            continue
+        if stem and stem not in source:
+            out.append(w)
+    return out
+
+
+def _grade_problems(text: str, fact: Fact, source: str) -> list[str]:
+    """F1 사실을 인용한 문장: 등급 쪽 표현이 있고, 뒤집히지 않고, 이유가 사실 안의 말인가."""
+    metric, grade = fact.id.removeprefix("F1-"), GRADE_OF.search(fact.text).group(1)
+    for said in SAYS[(metric, LEVEL[grade])]:
+        if said not in text:
+            continue
+        before, after = text.split(said, 1)
+        if FLIPPED.match(after):
+            continue
+        stray = _stray_words(before, source)
+        if any(b in after for b in BECAUSE):
+            stray += _stray_words(after, source)
+        return [f"사실에 없는 이유: {stray}"] if stray else []
+    return [f"결론 문구 없음: {fact.id}"]
+
+
 NUMBER = re.compile(r"\d+(?:\.\d+)?")
 GRADE = re.compile(r"(?<![A-Za-z])[SABC](?![A-Za-z])")
+GRADE_OF = re.compile(r"([SABC])등급")
 THOUSANDS = re.compile(r"(?<=\d),(?=\d{3})")
+
+F1_RULE = (
+    "- 등급 사실(F1)을 쓸 때는 → 뒤 결론을 고치지 말고 그대로 쓴다. "
+    "이유는 그 사실의 등급·점수·순위만 쓴다."
+)
 
 SYSTEM = "\n".join(
     [
@@ -34,6 +138,7 @@ SYSTEM = "\n".join(
         "- 1문장: 하루 흐름(시간대). 2문장: 1년 흐름(한산한 달).",
         "- 3문장: 이 동의 강점(유형·등급). 목록 앞쪽의 드문 사실을 하나 이상 쓴다.",
         "- 목록에 없는 숫자·달·시각·등급·장소 이름·추측을 쓰지 않는다.",
+        F1_RULE,
         "- '추천', '최고', '가장 좋', '최적', '강추', '핫플'을 쓰지 않는다.",
         "- 문장마다 근거로 쓴 사실 id 를 facts 에 적는다.",
         '- JSON 하나만 출력한다: {"sentences": [{"text": "...", "facts": ["F2-1"]}, ...]}',
@@ -86,7 +191,8 @@ def collect_facts(raw: dict) -> list[Fact]:
         facts.append(
             Fact(
                 f"F1-{metric}",
-                f"{ko} {grade}등급 {score}점, 전국 {of}동 중 {rank}위",
+                f"{ko} {grade}등급 {score}점 ({GRADE_POS[grade]}), "
+                f"전국 {of}동 중 {rank}위 (1위가 {TOP_IS[metric]}) → {label(metric, grade)}",
                 _vals(grade, score, of, rank),
                 deg[f"grade:{metric}"] / n,
             )
@@ -180,6 +286,13 @@ def validate_sentence(text: str, cited: list[str], facts: dict[str, Fact]) -> li
     banned = [w for w in BANNED if w in text]
     if banned:
         problems.append(f"금지어: {banned}")
+    off = [w for w in OFF_DATA if w in text]
+    if off:
+        problems.append(f"데이터에 없는 말: {off}")
+    source = " ".join(facts[c].text for c in cited if c in facts)
+    for c in cited:
+        if c.removeprefix("F1-") in LABEL and c in facts:
+            problems += _grade_problems(text, facts[c], source)
     allowed = set().union(*(facts[c].values for c in cited if c in facts))
     plain = THOUSANDS.sub("", text)
     stray = [x for x in NUMBER.findall(plain) + GRADE.findall(plain) if x not in allowed]

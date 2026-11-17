@@ -43,7 +43,10 @@ def test_collect_facts_rare_first():
 
 def test_fact_texts_and_values():
     f = by_id()
-    assert f["F1-evening"].text == "저녁 활기 A등급 62점, 전국 203동 중 78위"
+    assert f["F1-evening"].text == (
+        "저녁 활기 A등급 62점 (4개 등급 중 두 번째), "
+        "전국 203동 중 78위 (1위가 저녁 활기가 가장 큼) → 저녁에 활기 있는 편"
+    )
     assert f["F1-evening"].values == {"A", "62", "203", "78"}
     assert f["F1-evening-sgg"].text == "강릉시 21동 중 저녁 활기 1위"
     assert f["F1-evening-sgg"].common == pytest.approx(12 / 203)
@@ -74,9 +77,9 @@ def test_validate_rejects_months_not_in_facts():
 
 def test_validate_rejects_grade_and_number_not_cited():
     f = by_id()
-    assert brief.validate_sentence("저녁 활기 S등급이에요.", ["F1-evening"], f) == [
-        "사실에 없는 값: ['S']"
-    ]
+    assert "사실에 없는 값: ['S']" in brief.validate_sentence(
+        "저녁 활기 S등급이에요.", ["F1-evening"], f
+    )
     # 62점은 F1-evening 값이라 F1-evening-sgg 만 인용하면 실패
     assert brief.validate_sentence("저녁 활기 62점, 강릉 1위예요.", ["F1-evening-sgg"], f) == [
         "사실에 없는 값: ['62']"

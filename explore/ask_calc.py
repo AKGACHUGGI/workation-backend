@@ -19,6 +19,9 @@ MANY_PCT, FEW_PCT = 85, 50  # 하루 최대 대비 이 % 이상이면 많은 편
 MONTH = re.compile(r"(1[0-2]|[1-9])\s*월")
 HOUR = re.compile(r"(오전|아침|새벽|오후|낮|저녁|밤)?\s*(2[0-3]|1\d|\d)\s*시")
 PM = ("오후", "저녁", "밤")
+# 답 문장 검사용 시각 (스펙 §4). 질문 해석(HOUR)과 달리 접두어가 꼭 있고, 섞인 표기는 None
+CLOCK = re.compile(r"(새벽|오전|아침|낮|오후|저녁|밤)\s*(\d{1,2})\s*시")
+MORNING = ("새벽", "오전", "아침")
 
 
 @dataclass(frozen=True)
@@ -33,6 +36,48 @@ def _hour(prefix: str | None, h: int) -> int:
     if prefix is None and 1 <= h <= 6:  # "3시" 는 보통 오후
         return h + 12
     return h
+
+
+def twelve(h: int) -> int:
+    """24시 → 12시 표기 숫자. 15 → 3, 0·12 → 12."""
+    return h % 12 or 12
+
+
+def clock(h: int) -> str:
+    """24시 → '새벽 2시' · '오전 9시' · '낮 12시' · '오후 3시' · '저녁 7시' · '밤 11시'.
+    0시는 '밤 12시'.
+    오전·오후 판단을 CLOVA 에 맡기면 새벽 2시를 '오후 2시'로 쓴다 (2026-11-17 실측 14건)."""
+    if h == 0:
+        return "밤 12시"
+    if h == 12:
+        return "낮 12시"
+    part = (
+        "새벽" if h < 5 else "오전" if h < 12 else "오후" if h < 18 else "저녁" if h < 21 else "밤"
+    )
+    return f"{part} {twelve(h)}시"
+
+
+def label(h: int) -> str:
+    """사실 문구용: '오후 3시(15시)'. 24시를 괄호에 남겨 '15시'로 물어도 맞춘다."""
+    return f"{clock(h)}({h}시)"
+
+
+def hour_vals(*hours: int) -> frozenset[str]:
+    """시각 사실의 values: 24시와 12시 숫자 둘 다."""
+    return brief._vals(*hours, *(twelve(h) for h in hours))
+
+
+def to_24(prefix: str, h: int) -> int | None:
+    """'오후 3시' → 15. 접두어 뒤 13 이상(오후 15시)은 None."""
+    if h >= 13:
+        return None
+    if prefix in MORNING:
+        return 0 if h == 12 else h
+    if prefix == "낮":
+        return h if h in (0, 11, 12) else h + 12
+    if prefix == "밤":
+        return 0 if h == 12 else h + 12 if h >= 6 else h
+    return h if h == 12 else h + 12  # 오후 · 저녁
 
 
 def _unique(xs: list[int]) -> list[int]:
@@ -111,9 +156,12 @@ def _calc(raw: dict, question: str) -> list[tuple[Fact, str]]:
             v, pv = hours[h], hours[peak]
             pct = round(v / pv * 100)
             level = "많은 편" if pct >= MANY_PCT else "적은 편" if pct <= FEW_PCT else "보통"
-            text = f"{ko} {h}시 차량 이동 인구 {v}명: 하루 최대({peak}시 {pv}명)의 {pct}%, {level}"
-            values = brief._vals(h, v, peak, pv, pct)
-            rule = f"{ko} {h}시 차량은 하루 가장 많은 {peak}시의 {pct}%로 {level}이에요."
+            text = (
+                f"{ko} {label(h)} 차량 이동 인구 {v}명: "
+                f"하루 최대({label(peak)} {pv}명)의 {pct}%, {level}"
+            )
+            values = brief._vals(v, pv, pct) | hour_vals(h, peak)
+            rule = f"{ko} {clock(h)} 차량은 하루 가장 많은 {clock(peak)}의 {pct}%로 {level}이에요."
             out.append((Fact(f"F8-{i}", text, values, 1.0), rule))
     return out
 
