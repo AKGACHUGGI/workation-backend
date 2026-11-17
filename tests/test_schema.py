@@ -25,7 +25,6 @@ EXPECTED_TABLES = {
     "dong_hour_stat",
     "dong_similar",
     "dong_brief",
-    "dong_answer",
 }
 
 
@@ -38,3 +37,4 @@ def test_schema_sql_loaded_into_test_db(db):
         tables = {row[0] for row in cursor.fetchall()}
 
     assert EXPECTED_TABLES <= tables
+    assert "dong_answer" not in tables  # 2026-11-17 제거: 답은 Redis 에만

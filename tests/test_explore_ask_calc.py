@@ -7,6 +7,57 @@ from tests.explore_samples import jumunjin_raw
 
 
 @pytest.mark.parametrize(
+    ("h", "said"),
+    [
+        (0, "밤 12시"),
+        (2, "새벽 2시"),
+        (5, "오전 5시"),
+        (9, "오전 9시"),
+        (12, "낮 12시"),
+        (15, "오후 3시"),
+        (18, "저녁 6시"),
+        (23, "밤 11시"),
+    ],
+)
+def test_clock(h, said):
+    assert ask_calc.clock(h) == said
+    assert ask_calc.label(h) == f"{said}({h}시)"
+
+
+def test_hour_vals_has_24_and_12_hour_numbers():
+    assert ask_calc.hour_vals(15, 0, 9) == frozenset({"15", "3", "0", "12", "9"})
+
+
+@pytest.mark.parametrize(
+    ("prefix", "h", "h24"),
+    [
+        ("오전", 12, 0),
+        ("새벽", 2, 2),
+        ("아침", 9, 9),
+        ("낮", 11, 11),
+        ("낮", 12, 12),
+        ("낮", 1, 13),
+        ("오후", 12, 12),
+        ("오후", 3, 15),
+        ("저녁", 7, 19),
+        ("밤", 2, 2),
+        ("밤", 11, 23),
+        ("밤", 12, 0),
+        ("오후", 15, None),  # 섞인 표기
+        ("밤", 13, None),
+    ],
+)
+def test_to_24(prefix, h, h24):
+    assert ask_calc.to_24(prefix, h) == h24
+
+
+def test_clock_round_trips_through_to_24():
+    for h in range(24):
+        prefix, n = ask_calc.CLOCK.fullmatch(ask_calc.clock(h)).groups()
+        assert ask_calc.to_24(prefix, int(n)) == h
+
+
+@pytest.mark.parametrize(
     ("question", "months", "hours"),
     [
         ("1월이랑 3월은 어느정도 차이야?", [1, 3], []),
@@ -49,19 +100,21 @@ def test_single_month_rank():
 def test_hour_vs_peak_weekday_by_default():
     # 주문진 평일 15시 2024 · 12시 2064(하루 최대)
     assert texts("오후 3시에 차 많아?") == [
-        "평일 15시 차량 이동 인구 2024명: 하루 최대(12시 2064명)의 98%, 많은 편"
+        "평일 오후 3시(15시) 차량 이동 인구 2024명: 하루 최대(낮 12시(12시) 2064명)의 98%, 많은 편"
     ]
 
 
 def test_hour_weekend_and_low():
     assert texts("주말 오전 3시엔?") == [
-        "주말 3시 차량 이동 인구 569명: 하루 최대(14시 2833명)의 20%, 적은 편"
+        "주말 새벽 3시(3시) 차량 이동 인구 569명: 하루 최대(오후 2시(14시) 2833명)의 20%, 적은 편"
     ]
 
 
 def test_computed_facts_values_allow_numbers():
     fact = ask_calc.computed_facts(jumunjin_raw(), "1월이랑 3월은 어느정도 차이야?")[0]
     assert {"1", "3", "80.3", "78.4", "80", "78", "2"} <= set(fact.values)
+    hour = ask_calc.computed_facts(jumunjin_raw(), "오후 3시에 차 많아?")[0]
+    assert {"15", "3", "12", "2024", "2064", "98"} <= set(hour.values)
 
 
 def test_computed_rules():
@@ -73,7 +126,7 @@ def test_computed_rules():
         "강릉시는 8월이 2월보다 43% 더 붐벼요."
     ]
     assert ask_calc.computed_rules(raw, "오후 3시에 차 많아?") == [
-        "평일 15시 차량은 하루 가장 많은 12시의 98%로 많은 편이에요."
+        "평일 오후 3시 차량은 하루 가장 많은 낮 12시의 98%로 많은 편이에요."
     ]
 
 
@@ -106,41 +159,32 @@ def test_check_sentence_style(text, problem):
         assert problem in problems
 
 
-def test_answer_reads_plain_text_reply():
-    # HCX-005 는 JSON 지시를 자주 무시한다 → 일반 문장도 읽고, 근거는 넘긴 사실 전체로 본다
+def all_ids(raw, intents, question):
+    return [f.id for f in ask.facts_for(raw, intents, question)]
+
+
+def generate(*texts, ids):
+    def fake(system, user, schema):
+        return schema.model_validate({"sentences": [{"text": t, "facts": ids} for t in texts]})
+
+    return fake
+
+
+def test_answer_wrong_number_is_rule():
     raw = jumunjin_raw()
     q = "오후 3시에 차 많아?"
+    ids = all_ids(raw, ["weekday_hours"], q)
     out = ask.answer(
-        raw, ["weekday_hours"], lambda s, u: "오후 3시는 2,024명으로 많은 편입니다.", question=q
+        raw, ["weekday_hours"], generate("오후 3시는 999명이에요.", ids=ids), question=q
     )
-    assert (out.sentences, out.source) == (["오후 3시는 2,024명으로 많은 편입니다."], "llm")
-
-
-def test_answer_plain_text_wrong_number_is_rule():
-    raw = jumunjin_raw()
-    q = "오후 3시에 차 많아?"
-    out = ask.answer(raw, ["weekday_hours"], lambda s, u: "오후 3시는 999명이에요.", question=q)
-    assert out.sentences == ["평일 15시 차량은 하루 가장 많은 12시의 98%로 많은 편이에요."]
+    assert out.sentences == ["평일 오후 3시 차량은 하루 가장 많은 낮 12시의 98%로 많은 편이에요."]
     assert out.source == "rule"
-
-
-def test_parse_plain_splits_sentences():
-    assert ask.parse_plain("첫 문장이에요. 둘째 문장이에요!\n셋째예요?") == [
-        "첫 문장이에요.",
-        "둘째 문장이에요!",
-        "셋째예요?",
-    ]
-
-
-def test_parse_plain_drops_citation_marks_and_quotes():
-    reply = '"1월과 3월은 거의 비슷해요." (F8-1)\n(facts: F3-2, F8-1)'
-    assert ask.parse_plain(reply) == ["1월과 3월은 거의 비슷해요."]
 
 
 def test_failed_sentence_dropped_when_same_topic_already_answered():
     raw = jumunjin_raw()
     q = "1월이랑 3월은 어느정도 차이야?"
-    reply = "1월과 3월은 거의 비슷해요. 두 달 지수는 80.3과 78.4이고 2배 차이예요."
-    out = ask.answer(raw, ["months"], lambda s, u: reply, question=q)
+    texts = ("1월과 3월은 거의 비슷해요.", "두 달 지수는 80.3과 78.4이고 2배 차이예요.")
+    out = ask.answer(raw, ["months"], generate(*texts, ids=all_ids(raw, ["months"], q)), question=q)
     assert out.sentences == ["1월과 3월은 거의 비슷해요."]
     assert out.source == "mixed"

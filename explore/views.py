@@ -10,7 +10,6 @@ from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 
-from core import clova
 from core.errors import error
 from explore import ask, ask_match, queries, sources
 from explore.chat import arrange, flow, llm
@@ -63,9 +62,8 @@ def dong_detail(request, dong_id: str):
 
 # ──────────────── 동 1개 답 (v6.1 질문 답 재사용, 채팅이 부른다) ────────────────
 
-ANSWER_TTL = 40 * 24 * 60 * 60
+ANSWER_TTL = 7 * 24 * 60 * 60  # 데이터가 월마다 바뀌고 질문 원문까지 같아야 다시 쓰여서 짧게
 MAX_QUESTION = 100
-CHAT_TIMEOUT = 10  # 초. 사용자가 기다리는 요청이라 브리핑 배치(20초)보다 짧게
 
 
 class AskBurstThrottle(AnonRateThrottle):
@@ -76,27 +74,17 @@ class AskDayThrottle(AnonRateThrottle):
     scope = "explore_ask_day"
 
 
-def _chat(system: str, user: str) -> str:
-    return clova.chat(system, user, max_tokens=300, temperature=0.3, timeout=CHAT_TIMEOUT)
-
-
 def answer_one(dong_id: str, raw: dict, intents: list[str], question: str) -> tuple[list[str], str]:
-    """동 1개 답: Redis → dong_answer → 생성·저장 (v6.1 스펙 §4 ⑥~⑧). 채팅도 같이 쓴다."""
-    joined = "+".join(intents)
+    """동 1개 답: Redis → 생성. 생성기가 없거나 실패해 나간 규칙 답은 저장하지 않는다."""
     digest = ask.prompt_hash(ask.facts_for(raw, intents, question), question)
-    key = f"explore:ask:a:{dong_id}:{joined}:{digest}"
+    key = f"explore:ask:a:{dong_id}:{'+'.join(intents)}:{digest}"
     hit = cache.get(key)
     if hit is not None:
         return hit[0], hit[1]
-    stored = sources.load_answer(dong_id, joined, digest)
-    if stored is None:
-        result = ask.answer(raw, intents, _chat if clova.enabled() else None, question=question)
-        sources.save_answer(
-            dong_id, joined, result.facts_hash, result.sentences, result.source, result.model
-        )
-        stored = (result.sentences, result.source)
-    cache.set(key, list(stored), ANSWER_TTL)
-    return stored
+    result = ask.answer(raw, intents, llm.generate if llm.enabled() else None, question=question)
+    if not result.fallback:
+        cache.set(key, [result.sentences, result.source], ANSWER_TTL)
+    return result.sentences, result.source
 
 
 # ───────────────────────── 동 패널 채팅 (v7) ─────────────────────────
