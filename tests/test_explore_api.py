@@ -4,7 +4,7 @@ queries · sources 함수를 바꿔 끼워 Neo4j · DB 없이 본다."""
 import pytest
 from django.core.cache import cache
 
-from explore import queries, sources
+from explore import queries, sources, views
 from explore.graphdb import GraphUnavailable
 from tests.explore_samples import jumunjin_raw
 from tests.test_explore_queries import PINS_REC
@@ -42,6 +42,14 @@ def test_pins(client, monkeypatch):
         True,
     )
     assert jumunjin["life"] == "생활권" and jumunjin["grades"] == {"quiet": "B", "evening": "A"}
+    assert [t["name"] for t in jumunjin["types"]] == ["로컬살이형", "네트워킹형", "몰입형"]
+
+
+def test_pins_cache_key_has_shape_version(client, monkeypatch):
+    """types 가 붙기 전 핀 응답이 캐시(`:last` 는 만료 없음)에서 나가지 않게 키에 버전을 둔다."""
+    cache.set("explore:pins:51150", {"sigunguId": "51150", "dongs": []}, None)
+    monkeypatch.setattr(queries, "fetch_pins", lambda code: PINS)
+    assert client.get("/api/explore/sigungu/51150/pins").json() == PINS
 
 
 def test_pins_not_found_is_not_cached(client, monkeypatch):
@@ -87,7 +95,7 @@ def test_cache_hit_skips_neo4j(client, monkeypatch, no_briefing):
 def test_neo4j_down_serves_last_response(client, monkeypatch):
     monkeypatch.setattr(queries, "fetch_pins", lambda code: PINS)
     client.get("/api/explore/sigungu/51150/pins")
-    cache.delete("explore:pins:51150")  # 1시간 캐시가 만료된 상황
+    cache.delete(views.PINS_KEY.format("51150"))  # 1시간 캐시가 만료된 상황
     monkeypatch.setattr(queries, "fetch_pins", down)
     res = client.get("/api/explore/sigungu/51150/pins")
     assert res.status_code == 200 and res.json() == PINS

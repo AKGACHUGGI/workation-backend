@@ -19,6 +19,8 @@ from explore.graphdb import GraphUnavailable
 logger = logging.getLogger(__name__)
 
 TTL = 60 * 60
+# 응답 모양이 바뀌면 버전을 올린다. `:last` 는 만료가 없어 옛 모양이 남기 때문 (v2: 핀 types)
+PINS_KEY = "explore:pins:v2:{}"
 
 
 def _serve(key: str, load, nf_code: str, nf_msg: str) -> Response:
@@ -44,7 +46,7 @@ def _serve(key: str, load, nf_code: str, nf_msg: str) -> Response:
 @api_view(["GET"])
 def sigungu_pins(request, sigungu_id: str):
     return _serve(
-        f"explore:pins:{sigungu_id}",
+        PINS_KEY.format(sigungu_id),
         lambda: queries.fetch_pins(sigungu_id),
         "SIGUNGU_NOT_FOUND",
         "시군구를 찾을 수 없어요.",
