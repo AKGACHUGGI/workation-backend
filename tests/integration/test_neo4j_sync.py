@@ -61,6 +61,8 @@ def test_pins_with_real_cypher(driver):
     jumunjin = pins["dongs"][1]
     assert jumunjin["tags"] == ["coast", "cafe", "resort", "beach", "park", "market"]
     assert (jumunjin["topType"], jumunjin["topScore"]) == ("로컬살이형", 60)
+    detail = queries.shape_dong(queries.fetch_dong("5115025000"), [])
+    assert jumunjin["types"] == [{"name": t["name"], "score": t["score"]} for t in detail["types"]]
     assert (jumunjin["coastal"], jumunjin["life"]) == (True, "생활권")
     assert jumunjin["grades"] == {"quiet": "B", "evening": "A"}
     assert jumunjin["center"] == {"lat": 37.88818, "lng": 128.75354}

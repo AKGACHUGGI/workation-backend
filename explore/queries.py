@@ -23,6 +23,7 @@ RETURN r.code AS code, collect(d {
   .code, .name, .lat, .lng,
   tags: [(d)-[:HAS_TAG]->(t:PoiTag) | [t.order, t.code]],
   top: [(d)-[f:FITS {rank: 1}]->(ty:Type) WHERE f.score >= $type_min | [ty.name, f.score]],
+  types: [(d)-[f:FITS]->(ty:Type) | [f.rank, ty.name, f.score]],
   near: [(d)-[:NEAR]->(p:Place) | p.id],
   life: [(d)-[:LIFE]->(t:Tag) | t.name],
   grades: [(d)-[:HAS_GRADE]->(g:Grade) | [g.metric, g.grade]]
@@ -113,6 +114,8 @@ def shape_pins(rec: dict) -> dict:
                 "tags": [code for _, code in sorted(d["tags"])],
                 "topType": top[0],
                 "topScore": top[1],
+                # 동 상세 types 와 같은 값 · 순서(rank). 유형 칩 정렬용이라 reason 은 뺀다
+                "types": [{"name": name, "score": score} for _, name, score in sorted(d["types"])],
                 "coastal": bool(d["near"]),
                 "life": d["life"][0] if d["life"] else None,
                 "grades": {"quiet": grades.get("quiet"), "evening": grades.get("evening")},

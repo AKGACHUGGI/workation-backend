@@ -12,19 +12,24 @@ PINS_REC = {  # PINS Cypher 결과 한 행
         {
             "code": "5115037000", "name": "연곡면", "lat": 37.85, "lng": 128.8,
             "tags": [[6, "beach"], [0, "coast"], [2, "cafe"]],
-            "top": [["몰입형", 50]], "near": ["place:coast"], "life": ["관광지"],
+            "top": [["몰입형", 50]],
+            "types": [[2, "로컬살이형", 40], [1, "몰입형", 50], [3, "네트워킹형", 30]],
+            "near": ["place:coast"], "life": ["관광지"],
             "grades": [["quiet", "A"], ["peer", "C"], ["evening", "B"]],
         },
         {
             "code": "5115025000", "name": "주문진읍", "lat": 37.88818, "lng": 128.75354,
             "tags": [[11, "market"], [0, "coast"], [5, "resort"], [2, "cafe"], [6, "beach"],
                      [7, "park"]],
-            "top": [["로컬살이형", 60]], "near": ["place:coast"], "life": ["생활권"],
+            "top": [["로컬살이형", 60]],
+            "types": [[3, "몰입형", 36], [1, "로컬살이형", 60], [2, "네트워킹형", 50]],
+            "near": ["place:coast"], "life": ["생활권"],
             "grades": [["quiet", "B"], ["peer", "B"], ["evening", "A"]],
         },
         {
             "code": "5115099000", "name": "가상동", "lat": None, "lng": None,
-            "tags": [], "top": [], "near": [], "life": [], "grades": [["peer", "S"]],
+            "tags": [], "top": [], "types": [], "near": [], "life": [],
+            "grades": [["peer", "S"]],
         },
     ],
 }  # fmt: skip
@@ -42,6 +47,11 @@ def test_shape_pins():
         "tags": ["coast", "cafe", "resort", "beach", "park", "market"],
         "topType": "로컬살이형",
         "topScore": 60,
+        "types": [
+            {"name": "로컬살이형", "score": 60},
+            {"name": "네트워킹형", "score": 50},
+            {"name": "몰입형", "score": 36},
+        ],
         "coastal": True,
         "life": "생활권",
         "grades": {"quiet": "B", "evening": "A"},
@@ -52,6 +62,7 @@ def test_shape_pins_missing_values():
     empty = queries.shape_pins(PINS_REC)["dongs"][0]
     assert empty["tags"] == [] and empty["coastal"] is False
     assert (empty["topType"], empty["topScore"], empty["life"]) == (None, None, None)
+    assert empty["types"] == []
     assert empty["grades"] == {"quiet": None, "evening": None}
 
 
