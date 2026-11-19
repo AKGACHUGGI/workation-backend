@@ -17,3 +17,9 @@ def health(request):
         logger.exception("health check: database unavailable")
         return Response({"status": "error", "db": "unavailable"}, status=503)
     return Response({"status": "ok", "db": "ok"})
+
+
+@api_view(["GET"])
+def live(request):
+    """프로세스가 요청을 받는지만 본다. DB 는 보지 않는다 (컨테이너 헬스체크용)."""
+    return Response({"status": "ok"})
