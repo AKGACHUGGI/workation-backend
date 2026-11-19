@@ -196,6 +196,28 @@ def test_favorites_list_month(client, me):
     assert client.get("/api/me/favorites?month=10", **auth()).status_code == 400
 
 
+def popular_favorite_counts(client):
+    items = client.get("/api/regions/popular").json()["items"]
+    return {it["id"]: it["favoriteCount"] for it in items}
+
+
+def test_popular_favorite_count(client, me):
+    assert set(popular_favorite_counts(client).values()) == {0}
+    put_favorite(client, "regions", GOSEONG)
+    put_favorite(client, "regions", GANGNEUNG)
+    run(  # 두 번째 사용자도 고성을 저장
+        "INSERT INTO favorite (user_id, scope, unit_id) VALUES (%s, 'region', %s)",
+        [OTHER_ID, community.unit_id("region", GOSEONG)],
+    )
+    put_favorite(client, "dongs", GEOJIN)  # 동 즐겨찾기는 세지 않는다
+    counts = popular_favorite_counts(client)
+    assert counts[GOSEONG] == 2
+    assert counts[GANGNEUNG] == 1
+    assert sum(counts.values()) == 3  # 즐겨찾기 없는 지역은 0
+    assert client.delete(f"/api/me/favorites/regions/{GOSEONG}", **auth()).status_code == 204
+    assert popular_favorite_counts(client)[GOSEONG] == 1
+
+
 # ───────────────────────── 노트 읽기 ─────────────────────────
 
 

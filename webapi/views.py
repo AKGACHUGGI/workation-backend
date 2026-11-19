@@ -109,6 +109,7 @@ def popular(request):
     scores = scoring.unit_scores("region", month)
     photos = data.one_photo_per_unit("region", list(regions), month)
     views = _view_counts()
+    favorites = _favorite_counts()
     items = [
         {
             "id": r.sigungu_code,
@@ -118,12 +119,21 @@ def popular(request):
             "tags": data.tag_labels(r.tags, 3),
             "terrain": data.terrain_of(r.tags),
             "scores": data.web_scores(scores.get(rid, {})),
-            "favoriteCount": 0,  # 즐겨찾기 집계는 로그인이 생기면 채운다
+            "favoriteCount": favorites.get(rid, 0),
             "viewCount": views.get(r.sigungu_code, 0),
         }
         for rid, r in sorted(regions.items())
     ]
     return Response({"month": month_str, "asOf": date.today().isoformat(), "items": items})
+
+
+def _favorite_counts() -> dict[int, int]:
+    """region_id → 그 시군구를 즐겨찾기한 사용자 수. 한 번의 집계 쿼리 (캐시하지 않는다)."""
+    with connection.cursor() as cur:
+        cur.execute(
+            "SELECT unit_id, COUNT(*) FROM favorite WHERE scope = 'region' GROUP BY unit_id"
+        )
+        return dict(cur.fetchall())
 
 
 def _view_counts() -> dict[str, int]:
