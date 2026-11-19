@@ -137,6 +137,27 @@ def dong_visits(dong_ids: list[int]) -> dict[int, dict[int, float]]:
     return out
 
 
+def dong_stay_hourly(dong_id: int, month: int | None) -> dict[str, list[int]]:
+    """{'weekday'|'weekend': 시간대 0~23 평균 체류인구(명)}.
+
+    요일그룹 안 요일과 (연간이면) 달을 평균한다.
+
+    dong_hourly(보행 지수)와 달리 실제 인원이라 동끼리 크기를 견줄 수 있다. 값 없는 시간은 0.
+    """
+    out = {"weekday": [0] * 24, "weekend": [0] * 24}
+    sql = (
+        "SELECT day_group, hour, avg(stay_avg) FROM population_hourly"
+        " WHERE dong_id = %s AND year = %s"
+        + (" AND month = %s" if month else "")
+        + " GROUP BY day_group, hour"
+    )
+    with connection.cursor() as cur:
+        cur.execute(sql, [dong_id, DATA_YEAR, *([month] if month else [])])
+        for g, h, v in cur.fetchall():
+            out[g][h] = round(v or 0)
+    return out
+
+
 def dong_bbox(dong_id: int) -> list[float] | None:
     """행정동 경계의 [서, 남, 동, 북]. 경계는 바뀌지 않아 정적 캐시 (조회 실패는 캐시하지 않음)."""
     try:
