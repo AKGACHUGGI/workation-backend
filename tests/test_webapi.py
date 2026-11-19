@@ -1,5 +1,7 @@
 """웹 화면 계약 API (/api/...). 계약: workation-web src/features/*/types.ts"""
 
+from django.db import connection
+
 from search import engine
 from tests.test_api import data, photos  # noqa: F401 (픽스처 재사용)
 
@@ -57,6 +59,30 @@ def test_dong_detail_contract(client, photos):  # noqa: F811
     assert body["stats"]["localLife"] == 80
     assert body["quieterTwins"] == []  # 테스트 DB 에는 dong_feature 가 없다
     assert body["kind"] == "living"
+    assert len(body["stayHourly"]["weekday"]) == len(body["stayHourly"]["weekend"]) == 24
+
+
+def test_dong_detail_stay_hourly(client, photos):  # noqa: F811
+    """요일그룹 안 요일 평균 · 선택 월만 · 데이터 연도만. 연간은 달까지 평균."""
+    rows = [
+        (2025, 10, 0, "weekday", 100.0),
+        (2025, 10, 1, "weekday", 201.0),
+        (2025, 10, 5, "weekend", 50.0),
+        (2025, 9, 0, "weekday", 1000.0),
+        (2024, 10, 2, "weekday", 99999.0),  # 데이터 연도가 아님
+    ]
+    with connection.cursor() as cur:
+        cur.executemany(
+            "INSERT INTO population_hourly (dong_id, year, month, dow, hour, day_group,"
+            " time_band, weekday_count, stay_avg)"
+            " VALUES (101, %s, %s, %s, 9, %s, 'morning', 4, %s)",
+            rows,
+        )
+    oct_ = client.get("/api/dongs/5182025300?month=2025-10").json()["stayHourly"]
+    assert oct_["weekday"][9] == 150 and oct_["weekend"][9] == 50
+    assert oct_["weekday"][8] == 0
+    annual = client.get("/api/dongs/5182025300?month=annual").json()["stayHourly"]
+    assert annual["weekday"][9] == 434  # (100 + 201 + 1000) / 3
 
 
 def test_dong_detail_scores_match_tier(client, photos):  # noqa: F811

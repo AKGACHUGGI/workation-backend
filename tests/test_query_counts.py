@@ -11,7 +11,7 @@ from tests.test_api import data, photos  # noqa: F401 (픽스처 재사용)
 # 실제 DB 에서는 캐시돼 동네 프로필이 4~7번이다
 CASES = [
     ("/api/regions/51820?month=2025-10", 4),
-    ("/api/dongs/5182025300?month=2025-10", 12),
+    ("/api/dongs/5182025300?month=2025-10", 13),  # + 체류 곡선(population_hourly) 1번
     ("/api/tier?month=2025-10&scope=dong", 2),
     ("/api/regions/popular?month=2025-10", 5),
     ("/api/v1/tiers?metric=value&month=10", 1),

@@ -451,6 +451,8 @@ def dong_detail(request, dong_id: str):
                 "eveningSurplus": round(surplus, 2),  # 근사: 전체 행정동 평균 대비 배율
             },
             "hourly": {"weekday": curves[DayGroup.WEEKDAY], "weekend": curves[DayGroup.WEEKEND]},
+            # W-05 비교 곡선: 시간대별 평균 체류인구(명)
+            "stayHourly": data.dong_stay_hourly(dong.dong_id, month),
             "peaks": {"weekday": peaks[DayGroup.WEEKDAY], "weekend": peaks[DayGroup.WEEKEND]},
             "activityMix": data.activity_mix(
                 curves[DayGroup.WEEKDAY],
