@@ -1,7 +1,7 @@
 # Traefik 정문 (로컬 1단계) 설계
 
 - 작성일: 2026-11-20
-- 상태: 초안 (사용자 검토 대기)
+- 상태: 확정 (2026-11-20 사용자 승인)
 - 바탕 문서: `reports/traefik-활용.md` (에이전트 팀 분석, 통합안 H1-final의 '필수 정문')
 - 바탕 코드: `core/views.py`(`health`) · `core/urls.py` · `Dockerfile` · `compose.yaml` · `config/settings.py` · `webapi/views.py`(`EventsView`)
 
@@ -121,7 +121,7 @@ def live(request):
 - DB는 `.env` 의 Supabase 값을 그대로 쓴다 (test-db는 단위 테스트 전용).
 - `urlopen` 은 2xx가 아니거나 연결이 안 되면 예외 → 종료 코드 1 → unhealthy.
 - 헬스체크 요청의 Host 헤더는 `localhost:8000` 이다. 그래서 `DJANGO_ALLOWED_HOSTS` 에 `localhost` 가 있어야 한다 (Django는 포트를 떼고 비교한다). 없으면 400 → unhealthy.
-- 맨 위 주석 "앱 · Traefik 은 배포 세팅 때 추가한다" 를 "`--profile proxy` 로 Traefik + 앱 컨테이너를 띄운다" 로 바꾼다.
+- 맨 위 주석 "앱 · Traefik 은 배포 세팅 때 추가한다" 를 "`--profile proxy` 로 Traefik + 앱 컨테이너를 띄운다. 웹·앱 팀원은 이걸로 백엔드 전체를 띄우고 `http://api.localhost` 를 부른다. 백엔드 개발은 평소대로 `uv run`" 으로 바꾼다.
 - Docker 소켓은 읽기 전용으로 마운트한다.
 - 호스트의 80 포트를 다른 프로그램이 쓰고 있으면 Traefik이 뜨지 않는다. 그때는 `127.0.0.1:8080:80` 으로 바꾸고 검증 주소에 `:8080` 을 붙인다.
 
