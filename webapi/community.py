@@ -22,7 +22,6 @@ from webapi import data
 FAVORITE_LIMIT = 50  # 종류(지역 · 동네)마다. 웹 FAVORITE_LIMIT 과 같다
 PAGE_SIZE = 20
 KIND_SCOPE = {"regions": "region", "dongs": "dong"}
-LIVING_MIN = 0.7  # 생활인구 비중이 이 이상이면 생활권 (지역 상세 · 동네 프로필과 같은 기준)
 
 
 class BadCursor(ValueError):
@@ -123,14 +122,11 @@ def favorites(user_id, month: int | None) -> tuple[list[dict], list[dict]]:
         region_scores,
         {u: rid for u, *_, rid in saved_dongs},
     )
-    raw_local = lambda scores, u: scores.get(u, {}).get("local_life", {}).get("raw")  # noqa: E731
     dong_items = [
         {
             "id": adm_code,
             "name": name,
-            "kind": "living"
-            if (raw_local(dong_scores, u) or raw_local(annual, u) or 0) >= LIVING_MIN
-            else "tourist",
+            "kind": scoring.dong_kind(u, annual),
             "sigungu": {"id": regions[rid].sigungu_code, "name": regions[rid].sigungu_name},
             "scores": data.web_scores(merged[u]),
             "addedAt": iso(at),

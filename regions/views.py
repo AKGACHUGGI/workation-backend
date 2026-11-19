@@ -218,14 +218,14 @@ def _similar(dong_id: int, month, my_quiet) -> list[dict]:
     ]
 
 
-def _personality(metrics: dict, local_life) -> str:
+def _personality(metrics: dict, living: bool) -> str:
     evening = (metrics.get("evening") or {}).get("grade")
     quiet = (metrics.get("quiet") or {}).get("grade")
     if evening in ("S", "A"):
         return "저녁 상권형. 저녁에 거리를 걷는 사람이 많음."
     if quiet == "C":
         return "낮 유입형. 낮에 외부에서 사람이 몰림."
-    if local_life is not None and local_life >= 0.7:
+    if living:
         return "조용한 생활권. 주민 중심."
     return "주민과 방문객이 섞인 동네."
 
@@ -280,6 +280,7 @@ def dong_detail(request, dong_id: str):
     mine = dong_scores.get(dong.dong_id, {})
     local_life = mine.get("local_life", {}).get("raw")
     metrics = {k: _score(mine.get(k)) for k in scoring.DONG_KEYS}
+    living = scoring.dong_kind(dong.dong_id) == "living"  # 연간 값 기준 (webapi 응답과 같은 판정)
     metrics["local_life"] = round(local_life, 2) if local_life is not None else None
     my_quiet = mine.get("quiet", {}).get("score")
 
@@ -298,16 +299,16 @@ def dong_detail(request, dong_id: str):
             "weekendPeak": _peak(weekend),
             "quietest": _peak(weekday, range(9, 19), highest=False),
         }
-        kind = "생활권" if (local_life or 0) >= 0.7 else "방문객이 많은"
+        kind = "생활권" if living else "방문객이 많은"
         summary = f"평일 {peaks['weekdayPeak']['hour']}시에 가장 붐비는 {kind} 동네"
     quiet_raw = mine.get("quiet", {}).get("raw")
     peer_raw = mine.get("peer", {}).get("raw")
     return Response(
         base
         | {
-            "lifeType": "local" if (local_life or 0) >= 0.7 else "tourist",
+            "lifeType": "local" if living else "tourist",
             "summary": summary,
-            "comment": _personality(metrics, local_life),
+            "comment": _personality(metrics, living),
             "hidden": False,
             "metrics": metrics,
             "rankInRegion": scoring.rank_of(sibling_quiet, dong.dong_id),

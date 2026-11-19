@@ -53,6 +53,19 @@ def _load_unit_scores(scope: str, m: int) -> dict[int, dict[str, dict]]:
     return dict(out)
 
 
+LIVING_MIN = 0.7  # 생활인구 비중이 이 이상이면 생활권
+
+
+def dong_kind(dong_id: int, annual: dict[int, dict[str, dict]] | None = None) -> str:
+    """동의 성격 "living"(생활권) · "tourist"(관광지).
+    어느 응답에서나 같도록 **연간** local_life 로만 판정한다 (없으면 tourist).
+    annual 은 unit_scores("dong", None) 결과 (이미 읽었으면 넘겨서 다시 읽지 않는다)."""
+    if annual is None:
+        annual = unit_scores("dong", None)
+    local = annual.get(dong_id, {}).get("local_life", {}).get("raw") or 0
+    return "living" if local >= LIVING_MIN else "tourist"
+
+
 def weighted(scores: dict[str, dict], weights: dict[str, float]) -> int | None:
     """가중치가 0 보다 큰 지표 중 점수가 있는 것만 가중 평균. 하나도 없으면 None."""
     num = den = 0.0

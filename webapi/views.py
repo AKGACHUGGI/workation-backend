@@ -299,12 +299,11 @@ def region_detail(request, sgg_id: str):
     for d in dongs:
         v = visits.get(d.dong_id, {})
         peak = max(v, key=v.get) if v else 1
-        local = annual.get(d.dong_id, {}).get("local_life", {}).get("raw") or 0
         dong_items.append(
             {
                 "id": d.adm_code,
                 "name": d.dong_name,
-                "kind": "living" if local >= 0.7 else "tourist",
+                "kind": scoring.dong_kind(d.dong_id, annual),
                 "landmark": "",
                 "quietScore": dong_scores.get(d.dong_id, {}).get("quiet", {}).get("score") or 0,
                 "peakMonth": peak,
@@ -424,7 +423,7 @@ def dong_detail(request, dong_id: str):
             "name": dong.dong_name,
             "sigungu": {"id": region.sigungu_code, "name": region.sigungu_name},
             "province": region.sido_name,
-            "kind": "living" if local >= 0.7 else "tourist",
+            "kind": scoring.dong_kind(dong.dong_id),
             "tags": data.tag_labels(dong.tags),
             "photos": [{"url": p["url"], "credit": p["credit"]} for p in photos],
             "landmarks": [],
