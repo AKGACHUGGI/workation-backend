@@ -164,4 +164,7 @@ def live(request):
 
 ## 7. 실험 결과
 
-(구현 후 §5-2 · §5-3 결과를 적는다.)
+실행일: 2026-11-20, Traefik v3.7.19, Docker Desktop 4.62.0 (Engine 29.2.1)
+
+- §5-2 헬스 실패: unhealthy 상태에서 `/api/live` → **500** (`Internal Server Error`, 본문 21바이트. 예상한 503 이 아니다). access log 의 `ServiceURL` · `ServiceAddr` 가 비어 있고, api 로그에는 `api.localhost` 요청이 한 건도 없다 (헬스체크의 `localhost:8000` DisallowedHost 만 있음). 전달 기록 없음 → 500 은 Traefik 이 직접 낸 응답이다. 판정: `allowEmptyServices=true` (unhealthy 컨테이너로 트래픽이 가지 않는다는 목적은 충족. 상태 코드만 503 이 아닌 500).
+- §5-3 XFF 위조: `X-Forwarded-For: 1.2.3.4` 로 보낸 `POST /api/events` → 400. throttle 키 = `throttle_events_burst_172.25.0.1` · `throttle_events_day_172.25.0.1` (Docker 네트워크 게이트웨이, Traefik access log 의 `ClientHost` 와 같음). 위조 값 무시됨.
