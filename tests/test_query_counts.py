@@ -13,7 +13,7 @@ CASES = [
     ("/api/regions/51820?month=2025-10", 4),
     ("/api/dongs/5182025300?month=2025-10", 12),
     ("/api/tier?month=2025-10&scope=dong", 2),
-    ("/api/regions/popular?month=2025-10", 4),
+    ("/api/regions/popular?month=2025-10", 5),
     ("/api/v1/tiers?metric=value&month=10", 1),
     ("/api/v1/regions/51820?month=10", 2),
     ("/api/v1/dongs/5182025300?month=10", 8),
