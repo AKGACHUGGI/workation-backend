@@ -59,6 +59,17 @@ def test_dong_detail_contract(client, photos):  # noqa: F811
     assert body["kind"] == "living"
 
 
+def test_dong_detail_scores_match_tier(client, photos):  # noqa: F811
+    """모바일 M-04: 동 상세 scores 는 /api/tier?scope=dong 의 같은 동 값과 같다."""
+    body = client.get("/api/dongs/5182025300?month=2025-10").json()
+    tier = client.get("/api/tier?month=2025-10&scope=dong").json()
+    item = next(i for i in tier["items"] if i["id"] == "5182025300")
+    assert body["scores"] == item["scores"]
+    assert body["scores"]["quiet"] == 95 and body["scores"]["crowd"] == 90  # crowd 는 시군구 값
+    assert body["dongCount"] == len(tier["items"]) == 2  # 수동면(집계 제외)은 빠짐
+    assert "special" not in body
+
+
 def test_notes_poll_view_and_auth(client, data):  # noqa: F811
     assert client.get("/api/regions/51820/notes?sort=helpful").json() == {"total": 0, "items": []}
     assert client.get("/api/dongs/5182025300/poll?month=2025-10").json()["total"] == 0
