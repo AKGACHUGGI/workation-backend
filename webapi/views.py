@@ -2,7 +2,8 @@
 
 화면 데이터는 /api/v1 과 같은 DB · 같은 점수 계산(metrics/scoring.py)을 쓰고
 모양만 웹 계약에 맞춘다.
-아직 데이터가 없는 것(랜드마크 · 접근 안내 · 팁 · 투표 · 즐겨찾기 · 로그인)은 빈 값이다.
+아직 데이터가 없는 것(랜드마크 · 접근 안내 · 체감 투표)은 빈 값이다.
+마이페이지 · 즐겨찾기(/api/me/*)는 webapi/me.py.
 NMF 계절 · 활동 유형과 저녁 잔차는 DB 에 없어 월별 혼잡과 24시간 곡선으로 만든 근사값이다.
 """
 
@@ -28,7 +29,7 @@ from metrics import scoring
 from regions.models import DayGroup, Dong, DongHourly, Region
 from regions.photos import dong_photos, region_photos
 from search import engine
-from webapi import data
+from webapi import community, data
 from webapi.models import UserEvent
 
 logger = logging.getLogger(__name__)
@@ -471,12 +472,42 @@ def dong_detail(request, dong_id: str):
     )
 
 
-# ───────────────────────── 노트 · 투표 (데이터 없음) ─────────────────────────
+# ───────────────────────── 워케이션 노트 (읽기) ─────────────────────────
+
+
+def _notes(request, by: str, target_id: int) -> Response:
+    """NotesResponse. 공개 팁만, 로그인 없이 읽는다. sort 기본값은 helpful."""
+    sort = request.query_params.get("sort") or "helpful"
+    if sort not in community.TIP_ORDERS:
+        return bad_request("sort 는 helpful 또는 recent 입니다.")
+    try:
+        page = community.tip_page(by, target_id, sort, request.query_params.get("cursor"))
+    except community.BadCursor as ex:
+        return bad_request(str(ex))
+    body = {"total": page["total"], "items": page["items"]}
+    if page["nextCursor"]:
+        body["nextCursor"] = page["nextCursor"]
+    return Response(body)
 
 
 @api_view(["GET"])
-def empty_notes(request, **kwargs):
-    return Response({"total": 0, "items": []})
+def region_notes(request, sgg_id: str):
+    """시군구의 팁 전부 (그 시군구의 동네에 쓴 팁 포함, dongName 으로 구분)."""
+    region = community.region_by_code(sgg_id)
+    if region is None:
+        return not_found("시군구를 찾을 수 없습니다.")
+    return _notes(request, "region", region.region_id)
+
+
+@api_view(["GET"])
+def dong_notes(request, dong_id: str):
+    dong = community.dong_by_code(dong_id)
+    if dong is None:
+        return not_found("행정동을 찾을 수 없습니다.")
+    return _notes(request, "dong", dong.dong_id)
+
+
+# ───────────────────────── 체감 투표 (데이터 없음) ─────────────────────────
 
 
 @api_view(["GET"])

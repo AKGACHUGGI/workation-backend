@@ -2,20 +2,33 @@
 
 from django.urls import path, re_path
 
-from webapi import views
+from webapi import me, views
 
 urlpatterns = [
     path("tier", views.tier, name="web-tier"),
     path("regions/popular", views.popular, name="web-popular"),
-    path("regions/<str:sgg_id>/notes", views.empty_notes, name="web-region-notes"),
+    path("regions/<str:sgg_id>/notes", views.region_notes, name="web-region-notes"),
     path("regions/<str:sgg_id>/poll", views.empty_poll, name="web-region-poll"),
     path("regions/<str:sgg_id>/view", views.record_view, name="web-region-view"),
     path("regions/<str:sgg_id>", views.region_detail, name="web-region"),
-    path("dongs/<str:dong_id>/notes", views.empty_notes, name="web-dong-notes"),
+    path("dongs/<str:dong_id>/notes", views.dong_notes, name="web-dong-notes"),
     path("dongs/<str:dong_id>/poll", views.empty_poll, name="web-dong-poll"),
     path("dongs/<str:dong_id>", views.dong_detail, name="web-dong"),
     path("search/parse", views.search_parse, name="web-search-parse"),
     path("events", views.events, name="web-events"),
-    # 예전 쿠키 로그인 경로. /api/me/* 는 accounts 가 받는다
+    # 마이페이지 · 즐겨찾기 (로그인 필요).
+    # /api/me 와 아직 없는 /api/me/settings 는 accounts 가 받는다
+    path("me/favorites/ids", me.FavoriteIdsView.as_view(), name="me-favorite-ids"),
+    path("me/favorites", me.FavoritesView.as_view(), name="me-favorites"),
+    path(
+        "me/favorites/<str:kind>/<str:item_id>",
+        me.FavoriteItemView.as_view(),
+        name="me-favorite-item",
+    ),
+    path("me/summary", me.SummaryView.as_view(), name="me-summary"),
+    path("me/tips", me.MyTipsView.as_view(), name="me-tips"),
+    path("me/tips/<str:tip_id>", me.MyTipView.as_view(), name="me-tip"),
+    path("me/photos", me.MyPhotosView.as_view(), name="me-photos"),
+    # 예전 쿠키 로그인 경로
     re_path(r"^auth(/.*)?$", views.unauthorized, name="web-auth"),
 ]

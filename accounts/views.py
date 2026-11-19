@@ -109,7 +109,7 @@ class MeView(LoginAPIView):
 
 
 class MeNotReadyView(LoginAPIView):
-    """아직 없는 /api/me/* (마이페이지 W-08).
+    """아직 없는 /api/me/settings (알림 설정, 저장할 칸이 DB 에 없음).
 
     로그인 상태면 501 이라 웹이 세션 만료(401)로 보고 로그아웃하지 않는다.
     """
