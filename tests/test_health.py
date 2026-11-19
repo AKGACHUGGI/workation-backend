@@ -25,3 +25,19 @@ def test_health_db_down_hides_error(client, monkeypatch):
     assert response.status_code == 503
     assert response.json() == {"status": "error", "db": "unavailable"}
     assert "secret-pw" not in response.content.decode()
+
+
+def test_live_ok(client):
+    response = client.get("/api/live")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_live_ignores_db(client, monkeypatch):
+    monkeypatch.setattr(core.views, "connection", _BrokenConnection())
+
+    response = client.get("/api/live")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}

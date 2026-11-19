@@ -1,4 +1,6 @@
-# 로컬 테스트 DB · 탐색 그래프 Neo4j · 캐시 Redis. 앱 · Traefik 은 배포 세팅 때 추가한다.
+# 로컬 테스트 DB · 탐색 그래프 Neo4j · 캐시 Redis.
+# --profile proxy 로 Traefik + 앱 컨테이너를 띄운다. 웹·앱 팀원은 이걸로 백엔드 전체를 띄우고
+# http://api.localhost 를 부른다. 백엔드 개발은 평소대로 uv run (compose 는 위 3개만).
 # 단위 테스트는 test-db 만 있으면 된다: docker compose up -d --wait test-db
 services:
   test-db:
@@ -44,6 +46,52 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  # Django 앞의 리버스 프록시. 라벨(traefik.enable=true) 붙은 컨테이너만 공개한다
+  traefik:
+    image: traefik:v3.7.19
+    profiles: ["proxy"]
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.allowEmptyServices=true
+      - --entrypoints.web.address=:80
+      - --accesslog=true
+      - --accesslog.format=json
+      - --api.dashboard=false
+    ports:
+      - "127.0.0.1:80:80"   # 80 을 다른 프로그램이 쓰면 127.0.0.1:8080:80 으로
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  # Django (gunicorn). 호스트 포트 없이 Traefik 으로만 들어온다.
+  # .env 를 uv run 과 같이 쓰고, 컨테이너 안에서 달라지는 값만 environment 로 덮어쓴다
+  api:
+    build: .
+    profiles: ["proxy"]
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      NEO4J_URI: bolt://neo4j:7687
+      DJANGO_ALLOWED_HOSTS: api.localhost,localhost   # localhost 는 아래 헬스체크용
+      DRF_NUM_PROXIES: "1"
+    healthcheck:
+      # DB 를 보지 않는 /api/live. 이미지에 curl 이 없어 python 으로 부른다
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/live', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.api.rule=Host(`api.localhost`)
+      - traefik.http.routers.api.entrypoints=web
+      - traefik.http.services.api.loadbalancer.server.port=8000
+    depends_on:
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
 
 volumes:
   neo4j-data:
