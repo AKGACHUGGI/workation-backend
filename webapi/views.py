@@ -407,6 +407,16 @@ def dong_detail(request, dong_id: str):
         scoring.unit_scores("dong", None).get(dong.dong_id, {}).get("local_life", {}).get("raw")
         or 0
     )
+    region_scores = scoring.unit_scores("region", month)
+    # 모바일 M-04 지표 카드 · 고정 바: /api/tier?scope=dong 의 같은 동 scores 와 같은 값
+    # (crowd · overnight 는 시군구 값). 집계 제외 동은 scores 를 넣지 않는다.
+    scores = (
+        {}
+        if dong.is_excluded or not mine
+        else scoring.with_region_metrics(
+            {dong.dong_id: mine}, region_scores, {dong.dong_id: region.region_id}
+        )[dong.dong_id]
+    )
     return Response(
         {
             "id": dong.adm_code,
@@ -435,10 +445,7 @@ def dong_detail(request, dong_id: str):
             "activityMix": data.activity_mix(
                 curves[DayGroup.WEEKDAY],
                 curves[DayGroup.WEEKEND],
-                scoring.unit_scores("region", month)
-                .get(region.region_id, {})
-                .get("weekend_gap", {})
-                .get("raw"),
+                region_scores.get(region.region_id, {}).get("weekend_gap", {}).get("raw"),
             ),
             "seasonType": data.season_type(data.monthly_crowd(region.region_id)),
             "quieterTwins": [
@@ -456,7 +463,10 @@ def dong_detail(request, dong_id: str):
                 for cid, code, name, crid, dist, ratio in twins
             ],
             "bbox": data.dong_bbox(dong.dong_id) or [0, 0, 0, 0],
+            # 백분위를 매긴 행정동 수 (집계 제외 빼고)
+            "dongCount": len(data.active_dongs()),
         }
+        | ({"scores": data.web_scores(scores)} if scores else {})
         | ({"special": "special_facility"} if dong.is_excluded else {})
     )
 
