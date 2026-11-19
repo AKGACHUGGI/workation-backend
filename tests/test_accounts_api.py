@@ -123,12 +123,13 @@ def test_me_subpaths_401_without_login(client, supabase):  # noqa: F811
     assert_unauthorized(client.get("/api/auth/me"))
 
 
-def test_me_subpaths_501_when_logged_in(client, supabase):  # noqa: F811
-    """즐겨찾기 등 /api/me/* 는 아직 없다 (W-08).
-    로그인 상태면 501 이라 웹이 로그아웃하지 않는다."""
+def test_me_settings_501_when_logged_in(client, supabase):  # noqa: F811
+    """알림 설정 /api/me/settings 는 아직 없다 (저장할 칸이 DB 에 없음).
+    로그인 상태면 501 이라 웹이 로그아웃하지 않는다. 나머지 /api/me/* 는 tests/test_me_api.py"""
+    assert_unauthorized(client.get("/api/me/settings"))
     get_me(client, **auth())
-    for path in ("/api/me/favorites/ids", "/api/me/summary"):
-        r = client.get(path, **auth())
+    for method in (client.get, client.patch):
+        r = method("/api/me/settings", **auth())
         assert r.status_code == 501
         assert r.json()["error"]["code"] == "NOT_IMPLEMENTED"
     assert_unauthorized(client.get("/api/auth/me", **auth()))
