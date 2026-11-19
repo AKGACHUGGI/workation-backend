@@ -443,3 +443,145 @@ def test_favorite_put_is_one_statement(client, me, django_assert_max_num_queries
     put_favorite(client, "regions", GOSEONG)  # 시군구 목록 캐시를 채운다
     with django_assert_max_num_queries(2):  # app_user 조회 + 세기 · 넣기 한 문장
         assert put_favorite(client, "regions", GANGNEUNG).status_code == 204
+
+
+# ───────────────────────── 팁 쓰기 ─────────────────────────
+
+
+def post_tip(client, kind, item_id, payload, token=None):
+    path = f"/api/{kind}/{item_id}/notes"
+    return client.post(path, payload, content_type="application/json", **auth(token))
+
+
+def test_post_region_tip_contract(client, me):
+    r = post_tip(
+        client, "regions", GOSEONG, {"body": "  속초에서 버스로 40분  ", "visitMonth": "2025-10"}
+    )
+    assert r.status_code == 201
+    note = r.json()
+    assert note == {
+        "id": note["id"],
+        "author": {"nickname": "두이", "initial": "두"},
+        "createdAt": note["createdAt"],
+        "visitMonth": "2025-10",
+        "body": "속초에서 버스로 40분",
+        "helpful": 0,
+        "replies": 0,
+    }
+    assert note["createdAt"].endswith("+09:00")
+    row = run("SELECT user_id, region_id, dong_id, visit_month, stay_days, body, status FROM tip")
+    assert [tuple(map(str, r)) for r in row] == [
+        (me, "1", "None", "10", "None", "속초에서 버스로 40분", "public")
+    ]
+    assert str(row[0][0]) == str(me)
+
+
+def test_post_dong_tip_stores_region_and_dong(client, me):
+    r = post_tip(client, "dongs", GEOJIN, {"body": "거진항 카페"})
+    assert r.status_code == 201
+    note = r.json()
+    assert note["dongName"] == "거진읍" and "visitMonth" not in note
+    assert run(
+        "SELECT region_id, dong_id, visit_month FROM tip WHERE tip_id = %s", [note["id"]]
+    ) == [(1, 101, None)]
+    # 시군구 읽기에도 보인다 (dongName 으로 구분)
+    region = client.get(f"/api/regions/{GOSEONG}/notes").json()
+    assert [n["id"] for n in region["items"]] == [note["id"]]
+
+
+def test_post_tip_needs_login(client, supabase, data):  # noqa: F811
+    for headers in ({}, auth()):  # 토큰 없음 · app_user 아직 없음
+        r = client.post(
+            f"/api/regions/{GOSEONG}/notes",
+            {"body": "팁"},
+            content_type="application/json",
+            **headers,
+        )
+        assert r.status_code == 401 and r.json()["error"]["code"] == "UNAUTHORIZED"
+    assert run("SELECT count(*) FROM tip") == [(0,)]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"body": ""},
+        {"body": "   \n "},
+        {"body": 123},
+        {"body": None},
+        {"body": "가" * 301},
+        {"body": "  " + "가" * 301 + "  "},
+        {"body": "팁", "visitMonth": "2025-13"},
+        {"body": "팁", "visitMonth": "2025-00"},
+        {"body": "팁", "visitMonth": "2025-1"},
+        {"body": "팁", "visitMonth": "annual"},
+        {"body": "팁", "visitMonth": "2024-10"},
+        {"body": "팁", "visitMonth": 10},
+        ["팁"],
+    ],
+)
+def test_post_tip_bad_body_400(client, me, payload):
+    r = post_tip(client, "regions", GOSEONG, payload)
+    assert r.status_code == 400 and r.json()["error"]["code"] == "BAD_REQUEST"
+    assert run("SELECT count(*) FROM tip") == [(0,)]
+
+
+def test_post_tip_300_chars_ok(client, me):
+    body = "가" * 300
+    r = post_tip(client, "regions", GOSEONG, {"body": f" {body} "})
+    assert r.status_code == 201 and r.json()["body"] == body
+
+
+def test_post_tip_unknown_or_excluded_404(client, me):
+    from regions.models import Dong
+
+    Dong.objects.create(
+        dong_id=103,
+        region_id=1,
+        dong_name="제외동",
+        adm_code="5182025400",
+        is_excluded=True,
+        tags=[],
+    )
+    for kind, item_id in [
+        ("regions", "99999"),
+        ("dongs", "0000000000"),
+        ("dongs", "5182025400"),
+    ]:
+        r = post_tip(client, kind, item_id, {"body": "팁"})
+        assert r.status_code == 404 and r.json()["error"]["code"] == "NOT_FOUND"
+    assert run("SELECT count(*) FROM tip") == [(0,)]
+
+
+def test_post_tip_burst_429(client, me):
+    for i in range(community.TIP_BURST_LIMIT):
+        assert post_tip(client, "regions", GOSEONG, {"body": f"팁 {i}"}).status_code == 201
+    r = post_tip(client, "dongs", GEOJIN, {"body": "넷째"})
+    assert r.status_code == 429 and r.json()["error"]["code"] == "TIP_RATE_LIMIT"
+    assert run("SELECT count(*) FROM tip") == [(community.TIP_BURST_LIMIT,)]
+
+
+def test_post_tip_burst_counts_only_last_minute(client, me):
+    for i in range(3):
+        add_tip(me, 1, None, f"오래된 팁 {i}", minutes_ago=2)
+    assert post_tip(client, "regions", GOSEONG, {"body": "새 팁"}).status_code == 201
+
+
+def test_posted_tip_shows_up_in_reads(client, me):
+    add_tip(OTHER_ID, 1, None, "먼저 쓴 팁", minutes_ago=10)
+    tip_id = post_tip(client, "regions", GOSEONG, {"body": "방금 쓴 팁"}).json()["id"]
+    notes = client.get(f"/api/regions/{GOSEONG}/notes?sort=recent").json()
+    assert notes["total"] == 2 and notes["items"][0]["id"] == tip_id
+    mine = client.get("/api/me/tips", **auth()).json()
+    assert [n["id"] for n in mine["items"]] == [tip_id]
+    assert mine["items"][0]["target"] == {"kind": "region", "id": GOSEONG, "name": "고성군"}
+    summary = client.get("/api/me/summary", **auth()).json()
+    assert summary["tipCount"] == 1 and summary["stays"] == [{"regionName": "고성", "count": 1}]
+
+
+def test_post_tip_query_count(client, me, django_assert_max_num_queries):
+    post_tip(client, "regions", GOSEONG, {"body": "시군구 목록 캐시를 채운다"})
+    with django_assert_max_num_queries(2):  # app_user 조회 + 세기 · 넣기 한 문장
+        assert post_tip(client, "regions", GOSEONG, {"body": "둘째"}).status_code == 201
+    with django_assert_max_num_queries(3):  # + 행정동 조회
+        assert post_tip(client, "dongs", GEOJIN, {"body": "셋째"}).status_code == 201

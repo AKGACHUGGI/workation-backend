@@ -21,6 +21,9 @@ from webapi import data
 
 FAVORITE_LIMIT = 50  # 종류(지역 · 동네)마다. 웹 FAVORITE_LIMIT 과 같다
 PAGE_SIZE = 20
+TIP_MAX_LEN = 300  # tip.body 는 VARCHAR(300). 앞뒤 공백을 자른 뒤 글자 수 기준
+TIP_BURST_LIMIT = 3  # 같은 사용자가 TIP_BURST_WINDOW 안에 이만큼 쓰면 더 못 쓴다
+TIP_BURST_WINDOW = "1 minute"  # PostgreSQL interval 표기
 KIND_SCOPE = {"regions": "region", "dongs": "dong"}
 LIVING_MIN = 0.7  # 생활인구 비중이 이 이상이면 생활권 (지역 상세 · 동네 프로필과 같은 기준)
 
@@ -267,6 +270,79 @@ def tip_page(by: str, target_id, sort: str, cursor: str | None) -> dict:
         "helpfulSum": helpful_sum,
         "nextCursor": str(offset + PAGE_SIZE) if len(rows) > PAGE_SIZE else None,
     }
+
+
+class BadTip(ValueError):
+    """팁 쓰기 본문이 계약에 맞지 않는다. 메시지는 그대로 400 에 담긴다."""
+
+
+def parse_tip(payload) -> tuple[str, int | None]:
+    """{"body", "visitMonth"?} → (앞뒤 공백을 자른 body, visit_month 1~12 또는 None)."""
+    if not isinstance(payload, dict):
+        raise BadTip("본문은 JSON 객체여야 합니다.")
+    body = payload.get("body")
+    if not isinstance(body, str):
+        raise BadTip("body 는 문자열입니다.")
+    body = body.strip()
+    if not body:
+        raise BadTip("팁 내용을 입력해 주세요.")
+    if len(body) > TIP_MAX_LEN:
+        raise BadTip(f"팁은 {TIP_MAX_LEN}자까지 쓸 수 있어요.")
+    raw = payload.get("visitMonth")
+    if raw is None:
+        return body, None
+    # 읽기가 visit_month 를 DATA_YEAR-MM 으로 되돌려 주므로 그 해의 달만 받는다
+    if not isinstance(raw, str) or not re.fullmatch(rf"{data.DATA_YEAR}-(0[1-9]|1[0-2])", raw):
+        raise BadTip(f"visitMonth 는 '{data.DATA_YEAR}-01' ~ '{data.DATA_YEAR}-12' 입니다.")
+    return body, int(raw[-2:])
+
+
+def create_tip(user, region_id: int, dong: Dong | None, body: str, visit_month: int | None):
+    """공개 팁을 쓰고 읽기와 같은 모양(Note)으로 돌려준다. 연달아 쓰는 한도를 넘으면 None.
+
+    최근 TIP_BURST_WINDOW 안의 내 팁을 세는 것과 넣는 것이 한 문장이라 DB 왕복이 한 번이다.
+    """
+    with connection.cursor() as cur:
+        cur.execute(
+            f"""WITH cur AS (
+                 SELECT count(*) AS n FROM tip
+                  WHERE user_id = %(user)s AND created_at > now() - interval '{TIP_BURST_WINDOW}'
+               ), ins AS (
+                 INSERT INTO tip (user_id, region_id, dong_id, visit_month, body)
+                 SELECT %(user)s, %(region)s, %(dong)s, %(month)s, %(body)s
+                   FROM cur WHERE n < %(limit)s
+                 RETURNING tip_id, created_at
+               )
+               SELECT tip_id, created_at FROM ins""",
+            {
+                "user": user.user_id,
+                "region": region_id,
+                "dong": dong.dong_id if dong else None,
+                "month": visit_month,
+                "body": body,
+                "limit": TIP_BURST_LIMIT,
+            },
+        )
+        row = cur.fetchone()
+    if row is None:
+        return None
+    tip_id, created_at = row
+    return _note(
+        (
+            tip_id,
+            user.nickname,
+            created_at,
+            None,
+            visit_month,
+            body,
+            region_id,
+            dong.adm_code if dong else None,
+            dong.dong_name if dong else None,
+            0,
+            0,
+        ),
+        with_target=False,
+    )
 
 
 def delete_tip(user_id, tip_id: int) -> bool:

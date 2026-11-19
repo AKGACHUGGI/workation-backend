@@ -65,6 +65,43 @@ class FavoriteItemView(MeAPIView):
         return Response(status=204)
 
 
+# ───────────────────────── 팁 쓰기 ─────────────────────────
+
+
+class NoteCreateView(MeAPIView):
+    """POST /api/{regions|dongs}/{id}/notes. 201 + 만든 팁(Note). 같은 경로의 GET 은 views.py.
+
+    kind(regions · dongs)는 urls.py 의 하위 클래스가 정한다.
+    """
+
+    kind = ""
+
+    def post(self, request, sgg_id: str | None = None, dong_id: str | None = None):
+        region_id, dong = None, None
+        if self.kind == "regions":
+            region = community.region_by_code(sgg_id)
+            region_id = region.region_id if region else None
+        else:
+            dong = community.dong_by_code(dong_id)
+            if dong is not None and dong.is_excluded:  # 집계 제외 동은 팁 대상이 아니다
+                dong = None
+            region_id = dong.region_id if dong else None
+        if region_id is None:
+            return not_found("팁을 쓸 지역 · 동네를 찾을 수 없습니다.")
+        try:
+            body, visit_month = community.parse_tip(request.data)
+        except community.BadTip as ex:
+            return bad_request(str(ex))
+        note = community.create_tip(request.user, region_id, dong, body, visit_month)
+        if note is None:
+            return error(
+                429,
+                "TIP_RATE_LIMIT",
+                "팁을 너무 빠르게 올리고 있어요. 잠시 후 다시 시도해 주세요.",
+            )
+        return Response(note, status=201)
+
+
 # ───────────────────────── MY ─────────────────────────
 
 

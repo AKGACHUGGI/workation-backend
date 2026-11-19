@@ -4,14 +4,40 @@ from django.urls import path, re_path
 
 from webapi import me, views
 
+
+class RegionNoteCreateView(me.NoteCreateView):
+    kind = "regions"
+
+
+class DongNoteCreateView(me.NoteCreateView):
+    kind = "dongs"
+
+
+def read_or_write(read, write):
+    """같은 경로에서 POST 는 로그인이 필요한 쓰기 뷰로, 나머지는 읽기 뷰로 보낸다."""
+
+    def view(request, **kwargs):
+        return (write if request.method == "POST" else read)(request, **kwargs)
+
+    return view
+
+
 urlpatterns = [
     path("tier", views.tier, name="web-tier"),
     path("regions/popular", views.popular, name="web-popular"),
-    path("regions/<str:sgg_id>/notes", views.region_notes, name="web-region-notes"),
+    path(
+        "regions/<str:sgg_id>/notes",
+        read_or_write(views.region_notes, RegionNoteCreateView.as_view()),
+        name="web-region-notes",
+    ),
     path("regions/<str:sgg_id>/poll", views.empty_poll, name="web-region-poll"),
     path("regions/<str:sgg_id>/view", views.record_view, name="web-region-view"),
     path("regions/<str:sgg_id>", views.region_detail, name="web-region"),
-    path("dongs/<str:dong_id>/notes", views.dong_notes, name="web-dong-notes"),
+    path(
+        "dongs/<str:dong_id>/notes",
+        read_or_write(views.dong_notes, DongNoteCreateView.as_view()),
+        name="web-dong-notes",
+    ),
     path("dongs/<str:dong_id>/poll", views.empty_poll, name="web-dong-poll"),
     path("dongs/<str:dong_id>", views.dong_detail, name="web-dong"),
     path("search/parse", views.search_parse, name="web-search-parse"),
