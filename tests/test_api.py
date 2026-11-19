@@ -134,6 +134,11 @@ def data(db):
                 scope="dong", unit_id=dong_id, month=10, metric_def_id="local_life", raw_value=ll
             )
         )
+    # 동의 생활권/관광지(kind)는 연간 값으로 판정한다
+    for dong_id, ll in {101: 0.8, 201: 0.5}.items():
+        rows.append(
+            Metric(scope="dong", unit_id=dong_id, month=0, metric_def_id="local_life", raw_value=ll)
+        )
     Metric.objects.bulk_create(rows)
     curve = [
         10,
