@@ -55,7 +55,7 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
 | `migrations/20261115_user-event.sql` | 개인화 랭킹 행동 기록 `user_event` | 미적용 |
 | `migrations/20261117_drop-dong-answer.sql` | 동네에 물어보기 답 `dong_answer` 삭제 (답은 Redis 7일만) | 2026-11-17 |
 | `migrations/20261117_app-user-auth.sql` | 로그인: `app_user.email_masked` · `agreed_at` 추가 | 2026-11-17 |
-| `migrations/20261120_photo-upload-poll.sql` | 사진 업로드: `photo.tip_id` · `position` · `hidden_at` · `deleted_by_user` 추가, `status` 기본값 `approved`. 체감 투표: `metric_vote` 삭제 → `poll_vote`(질문 하나에 한 표) + RLS | 미적용 |
+| `migrations/20261120_photo-upload-poll.sql` | 사용자 사진: `user_photo` 새 표(노트 첨부 · 이달의 사진) + RLS, `report.target_type` 에 `upload`. `photo` 는 그대로. 체감 투표: `metric_vote` 삭제 → `poll_vote`(질문 하나에 한 표) + RLS | 미적용 |
 
 ## 지표 (명세 v0.3 변경안 3장)
 
@@ -106,7 +106,7 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
 - 사진 (`photo`, 2026-11-08): 관광공사 포토코리아 갤러리 사진 814장을 가로 1600px WebP 로 줄여 Cloudflare R2(`photos/<갤러리 id>.webp`)에 올렸다. 전부 **공공누리 1유형**이라 화면에 `credit`(예: "한국관광공사 포토코리아 / 작가")을 꼭 함께 보여 준다.
   - 시군구는 모든 사진, 행정동은 촬영지 문구로 특정된 334장(65개 동). 촬영지가 "제주도" 뿐인 181장(대부분 음식)과 원본 링크가 깨진 34장은 뺐다.
   - API 는 같은 달 → 앞뒤 한 달 → 월 모름 → 그 밖 순으로 고르고 같은 순위 안에서는 랜덤 (`regions/photos.py`).
-  - 사용자 사진(2026-11-20): `source = user`, 파일은 같은 버킷 `uploads/{tip|photo}/`. 올리면 바로 `approved`, 신고가 쌓이면 `pending` 으로 가리고 파일을 `uploads/quarantine/` 으로 옮긴다. 노트 첨부 사진(`tip_id` 있음)은 갤러리에 섞지 않는다. 검수는 `manage.py photos` ([개발 가이드](../docs/개발-가이드.md)).
+- 사용자 사진 (`user_photo`, 2026-11-20): `photo` 와 따로 둔다 (갤러리 · 대표 사진은 `photo` 만). 파일은 같은 버킷 `uploads/{tip|photo}/`. 노트 첨부 사진은 `tip_id` 가 있고, 없으면 이달의 사진이다. 올리면 바로 `approved`, 신고(`report.target_type = 'upload'`)가 쌓이면 `pending` 으로 가리고 파일을 `uploads/quarantine/` 으로 옮긴다. 검수는 `manage.py photos` ([개발 가이드](../docs/개발-가이드.md)).
 - 보류: `app_user.provider` 의 `apple` 제거와 알림 설정 컬럼 3개는 모바일 Apple 로그인 결정(workation-mobile #2) 뒤에.
 
 ## v0.2 → v0.3 변경
@@ -172,6 +172,7 @@ erDiagram
   app_user ||--o{ tip_reaction : ""
   app_user ||--o{ tip_reply : ""
   app_user ||--o{ report : ""
+  app_user ||--o{ user_photo : ""
   app_user ||--o{ poll_vote : ""
   app_user |o--o{ share_card : ""
   app_user |o--o{ nl_search_log : ""
@@ -180,16 +181,19 @@ erDiagram
   region ||--o{ share_card : ""
   tip ||--o{ tip_reaction : ""
   tip ||--o{ tip_reply : ""
-  tip |o--o{ photo : "노트 첨부"
+  tip |o--o{ user_photo : "노트 첨부"
   region ||..o{ favorite : "unit_id"
   dong ||..o{ favorite : "unit_id"
   region ||..o{ photo : "unit_id"
   dong ||..o{ photo : "unit_id"
+  region ||..o{ user_photo : "unit_id"
+  dong ||..o{ user_photo : "unit_id"
   region ||..o{ poll_vote : "unit_id"
   dong ||..o{ poll_vote : "unit_id"
   tip ||..o{ report : "target"
   tip_reply ||..o{ report : "target"
   photo ||..o{ report : "target"
+  user_photo ||..o{ report : "target"
 
   region {
     smallint region_id PK "1~12"
@@ -349,14 +353,24 @@ erDiagram
     varchar(6) scope "region dong"
     smallint unit_id "논리 참조"
     smallint month "촬영월"
-    text url "Cloudflare R2"
+    text url "Supabase Storage"
     varchar(8) source "user tourapi team"
     varchar(100) credit
     uuid user_id FK "업로더"
-    varchar(8) status "approved pending hidden"
+    varchar(8) status "pending approved hidden"
     boolean is_featured
+    timestamptz created_at
+  }
+  user_photo {
+    serial user_photo_id PK
+    uuid user_id FK "올린 사람"
+    varchar(6) scope "region dong"
+    smallint unit_id "논리 참조"
+    smallint month "NULL=연간"
+    text url "Cloudflare R2 uploads/"
     int tip_id FK "노트 첨부"
     smallint position "노트 안 순서"
+    varchar(8) status "approved pending hidden"
     timestamptz hidden_at
     boolean deleted_by_user
     timestamptz created_at
@@ -387,7 +401,7 @@ erDiagram
   }
   report {
     serial report_id PK
-    varchar(6) target_type "tip reply photo"
+    varchar(6) target_type "tip reply photo upload"
     int target_id "논리 참조"
     uuid user_id FK
     varchar(30) reason
