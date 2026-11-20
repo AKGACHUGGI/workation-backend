@@ -10,7 +10,7 @@ from rest_framework.response import Response
 
 from accounts.views import LoginAPIView
 from core.errors import bad_request, error, not_found
-from webapi import community, data, photo_upload
+from webapi import community, data, photo_quarantine, photo_upload
 
 
 class MeAPIView(LoginAPIView):
@@ -145,9 +145,15 @@ class MyTipsView(MeAPIView):
 class MyTipView(MeAPIView):
     def delete(self, request, tip_id: str):
         # tip_id 는 INTEGER 라 그 범위의 숫자만 본다
-        if not (tip_id.isascii() and tip_id.isdigit() and len(tip_id) <= 9) or not (
-            community.delete_tip(request.user.user_id, int(tip_id))
-        ):
+        if not (tip_id.isascii() and tip_id.isdigit() and len(tip_id) <= 9):
+            return not_found("내 팁을 찾을 수 없습니다.")
+        try:
+            deleted = community.delete_tip(request.user.user_id, int(tip_id))
+        except photo_quarantine.DeleteFailed:
+            return error(
+                502, "DELETE_FAILED", "사진을 지우지 못했어요. 잠시 후 다시 시도해 주세요."
+            )
+        if not deleted:
             return not_found("내 팁을 찾을 수 없습니다.")
         return Response(status=204)
 

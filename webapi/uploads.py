@@ -158,3 +158,19 @@ def _report(photo_id: int, user_id, reason: str) -> tuple[bool, bool]:
         )
         found, hid = cur.fetchone()
     return found > 0, hid > 0
+
+
+class MyPhotoView(MeAPIView):
+    """DELETE /api/me/photos/{photoId}. 204. 내 이달의 사진이 아니면 404 (스펙 4-6)."""
+
+    def delete(self, request, photo_id: str):
+        pid = photo_id_or_none(photo_id)
+        try:
+            deleted = pid is not None and photo_quarantine.delete_mine(request.user.user_id, pid)
+        except photo_quarantine.DeleteFailed:
+            return error(
+                502, "DELETE_FAILED", "사진을 지우지 못했어요. 잠시 후 다시 시도해 주세요."
+            )
+        if not deleted:
+            return not_found("내 사진을 찾을 수 없습니다.")
+        return Response(status=204)

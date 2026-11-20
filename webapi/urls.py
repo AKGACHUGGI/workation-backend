@@ -86,6 +86,7 @@ urlpatterns = [
     path("me/tips", me.MyTipsView.as_view(), name="me-tips"),
     path("me/tips/<str:tip_id>", me.MyTipView.as_view(), name="me-tip"),
     path("me/photos", me.MyPhotosView.as_view(), name="me-photos"),
+    path("me/photos/<str:photo_id>", uploads.MyPhotoView.as_view(), name="me-photo"),
     # 예전 쿠키 로그인 경로
     re_path(r"^auth(/.*)?$", views.unauthorized, name="web-auth"),
 ]

@@ -19,7 +19,7 @@ from django.utils import timezone
 
 from metrics import scoring
 from regions.models import Dong, Region
-from webapi import data, photo_upload
+from webapi import data, photo_quarantine, photo_upload
 
 FAVORITE_LIMIT = 50  # 종류(지역 · 동네)마다. 웹 FAVORITE_LIMIT 과 같다
 PAGE_SIZE = 20
@@ -416,10 +416,37 @@ def create_tip(
 
 
 def delete_tip(user_id, tip_id: int) -> bool:
-    """내 팁을 지운다 (도움돼요 · 답글은 ON DELETE CASCADE). 내 팁이 아니면 False."""
+    """내 팁을 지운다 (도움돼요 · 답글은 ON DELETE CASCADE). 내 팁이 아니면 False.
+
+    첨부 사진 (스펙 4-6):
+    - 공개(approved) 사진은 R2 파일을 먼저 지운다. 실패하면 DeleteFailed 이고 팁은 그대로
+      (다시 시도하면 된다). 행은 팁과 함께 지워진다 (CASCADE).
+    - 가려진(pending · hidden) 사진은 증거라 팁에서 떼어(tip_id = NULL) hidden · deleted_by_user 로
+      남긴다. 30일 뒤 manage.py photos purge 가 지운다.
+    """
     with connection.cursor() as cur:
+        cur.execute(
+            """SELECT p.photo_id, p.url, p.status
+                 FROM tip t JOIN photo p ON p.tip_id = t.tip_id
+                WHERE t.tip_id = %s AND t.user_id = %s""",
+            [tip_id, user_id],
+        )
+        photos = cur.fetchall()
+    photo_quarantine.delete_files([url for _, url, status in photos if status == "approved"])
+    kept = [pid for pid, _, status in photos if status != "approved"]
+    with transaction.atomic(), connection.cursor() as cur:
+        if kept:
+            cur.execute(
+                """UPDATE photo SET tip_id = NULL, status = 'hidden',
+                          hidden_at = coalesce(hidden_at, now()), deleted_by_user = true
+                    WHERE photo_id = ANY(%s)""",
+                [kept],
+            )
         cur.execute("DELETE FROM tip WHERE tip_id = %s AND user_id = %s", [tip_id, user_id])
-        return cur.rowcount > 0
+        deleted = cur.rowcount > 0
+    for pid in kept:  # 보통 이미 격리돼 있다 (신고로 가려질 때)
+        photo_quarantine.try_quarantine(pid)
+    return deleted
 
 
 # ───────────────────────── MY ─────────────────────────
