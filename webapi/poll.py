@@ -58,12 +58,12 @@ def result(t: community.Target, month: int | None, preset: str, user_id) -> dict
         )
         yes, no, mine = cur.fetchone()
         cur.execute(
-            """SELECT p.photo_id, p.url, coalesce(u.nickname, p.credit, '')
-                 FROM photo p LEFT JOIN app_user u ON u.user_id = p.user_id
+            """SELECT p.user_photo_id, p.url, coalesce(u.nickname, '')
+                 FROM user_photo p LEFT JOIN app_user u ON u.user_id = p.user_id
                 WHERE p.status = 'approved' AND p.tip_id IS NULL
                   AND p.scope = %(scope)s AND p.unit_id = %(unit)s
                   AND (%(month)s::int IS NULL OR p.month = %(month)s)
-                ORDER BY p.created_at DESC, p.photo_id DESC
+                ORDER BY p.created_at DESC, p.user_photo_id DESC
                 LIMIT %(limit)s""",
             {"scope": t.scope, "unit": t.unit_id, "month": month, "limit": PHOTO_LIMIT},
         )

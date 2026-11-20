@@ -85,34 +85,49 @@ def test_poll_photos(client, me):  # noqa: F811
     tip = run(
         "INSERT INTO tip (user_id, region_id, body) VALUES (%s, 1, '팁') RETURNING tip_id", [me]
     )[0][0]
-    rows = [  # (month, source, user_id, credit, status, tip_id)
-        (10, "user", me, None, "approved", None),
-        (10, "tourapi", None, "한국관광공사 포토코리아 / 갑", "approved", None),
-        (7, "user", me, None, "approved", None),  # 다른 달
-        (10, "user", me, None, "pending", None),  # 가려짐
-        (10, "user", me, None, "approved", tip),  # 노트 사진
+    rows = [  # (month, user_id, status, tip_id)
+        (10, me, "approved", None),
+        (10, OTHER_ID, "approved", None),
+        (7, me, "approved", None),  # 다른 달
+        (10, me, "pending", None),  # 가려짐
+        (10, me, "approved", tip),  # 노트 사진
     ]
     ids = []
-    for i, (month, source, user, credit, status, tip_id) in enumerate(rows):
+    for i, (month, user, status, tip_id) in enumerate(rows):
         ids.append(
             run(
-                "INSERT INTO photo (scope, unit_id, month, url, source, user_id, credit, status,"
-                " tip_id, created_at) VALUES ('region', 1, %s, %s, %s, %s, %s, %s, %s,"
-                " now() - make_interval(mins => %s)) RETURNING photo_id",
-                [month, f"https://r2.example/{i}.webp", source, user, credit, status, tip_id, i],
+                "INSERT INTO user_photo (scope, unit_id, month, url, user_id, status, tip_id,"
+                " created_at) VALUES ('region', 1, %s, %s, %s, %s, %s,"
+                " now() - make_interval(mins => %s)) RETURNING user_photo_id",
+                [month, f"https://r2.example/{i}.webp", user, status, tip_id, i],
             )[0][0]
         )
+    # 관광공사 사진(photo 표)은 투표 사진에 나오지 않는다
+    run(
+        "INSERT INTO photo (scope, unit_id, month, url, source, credit, status)"
+        " VALUES ('region', 1, 10, 'https://r2.example/t.webp', 'tourapi',"
+        " '한국관광공사 포토코리아 / 갑', 'approved')"
+    )
     body = client.get(f"/api/regions/{GOSEONG}/poll?month=2025-10&preset=quiet").json()
-    assert body["photos"] == [  # 최신순, 업로더 닉네임 또는 출처
+    assert body["photos"] == [  # 최신순, 올린 사람 닉네임
         {"id": str(ids[0]), "url": "https://r2.example/0.webp", "author": "두이"},
-        {
-            "id": str(ids[1]),
-            "url": "https://r2.example/1.webp",
-            "author": "한국관광공사 포토코리아 / 갑",
-        },
+        {"id": str(ids[1]), "url": "https://r2.example/1.webp", "author": "바다개발자"},
     ]
     annual = client.get(f"/api/regions/{GOSEONG}/poll?month=annual&preset=quiet").json()
     assert len(annual["photos"]) == 3  # 연간은 달을 가리지 않는다
+
+
+def test_poll_photos_latest_six(client, me):  # noqa: F811
+    for i in range(poll.PHOTO_LIMIT + 1):
+        run(
+            "INSERT INTO user_photo (scope, unit_id, month, url, user_id, created_at)"
+            " VALUES ('region', 1, 10, %s, %s, now() - make_interval(mins => %s))",
+            [f"https://r2.example/{i}.webp", me, i],
+        )
+    photos = client.get(f"/api/regions/{GOSEONG}/poll?month=2025-10&preset=quiet").json()["photos"]
+    assert [p["url"] for p in photos] == [
+        f"https://r2.example/{i}.webp" for i in range(poll.PHOTO_LIMIT)
+    ]
 
 
 @pytest.mark.parametrize(
