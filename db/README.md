@@ -55,7 +55,7 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
 | `migrations/20261115_user-event.sql` | 개인화 랭킹 행동 기록 `user_event` | 미적용 |
 | `migrations/20261117_drop-dong-answer.sql` | 동네에 물어보기 답 `dong_answer` 삭제 (답은 Redis 7일만) | 2026-11-17 |
 | `migrations/20261117_app-user-auth.sql` | 로그인: `app_user.email_masked` · `agreed_at` 추가 | 2026-11-17 |
-| `migrations/20261120_photo-upload-poll.sql` | 사용자 사진: `user_photo` 새 표(노트 첨부 · 이달의 사진) + RLS, `report.target_type` 에 `upload`. `photo` 는 그대로. 체감 투표: `metric_vote` 삭제 → `poll_vote`(질문 하나에 한 표) + RLS | 미적용 |
+| `migrations/20261120_photo-upload-poll.sql` | 사용자 사진: `user_photo` 새 표(노트 첨부 · 이달의 사진) + RLS, `report.target_type` 에 `upload`. `photo` 는 그대로. 체감 투표: `metric_vote` 삭제 → `poll_vote`(질문 하나에 한 표) + RLS | 2026-11-20 적용 |
 
 ## 지표 (명세 v0.3 변경안 3장)
 
