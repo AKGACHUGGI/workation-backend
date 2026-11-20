@@ -35,3 +35,11 @@ CLOVA_API_KEY = ""
 SUPABASE_URL = ""
 SUPABASE_JWT_SECRET = ""
 SUPABASE_SERVICE_ROLE_KEY = ""
+
+# .env 에 R2 키가 있어도 단위 테스트는 실제 R2 에 올리지 않는다.
+# 업로드 테스트는 tests/photo_tools.py 의 r2 픽스처로 가짜를 끼운다
+R2_ACCOUNT_ID = ""
+R2_ACCESS_KEY_ID = ""
+R2_SECRET_ACCESS_KEY = ""
+R2_BUCKET = ""
+R2_PUBLIC_URL = ""

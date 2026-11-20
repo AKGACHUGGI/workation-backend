@@ -42,6 +42,16 @@ CORS_ALLOWED_ORIGINS = env.list(
 
 # 자연어 검색(HyperCLOVA X · CLOVA 임베딩). 비어 있으면 규칙 파서 · 문자열 매칭으로 동작한다.
 CLOVA_API_KEY = env("CLOVA_API_KEY", default="")
+# 사진 업로드 (Cloudflare R2, S3 호환 API). 버킷은 데이터 담당 소유라 사용자 사진은
+# uploads/ 아래에만 쓴다. 비어 있으면 업로드가 502 UPLOAD_FAILED.
+# photo.url = R2_PUBLIC_URL + "/" + key
+R2_ACCOUNT_ID = env("R2_ACCOUNT_ID", default="")
+R2_ACCESS_KEY_ID = env("R2_ACCESS_KEY_ID", default="")
+R2_SECRET_ACCESS_KEY = env("R2_SECRET_ACCESS_KEY", default="")
+R2_BUCKET = env("R2_BUCKET", default="")
+R2_PUBLIC_URL = env("R2_PUBLIC_URL", default="").rstrip("/")
+# 신고가 이만큼 쌓이면 사진을 가리고(pending) 운영자 검수를 기다린다 (manage.py photos)
+PHOTO_REPORT_THRESHOLD = env.int("PHOTO_REPORT_THRESHOLD", default=3)
 
 # 로그인 (Supabase Auth). 웹·앱이 Supabase 로 로그인하고 백엔드는 JWT 만 검증한다.
 # SUPABASE_JWT_SECRET 은 레거시 HS256 프로젝트일 때만. 비어 있으면 JWKS(공개키)로 검증
