@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import re
+from typing import NamedTuple
 
 from django.db import connection
 from django.utils import timezone
@@ -56,6 +57,26 @@ def unit_id(scope: str, code: str) -> int | None:
         return region.region_id if region else None
     dong = dong_by_code(code)
     return dong.dong_id if dong else None
+
+
+class Target(NamedTuple):
+    """사진 · 투표 대상. unit_id 는 region_id 또는 dong_id, region_id 는 소속 시군구."""
+
+    scope: str
+    unit_id: int
+    region_id: int
+    name: str
+
+
+def target(kind: str, code: str) -> Target | None:
+    """웹 경로의 (regions|dongs, 코드) → Target. 없는 코드 · 집계 제외 동은 None."""
+    if kind == "regions":
+        r = region_by_code(code)
+        return Target("region", r.region_id, r.region_id, r.sigungu_name) if r else None
+    d = dong_by_code(code)
+    if d is None or d.is_excluded:
+        return None
+    return Target("dong", d.dong_id, d.region_id, d.dong_name)
 
 
 # ───────────────────────── 즐겨찾기 ─────────────────────────
