@@ -353,7 +353,7 @@ erDiagram
     varchar(6) scope "region dong"
     smallint unit_id "논리 참조"
     smallint month "촬영월"
-    text url "Supabase Storage"
+    text url "Cloudflare R2 (photos/)"
     varchar(8) source "user tourapi team"
     varchar(100) credit
     uuid user_id FK "업로더"
