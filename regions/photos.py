@@ -1,5 +1,4 @@
-"""지역 · 동네 사진 고르기. photo 테이블(파일은 Cloudflare R2)에서 공개(approved) 사진만,
-노트 첨부 사진(tip_id)은 빼고.
+"""지역 · 동네 사진 고르기. photo 테이블(파일은 Cloudflare R2)에서 승인된 사진만.
 
 - 같은 달 → 앞뒤 한 달 → 월 모름 → 그 밖의 달 순으로, 같은 순위 안에서는 랜덤.
 - 동네는 그 동 사진(scope=dong)을 먼저, 모자라면 소속 시군구 사진으로 채운다.
@@ -23,8 +22,7 @@ def _pick(where: str, params: dict, limit: int) -> tuple[list[dict], int]:
         SELECT photo_id, url, credit, count(*) OVER () AS total
           FROM (SELECT DISTINCT ON (url) photo_id, url, credit, month, prio FROM (
                   SELECT photo_id, url, credit, month, {where} AS prio
-                    FROM photo
-                   WHERE status = 'approved' AND tip_id IS NULL AND ({params.pop("_filter")})
+                    FROM photo WHERE status = 'approved' AND ({params.pop("_filter")})
                 ) a ORDER BY url, prio) b
          ORDER BY prio, {_ORDER}, random()
          LIMIT %(limit)s"""
@@ -71,8 +69,7 @@ def one_per_unit(scope: str, unit_ids: list[int], month: int | None) -> dict[int
         return {}
     sql = f"""
         SELECT DISTINCT ON (unit_id) unit_id, photo_id, url, credit FROM photo
-         WHERE status = 'approved' AND tip_id IS NULL
-           AND scope = %(scope)s AND unit_id = ANY(%(ids)s)
+         WHERE status = 'approved' AND scope = %(scope)s AND unit_id = ANY(%(ids)s)
          ORDER BY unit_id, {_ORDER}, random()"""
     with connection.cursor() as cur:
         cur.execute(sql, {"scope": scope, "ids": list(unit_ids), "month": month})
@@ -90,7 +87,7 @@ def one_per_dong(pairs: list[tuple[int, int]], month: int | None) -> dict[int, d
     sql = f"""
         SELECT DISTINCT ON (t.dong_id) t.dong_id, p.photo_id, p.url, p.credit
           FROM unnest(%(dongs)s::int[], %(regions)s::int[]) AS t(dong_id, region_id)
-          JOIN photo p ON p.status = 'approved' AND p.tip_id IS NULL
+          JOIN photo p ON p.status = 'approved'
                       AND ((p.scope = 'dong' AND p.unit_id = t.dong_id)
                         OR (p.scope = 'region' AND p.unit_id = t.region_id))
          ORDER BY t.dong_id, CASE WHEN p.scope = 'dong' THEN 0 ELSE 1 END, {_ORDER}, random()"""

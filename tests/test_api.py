@@ -410,36 +410,6 @@ def test_tiers_item_photo(client, photos):
     assert items["강릉시"]["photo"]["url"] == "https://r2.example/d.webp"
 
 
-def test_note_photos_stay_out_of_galleries(client, photos):
-    """노트 첨부 사진(tip_id 있음)은 지역 · 동네 갤러리와 대표 사진에 섞지 않는다."""
-    from django.db import connection
-
-    from regions.photos import one_per_dong, one_per_unit
-
-    with connection.cursor() as cur:
-        cur.execute(
-            "INSERT INTO app_user (user_id, provider, provider_uid, nickname)"
-            " VALUES ('9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d', 'kakao', 'x', '바다')"
-        )
-        cur.execute(
-            "INSERT INTO tip (user_id, region_id, body)"
-            " VALUES ('9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d', 2, '팁') RETURNING tip_id"
-        )
-        tip_id = cur.fetchone()[0]
-        for scope, unit in [("region", 1), ("region", 2), ("dong", 101), ("dong", 201)]:
-            cur.execute(
-                "INSERT INTO photo (scope, unit_id, month, url, source, status, tip_id)"
-                " VALUES (%s, %s, 10, 'https://r2.example/note.webp', 'user', 'approved', %s)",
-                [scope, unit, tip_id],
-            )
-    body = client.get("/api/v1/regions/51820?month=10").json()
-    assert body["photos"]["totalCount"] == 3
-    assert "https://r2.example/note.webp" not in [p["url"] for p in body["photos"]["featured"]]
-    for _ in range(5):  # 같은 순위 안은 랜덤이라 여러 번 본다
-        assert one_per_unit("region", [2], 10)[2]["url"] == "https://r2.example/d.webp"
-        assert one_per_dong([(201, 2)], 10)[201]["url"] == "https://r2.example/d.webp"
-
-
 # ───────────── 검색 속도 (분해 캐시 · 미리 받기) ─────────────
 
 
