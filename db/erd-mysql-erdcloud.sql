@@ -241,22 +241,6 @@ CREATE TABLE favorite (
   CONSTRAINT fk_favorite_user_id FOREIGN KEY (user_id) REFERENCES app_user (user_id)
 ) COMMENT = '즐겨찾기 (로그인 시 서버 동기화)';
 
-CREATE TABLE photo (
-  photo_id               INT AUTO_INCREMENT NOT NULL COMMENT '',
-  scope                  VARCHAR(6)     NOT NULL COMMENT 'region, dong',
-  unit_id                SMALLINT       NOT NULL COMMENT 'region_id 또는 dong_id (논리 참조)',
-  month                  SMALLINT       NULL COMMENT '1~12 (촬영월, NULL = 월 무관)',
-  url                    TEXT           NOT NULL COMMENT 'Cloudflare 공개 URL',
-  source                 VARCHAR(8)     NOT NULL COMMENT 'user, tourapi, team',
-  credit                 VARCHAR(100)   NULL COMMENT '출처 크레딧',
-  user_id                CHAR(36)       NULL COMMENT 'source=user 일 때 업로더',
-  status                 VARCHAR(8)     NOT NULL DEFAULT 'pending' COMMENT 'pending, approved, hidden',
-  is_featured            TINYINT(1)     NOT NULL DEFAULT false COMMENT '이달의 사진',
-  created_at             DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '',
-  PRIMARY KEY (photo_id),
-  CONSTRAINT fk_photo_user_id FOREIGN KEY (user_id) REFERENCES app_user (user_id)
-) COMMENT = '지역·동네 × 월 사진 (파일은 Cloudflare)';
-
 CREATE TABLE tip (
   tip_id                 INT AUTO_INCREMENT NOT NULL COMMENT '',
   user_id                CHAR(36)       NOT NULL COMMENT '',
@@ -272,6 +256,27 @@ CREATE TABLE tip (
   CONSTRAINT fk_tip_region_id FOREIGN KEY (region_id) REFERENCES region (region_id),
   CONSTRAINT fk_tip_dong_id FOREIGN KEY (dong_id) REFERENCES dong (dong_id)
 ) COMMENT = '워케이션 노트 — 한 줄 팁';
+
+CREATE TABLE photo (
+  photo_id               INT AUTO_INCREMENT NOT NULL COMMENT '',
+  scope                  VARCHAR(6)     NOT NULL COMMENT 'region, dong',
+  unit_id                SMALLINT       NOT NULL COMMENT 'region_id 또는 dong_id (논리 참조)',
+  month                  SMALLINT       NULL COMMENT '1~12 (촬영월, NULL = 월 무관)',
+  url                    TEXT           NOT NULL COMMENT 'Cloudflare 공개 URL',
+  source                 VARCHAR(8)     NOT NULL COMMENT 'user, tourapi, team',
+  credit                 VARCHAR(100)   NULL COMMENT '출처 크레딧',
+  user_id                CHAR(36)       NULL COMMENT 'source=user 일 때 업로더',
+  status                 VARCHAR(8)     NOT NULL DEFAULT 'approved' COMMENT 'approved(공개), pending(신고로 가려짐), hidden(숨김 확정)',
+  is_featured            TINYINT(1)     NOT NULL DEFAULT false COMMENT '이달의 사진',
+  tip_id                 INTEGER        NULL COMMENT '노트 첨부 사진이면 tip_id (갤러리에 섞지 않음)',
+  position               SMALLINT       NULL COMMENT '노트 안 순서 0~2',
+  hidden_at              DATETIME       NULL COMMENT 'hidden 이 된 시각 (30일 뒤 manage.py photos purge)',
+  deleted_by_user        TINYINT(1)     NOT NULL DEFAULT false COMMENT '가려진 사진을 올린 사람이 지움 (증거로 보관 중)',
+  created_at             DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '',
+  PRIMARY KEY (photo_id),
+  CONSTRAINT fk_photo_user_id FOREIGN KEY (user_id) REFERENCES app_user (user_id),
+  CONSTRAINT fk_photo_tip_id FOREIGN KEY (tip_id) REFERENCES tip (tip_id)
+) COMMENT = '지역·동네 × 월 사진 (파일은 Cloudflare)';
 
 CREATE TABLE tip_reaction (
   tip_id                 INTEGER        NOT NULL COMMENT '',
@@ -306,18 +311,17 @@ CREATE TABLE report (
   CONSTRAINT fk_report_user_id FOREIGN KEY (user_id) REFERENCES app_user (user_id)
 ) COMMENT = '신고 (3건 이상 자동 숨김)';
 
-CREATE TABLE metric_vote (
+CREATE TABLE poll_vote (
   user_id                CHAR(36)       NOT NULL COMMENT '',
   scope                  VARCHAR(6)     NOT NULL COMMENT 'region, dong',
   unit_id                SMALLINT       NOT NULL COMMENT 'region_id 또는 dong_id (논리 참조)',
-  month                  SMALLINT       NOT NULL COMMENT '',
-  metric_key             VARCHAR(20)    NOT NULL COMMENT '',
-  agree                  TINYINT(1)     NOT NULL COMMENT 'true = 그래요',
+  month                  SMALLINT       NOT NULL COMMENT '0 = 연간(annual), 1~12',
+  preset                 VARCHAR(8)     NOT NULL DEFAULT '' COMMENT 'region: quiet, lively, custom / dong: 빈 문자열',
+  choice                 TINYINT(1)     NOT NULL COMMENT 'true = yes',
   created_at             DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '',
-  PRIMARY KEY (user_id, scope, unit_id, month, metric_key),
-  CONSTRAINT fk_metric_vote_user_id FOREIGN KEY (user_id) REFERENCES app_user (user_id),
-  CONSTRAINT fk_metric_vote_metric_key FOREIGN KEY (metric_key) REFERENCES metric_def (metric_key)
-) COMMENT = '지표 체감 투표 (그래요/아니요)';
+  PRIMARY KEY (user_id, scope, unit_id, month, preset),
+  CONSTRAINT fk_poll_vote_user_id FOREIGN KEY (user_id) REFERENCES app_user (user_id)
+) COMMENT = '체감 투표 (질문 하나에 한 표)';
 
 CREATE TABLE share_card (
   card_id                INT AUTO_INCREMENT NOT NULL COMMENT '',
