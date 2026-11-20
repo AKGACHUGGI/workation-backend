@@ -255,10 +255,19 @@ def test_region_notes_contract(client, me):
         "body": "거진항 카페는 평일 오전이 조용해요",
         "helpful": 2,
         "replies": 1,
+        "photos": [],
     }
     assert note["createdAt"].endswith("+09:00")
     # 없는 값은 키를 뺀다 (웹 타입의 선택 필드)
-    assert set(body["items"][1]) == {"id", "author", "createdAt", "body", "helpful", "replies"}
+    assert set(body["items"][1]) == {
+        "id",
+        "author",
+        "createdAt",
+        "body",
+        "helpful",
+        "replies",
+        "photos",
+    }
 
     recent = client.get(f"/api/regions/{GOSEONG}/notes?sort=recent").json()
     assert [n["id"] for n in recent["items"]] == [str(second), str(first)]
@@ -375,7 +384,7 @@ def test_my_tips_contract(client, me):
         "한 달 체류",
         "2025-10",
     )
-    assert (tip["helpful"], tip["replies"]) == (2, 0)
+    assert (tip["helpful"], tip["replies"], tip["photos"]) == (2, 0, [])
 
 
 def test_my_tips_cursor_keeps_helpful_sum(client, me, monkeypatch):
@@ -502,6 +511,7 @@ def test_post_region_tip_contract(client, me):
         "body": "속초에서 버스로 40분",
         "helpful": 0,
         "replies": 0,
+        "photos": [],
     }
     assert note["createdAt"].endswith("+09:00")
     row = run("SELECT user_id, region_id, dong_id, visit_month, stay_days, body, status FROM tip")

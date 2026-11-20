@@ -5,11 +5,12 @@ GET · PATCH · DELETE /api/me 자체는 accounts/views.py 에 있다.
 """
 
 from rest_framework.exceptions import NotAuthenticated
+from rest_framework.parsers import JSONParser, MultiPartParser
 from rest_framework.response import Response
 
 from accounts.views import LoginAPIView
 from core.errors import bad_request, error, not_found
-from webapi import community, data
+from webapi import community, data, photo_upload
 
 
 class MeAPIView(LoginAPIView):
@@ -71,10 +72,12 @@ class FavoriteItemView(MeAPIView):
 class NoteCreateView(MeAPIView):
     """POST /api/{regions|dongs}/{id}/notes. 201 + 만든 팁(Note). 같은 경로의 GET 은 views.py.
 
+    사진이 없으면 JSON {body, visitMonth?}, 있으면 multipart (body · visitMonth · photos 0~3장).
     kind(regions · dongs)는 urls.py 의 하위 클래스가 정한다.
     """
 
     kind = ""
+    parser_classes = [JSONParser, MultiPartParser]
 
     def post(self, request, sgg_id: str | None = None, dong_id: str | None = None):
         region_id, dong = None, None
@@ -88,11 +91,23 @@ class NoteCreateView(MeAPIView):
             region_id = dong.region_id if dong else None
         if region_id is None:
             return not_found("팁을 쓸 지역 · 동네를 찾을 수 없습니다.")
+        payload = request.data
+        if (request.content_type or "").startswith("multipart/"):
+            payload = {k: payload[k] for k in ("body", "visitMonth") if k in payload}
         try:
-            body, visit_month = community.parse_tip(request.data)
+            body, visit_month = community.parse_tip(payload)
         except community.BadTip as ex:
             return bad_request(str(ex))
-        note = community.create_tip(request.user, region_id, dong, body, visit_month)
+        try:
+            photos = photo_upload.process(request.FILES.getlist("photos"), min_count=0)
+        except photo_upload.BadPhoto as ex:
+            return error(400, "INVALID_PHOTO", str(ex))
+        try:
+            note = community.create_tip(request.user, region_id, dong, body, visit_month, photos)
+        except photo_upload.UploadFailed:
+            return error(
+                502, "UPLOAD_FAILED", "사진을 올리지 못했어요. 잠시 후 다시 시도해 주세요."
+            )
         if note is None:
             return error(
                 429,

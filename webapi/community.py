@@ -11,13 +11,14 @@
 from __future__ import annotations
 
 import re
+from contextlib import nullcontext
 
-from django.db import connection
+from django.db import connection, transaction
 from django.utils import timezone
 
 from metrics import scoring
 from regions.models import Dong, Region
-from webapi import data
+from webapi import data, photo_upload
 
 FAVORITE_LIMIT = 50  # 종류(지역 · 동네)마다. 웹 FAVORITE_LIMIT 과 같다
 PAGE_SIZE = 20
@@ -186,7 +187,12 @@ _TIP_PAGE = """
                    t.region_id, d.adm_code, d.dong_name,
                    (SELECT count(*) FROM tip_reaction r WHERE r.tip_id = t.tip_id) AS helpful,
                    (SELECT count(*) FROM tip_reply p
-                     WHERE p.tip_id = t.tip_id AND p.status = 'public') AS replies
+                     WHERE p.tip_id = t.tip_id AND p.status = 'public') AS replies,
+                   (SELECT coalesce(json_agg(json_build_object('id', ph.photo_id::text,
+                                                               'url', ph.url)
+                                             ORDER BY ph.position), '[]'::json)
+                      FROM photo ph
+                     WHERE ph.tip_id = t.tip_id AND ph.status = 'approved') AS photos
               FROM tip t
               JOIN app_user u ON u.user_id = t.user_id
               LEFT JOIN dong d ON d.dong_id = t.dong_id
@@ -227,6 +233,7 @@ def _note(row: tuple, with_target: bool) -> dict:
         "body": body,
         "helpful": row[9],
         "replies": row[10],
+        "photos": row[11],
     }
     if dong_name:
         note["dongName"] = dong_name
@@ -259,7 +266,8 @@ def tip_page(by: str, target_id, sort: str, cursor: str | None) -> dict:
         if not rows and offset:  # 끝을 지난 커서. 합계만 다시 읽는다
             cur.execute(sql, {"id": target_id, "limit": 1, "offset": 0})
             totals = cur.fetchall()
-    total, helpful_sum = (totals[0][11], int(totals[0][12])) if totals else (0, 0)
+    # photos 열이 더해져 total · helpful_sum 은 12 · 13 번째
+    total, helpful_sum = (totals[0][12], int(totals[0][13])) if totals else (0, 0)
     return {
         "items": [_note(r, with_target=by == "user") for r in rows[:PAGE_SIZE]],
         "total": total,
@@ -293,36 +301,80 @@ def parse_tip(payload) -> tuple[str, int | None]:
     return body, int(raw[-2:])
 
 
-def create_tip(user, region_id: int, dong: Dong | None, body: str, visit_month: int | None):
+_TIP_INSERT = f"""
+    WITH cur AS (
+      SELECT count(*) AS n FROM tip
+       WHERE user_id = %(user)s AND created_at > now() - interval '{TIP_BURST_WINDOW}'
+    ), ins AS (
+      INSERT INTO tip (user_id, region_id, dong_id, visit_month, body)
+      SELECT %(user)s, %(region)s, %(dong)s, %(month)s, %(body)s
+        FROM cur WHERE n < %(limit)s
+      RETURNING tip_id, created_at
+    )
+    SELECT tip_id, created_at FROM ins"""
+
+
+def _insert_tip_photos(tip_id, scope, unit, month, user_id, urls) -> list[dict]:
+    """노트 사진 행을 한 문장으로 넣는다 → [{id, url}] (올린 순서)."""
+    with connection.cursor() as cur:
+        cur.execute(
+            """INSERT INTO photo (scope, unit_id, month, url, source, user_id, tip_id, position,
+                                  status)
+               SELECT %(scope)s, %(unit)s, %(month)s, u.url, 'user', %(user)s, %(tip)s, u.n - 1,
+                      'approved'
+                 FROM unnest(%(urls)s::text[]) WITH ORDINALITY AS u(url, n)
+               RETURNING photo_id, url, position""",
+            {
+                "scope": scope,
+                "unit": unit,
+                "month": month,
+                "user": user_id,
+                "tip": tip_id,
+                "urls": urls,
+            },
+        )
+        rows = sorted(cur.fetchall(), key=lambda r: r[2])
+    return [{"id": str(pid), "url": url} for pid, url, _ in rows]
+
+
+def create_tip(
+    user, region_id: int, dong: Dong | None, body: str, visit_month: int | None, photos=()
+):
     """공개 팁을 쓰고 읽기와 같은 모양(Note)으로 돌려준다. 연달아 쓰는 한도를 넘으면 None.
 
     최근 TIP_BURST_WINDOW 안의 내 팁을 세는 것과 넣는 것이 한 문장이라 DB 왕복이 한 번이다.
+    photos(WebP 바이트)가 있으면 한 트랜잭션 안에서 팁을 넣고(한도를 넘으면 올리지 않음) →
+    R2 에 올리고 → 사진 행을 넣는다. 업로드 실패는 UploadFailed(팁도 되돌림),
+    사진 행 실패는 올린 파일을 지우고 그 에러를 다시 던진다.
     """
-    with connection.cursor() as cur:
-        cur.execute(
-            f"""WITH cur AS (
-                 SELECT count(*) AS n FROM tip
-                  WHERE user_id = %(user)s AND created_at > now() - interval '{TIP_BURST_WINDOW}'
-               ), ins AS (
-                 INSERT INTO tip (user_id, region_id, dong_id, visit_month, body)
-                 SELECT %(user)s, %(region)s, %(dong)s, %(month)s, %(body)s
-                   FROM cur WHERE n < %(limit)s
-                 RETURNING tip_id, created_at
-               )
-               SELECT tip_id, created_at FROM ins""",
-            {
-                "user": user.user_id,
-                "region": region_id,
-                "dong": dong.dong_id if dong else None,
-                "month": visit_month,
-                "body": body,
-                "limit": TIP_BURST_LIMIT,
-            },
-        )
-        row = cur.fetchone()
-    if row is None:
-        return None
-    tip_id, created_at = row
+    attached: list[dict] = []
+    with transaction.atomic() if photos else nullcontext():
+        with connection.cursor() as cur:
+            cur.execute(
+                _TIP_INSERT,
+                {
+                    "user": user.user_id,
+                    "region": region_id,
+                    "dong": dong.dong_id if dong else None,
+                    "month": visit_month,
+                    "body": body,
+                    "limit": TIP_BURST_LIMIT,
+                },
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        tip_id, created_at = row
+        if photos:
+            uploaded = photo_upload.upload("tip", list(photos))
+            scope, unit = ("dong", dong.dong_id) if dong else ("region", region_id)
+            try:
+                attached = _insert_tip_photos(
+                    tip_id, scope, unit, visit_month, user.user_id, [url for _, url in uploaded]
+                )
+            except Exception:
+                photo_upload.discard([key for key, _ in uploaded])
+                raise
     return _note(
         (
             tip_id,
@@ -336,6 +388,7 @@ def create_tip(user, region_id: int, dong: Dong | None, body: str, visit_month: 
             dong.dong_name if dong else None,
             0,
             0,
+            attached,
         ),
         with_target=False,
     )
