@@ -23,7 +23,8 @@ MAX_BYTES = 10 * 1024 * 1024
 MAX_PIXELS = 40_000_000  # 압축 폭탄 방지
 MAX_WIDTH = 1600  # 관광공사 사진(photos/)과 같은 규격
 QUALITY = 82
-FORMATS = {"JPEG", "PNG", "WEBP"}
+# MPO = 다중 사진 JPEG (갤럭시 · 일부 카메라). Pillow 는 JPEG 하위 형식으로 열고 첫 장만 저장한다
+FORMATS = {"JPEG", "MPO", "PNG", "WEBP"}
 
 
 class BadPhoto(ValueError):

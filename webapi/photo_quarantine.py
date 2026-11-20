@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from urllib.parse import urlsplit
 
 from django.db import connection, transaction
 
@@ -26,9 +27,11 @@ class DeleteFailed(RuntimeError):
 
 
 def key_of(url: str) -> str | None:
-    """우리가 올린 사진(uploads/)의 R2 key. 관광공사 · 팀 사진이나 다른 주소는 None."""
-    prefix = storage.public_url("")
-    key = url.removeprefix(prefix) if url.startswith(prefix) else ""
+    """우리가 올린 사진(uploads/)의 R2 key. 관광공사 · 팀 사진(photos/)은 None.
+
+    공개 도메인(R2_PUBLIC_URL)을 r2.dev 에서 바꿔도 예전 행을 알아보도록 URL 의 경로만 본다.
+    """
+    key = urlsplit(url).path.lstrip("/")
     return key if key.startswith("uploads/") else None
 
 
@@ -66,7 +69,7 @@ def quarantine(photo_id: int) -> bool:
 
     공개 사진 · 관광공사 사진 · 이미 격리된 사진은 그대로 둔다. R2 실패는 StorageError.
     """
-    row = _one("SELECT url, status FROM photo WHERE photo_id = %s", [photo_id])
+    row = _one("SELECT url, status FROM photo WHERE photo_id = %s AND source = 'user'", [photo_id])
     if row is None or row[1] == "approved":
         return False
     key = key_of(row[0])
@@ -179,13 +182,20 @@ def delete_mine(user_id, photo_id: int) -> bool:
         return False
     url, status = row
     if status == "approved":
-        delete_files([url])
         with transaction.atomic(), connection.cursor() as cur:
-            cur.execute("DELETE FROM photo WHERE photo_id = %s", [photo_id])
-            cur.execute(
-                "DELETE FROM report WHERE target_type = 'photo' AND target_id = %s", [photo_id]
-            )
-        return True
+            # 신고(uploads._report 도 FOR UPDATE)와 엇갈려 그사이 가려졌으면 증거라 지우지 않는다
+            cur.execute("SELECT status FROM photo WHERE photo_id = %s FOR UPDATE", [photo_id])
+            now = cur.fetchone()
+            if now is None:
+                return False
+            if now[0] == "approved":
+                delete_files([url])  # 실패하면 DeleteFailed 로 되돌린다
+                cur.execute("DELETE FROM photo WHERE photo_id = %s", [photo_id])
+                cur.execute(
+                    "DELETE FROM report WHERE target_type = 'photo' AND target_id = %s",
+                    [photo_id],
+                )
+                return True
     with connection.cursor() as cur:
         cur.execute(
             """UPDATE photo SET status = 'hidden', hidden_at = now(), deleted_by_user = true

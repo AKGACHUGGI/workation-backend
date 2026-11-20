@@ -20,6 +20,16 @@ def test_formats_become_webp(fmt):
     assert im.format == "WEBP" and im.size == (800, 600)
 
 
+def test_mpo_phone_photo_accepted():
+    """갤럭시 · 일부 카메라의 다중 사진 JPEG(MPO). 첫 장만 WebP 로."""
+    out = io.BytesIO()
+    first, second = Image.new("RGB", (640, 480), "red"), Image.new("RGB", (320, 240), "blue")
+    first.save(out, "MPO", save_all=True, append_images=[second])
+    assert opened(out.getvalue()).format == "MPO"
+    (blob,) = photo_upload.process([upload(out.getvalue())], min_count=1)
+    assert opened(blob).format == "WEBP" and opened(blob).size == (640, 480)
+
+
 def test_wide_photo_is_resized_to_1600():
     (blob,) = photo_upload.process([upload(make_image(size=(3200, 1000)))], min_count=1)
     assert opened(blob).size == (1600, 500)

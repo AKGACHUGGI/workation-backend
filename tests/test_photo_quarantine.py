@@ -46,7 +46,8 @@ def key_now(pid):
 def test_key_of(r2):  # noqa: F811
     assert pq.key_of(f"{PUBLIC}/uploads/photo/a.webp") == "uploads/photo/a.webp"
     assert pq.key_of(f"{PUBLIC}/photos/1.webp") is None  # 버킷 주인 파일
-    assert pq.key_of("https://other.example/uploads/photo/a.webp") is None
+    # 공개 도메인이 바뀌어도 경로로 알아본다
+    assert pq.key_of("https://cdn.example/uploads/photo/a.webp") == "uploads/photo/a.webp"
 
 
 def test_quarantine_moves_file(me, r2):  # noqa: F811
@@ -150,6 +151,24 @@ def test_delete_mine_approved(me, r2):  # noqa: F811
     r2.fail_delete = False
     assert pq.delete_mine(me, pid) is True
     assert run("SELECT count(*) FROM photo") == [(0,)] and key not in r2.objects
+
+
+def test_delete_mine_hidden_by_report_meanwhile(me, r2, monkeypatch):  # noqa: F811
+    """처음 읽을 때는 공개였는데 지우기 직전에 신고로 가려졌으면 증거로 남긴다."""
+    pid, key = user_photo(r2, "approved")
+    real_one = pq._one
+    reported = []
+
+    def one_then_report(sql, params):
+        row = real_one(sql, params)
+        if not reported:  # 처음 읽은 직후 한 번만 가려진다
+            reported.append(1)
+            run("UPDATE photo SET status = 'pending' WHERE photo_id = %s", [pid])
+        return row
+
+    monkeypatch.setattr(pq, "_one", one_then_report)
+    assert pq.delete_mine(me, pid) is True
+    assert (col(pid, "status"), col(pid, "deleted_by_user")) == ("hidden", True)
 
 
 def test_delete_mine_pending_is_kept_as_evidence(me, r2):  # noqa: F811

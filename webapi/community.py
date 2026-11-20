@@ -366,36 +366,45 @@ def create_tip(
     최근 TIP_BURST_WINDOW 안의 내 팁을 세는 것과 넣는 것이 한 문장이라 DB 왕복이 한 번이다.
     photos(WebP 바이트)가 있으면 한 트랜잭션 안에서 팁을 넣고(한도를 넘으면 올리지 않음) →
     R2 에 올리고 → 사진 행을 넣는다. 업로드 실패는 UploadFailed(팁도 되돌림),
-    사진 행 실패는 올린 파일을 지우고 그 에러를 다시 던진다.
+    사진 행 · 커밋 실패는 올린 파일을 지우고 그 에러를 다시 던진다.
     """
     attached: list[dict] = []
-    with transaction.atomic() if photos else nullcontext():
-        with connection.cursor() as cur:
-            cur.execute(
-                _TIP_INSERT,
-                {
-                    "user": user.user_id,
-                    "region": region_id,
-                    "dong": dong.dong_id if dong else None,
-                    "month": visit_month,
-                    "body": body,
-                    "limit": TIP_BURST_LIMIT,
-                },
-            )
-            row = cur.fetchone()
-        if row is None:
-            return None
-        tip_id, created_at = row
-        if photos:
-            uploaded = photo_upload.upload("tip", list(photos))
-            scope, unit = ("dong", dong.dong_id) if dong else ("region", region_id)
-            try:
+    uploaded: list[tuple[str, str]] = []
+    try:
+        with transaction.atomic() if photos else nullcontext():
+            with connection.cursor() as cur:
+                if photos:
+                    # R2 에 올리는 동안 트랜잭션이 열려 있어 새 팁이 다른 요청의 한도 세기에
+                    # 보이지 않는다. 같은 사용자의 사진 노트 쓰기를 줄 세운다 (트랜잭션 끝에 풀림)
+                    cur.execute(
+                        "SELECT pg_advisory_xact_lock(hashtext(%s))", [f"tip:{user.user_id}"]
+                    )
+                cur.execute(
+                    _TIP_INSERT,
+                    {
+                        "user": user.user_id,
+                        "region": region_id,
+                        "dong": dong.dong_id if dong else None,
+                        "month": visit_month,
+                        "body": body,
+                        "limit": TIP_BURST_LIMIT,
+                    },
+                )
+                row = cur.fetchone()
+            if row is None:
+                return None
+            tip_id, created_at = row
+            if photos:
+                uploaded = photo_upload.upload("tip", list(photos))
+                scope, unit = ("dong", dong.dong_id) if dong else ("region", region_id)
                 attached = _insert_tip_photos(
                     tip_id, scope, unit, visit_month, user.user_id, [url for _, url in uploaded]
                 )
-            except Exception:
-                photo_upload.discard([key for key, _ in uploaded])
-                raise
+    except Exception:
+        # 사진 행 실패 · 커밋 실패 모두. 팁이 되돌려졌으니 올린 파일도 지운다
+        if uploaded:
+            photo_upload.discard([key for key, _ in uploaded])
+        raise
     return _note(
         (
             tip_id,
