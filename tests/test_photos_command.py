@@ -6,11 +6,10 @@ import pytest
 from django.core.management import call_command
 from django.core.management.base import CommandError
 
-from tests.photo_tools import r2  # noqa: F401
+from tests.photo_tools import r2, user_photo  # noqa: F401
 from tests.supabase_tokens import supabase  # noqa: F401
 from tests.test_api import data  # noqa: F401
 from tests.test_me_api import OTHER_ID, me, run  # noqa: F401
-from tests.test_photo_quarantine import user_photo
 from webapi import photo_quarantine
 
 pytestmark = pytest.mark.django_db
@@ -23,7 +22,7 @@ def photos_cmd(*args) -> str:
 
 
 def col(pid, name):
-    return run(f"SELECT {name} FROM photo WHERE photo_id = %s", [pid])[0][0]
+    return run(f"SELECT {name} FROM user_photo WHERE user_photo_id = %s", [pid])[0][0]
 
 
 def test_list(me, r2):  # noqa: F811
@@ -33,8 +32,8 @@ def test_list(me, r2):  # noqa: F811
     public, _ = user_photo(r2, "approved")
     run(
         "INSERT INTO report (target_type, target_id, user_id, reason)"
-        " VALUES ('photo', %s, %s, '광고'), ('photo', %s, %s, '무관한 사진')",
-        [moved, me, moved, OTHER_ID],
+        " VALUES (%s, %s, %s, '광고'), (%s, %s, %s, '무관한 사진')",
+        [photo_quarantine.REPORT_TYPE, moved, me, photo_quarantine.REPORT_TYPE, moved, OTHER_ID],
     )
     out = photos_cmd("list")
     lines = {line.split("\t")[0]: line for line in out.splitlines() if "\t" in line}
@@ -72,10 +71,10 @@ def test_purge(me, r2):  # noqa: F811
     pid, _ = user_photo(r2, "approved")
     photos_cmd("hide", str(pid))
     assert "0장 영구 삭제" in photos_cmd("purge")
-    run("UPDATE photo SET hidden_at = now() - interval '3 days'")
+    run("UPDATE user_photo SET hidden_at = now() - interval '3 days'")
     assert "0장 영구 삭제" in photos_cmd("purge")
     assert "1장 영구 삭제" in photos_cmd("purge", "--days", "2")
-    assert run("SELECT count(*) FROM photo") == [(0,)]
+    assert run("SELECT count(*) FROM user_photo") == [(0,)]
 
 
 def test_needs_ids():
