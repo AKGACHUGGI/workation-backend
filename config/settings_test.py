@@ -14,6 +14,9 @@ DATABASES = {
         "NAME": "postgres",
         "USER": os.environ.get("TEST_DB_USER", "postgres"),
         "PASSWORD": os.environ.get("TEST_DB_PASSWORD", "postgres"),
+        # 여러 작업 폴더(worktree)에서 테스트를 동시에 돌릴 때 테스트 DB 이름이 겹치지 않게.
+        # 비우면 Django 기본(test_postgres)
+        "TEST": {"NAME": os.environ.get("TEST_DB_NAME") or None},
     }
 }
 
