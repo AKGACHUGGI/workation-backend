@@ -79,7 +79,7 @@ class MonthPhotoView(MeAPIView):
 def _recent_count(user_id) -> int:
     with connection.cursor() as cur:
         cur.execute(
-            "SELECT count(*) FROM photo WHERE user_id = %s AND tip_id IS NULL"
+            "SELECT count(*) FROM user_photo WHERE user_id = %s AND tip_id IS NULL"
             " AND created_at > now() - interval '1 hour'",
             [user_id],
         )
@@ -87,13 +87,13 @@ def _recent_count(user_id) -> int:
 
 
 def _insert(t: community.Target, month: int | None, user_id, urls: list[str]) -> list[int]:
-    """사진 행을 한 문장으로 넣는다 → photo_id (urls 순서)."""
+    """사진 행을 한 문장으로 넣는다 → user_photo_id (urls 순서)."""
     with connection.cursor() as cur:
         cur.execute(
-            """INSERT INTO photo (scope, unit_id, month, url, source, user_id, status)
-               SELECT %(scope)s, %(unit)s, %(month)s, u.url, 'user', %(user)s, 'approved'
+            """INSERT INTO user_photo (scope, unit_id, month, url, user_id, status)
+               SELECT %(scope)s, %(unit)s, %(month)s, u.url, %(user)s, 'approved'
                  FROM unnest(%(urls)s::text[]) WITH ORDINALITY AS u(url, n)
-               RETURNING photo_id, url""",
+               RETURNING user_photo_id, url""",
             {"scope": t.scope, "unit": t.unit_id, "month": month, "user": user_id, "urls": urls},
         )
         by_url = {url: pid for pid, url in cur.fetchall()}
@@ -120,7 +120,7 @@ class PhotoReportView(MeAPIView):
 
 
 def photo_id_or_none(raw: str) -> int | None:
-    """경로의 photoId. photo_id 는 SERIAL 이라 그 범위의 숫자만 본다."""
+    """경로의 photoId. user_photo_id 는 SERIAL 이라 그 범위의 숫자만 본다."""
     return int(raw) if raw.isascii() and raw.isdigit() and len(raw) <= 9 else None
 
 
@@ -133,24 +133,25 @@ def _report(photo_id: int, user_id, reason: str) -> tuple[bool, bool]:
     with connection.cursor() as cur:
         cur.execute(
             """WITH p AS (
-                 SELECT photo_id FROM photo
-                  WHERE photo_id = %(id)s AND status = 'approved' FOR UPDATE
+                 SELECT user_photo_id FROM user_photo
+                  WHERE user_photo_id = %(id)s AND status = 'approved' FOR UPDATE
                ), ins AS (
                  INSERT INTO report (target_type, target_id, user_id, reason)
-                 SELECT 'photo', photo_id, %(user)s, %(reason)s FROM p
+                 SELECT %(type)s, user_photo_id, %(user)s, %(reason)s FROM p
                  ON CONFLICT DO NOTHING
                  RETURNING 1
                ), up AS (
-                 UPDATE photo SET status = 'pending'
-                  WHERE photo_id IN (SELECT photo_id FROM p)
+                 UPDATE user_photo SET status = 'pending'
+                  WHERE user_photo_id IN (SELECT user_photo_id FROM p)
                     AND (SELECT count(*) FROM report
-                          WHERE target_type = 'photo' AND target_id = %(id)s)
+                          WHERE target_type = %(type)s AND target_id = %(id)s)
                         + (SELECT count(*) FROM ins) >= %(threshold)s
                  RETURNING 1
                )
                SELECT (SELECT count(*) FROM p), (SELECT count(*) FROM up)""",
             {
                 "id": photo_id,
+                "type": photo_quarantine.REPORT_TYPE,
                 "user": user_id,
                 "reason": reason,
                 "threshold": settings.PHOTO_REPORT_THRESHOLD,
