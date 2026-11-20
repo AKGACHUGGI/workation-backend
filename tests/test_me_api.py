@@ -457,15 +457,16 @@ def test_my_photos_contract(client, me):
 
 # ───────────────────────── DB 왕복 수 ─────────────────────────
 
-# 토큰 주인(app_user) 조회 1번 포함. 정적 데이터 캐시가 찬 뒤 기준
+# 토큰 주인(app_user) 조회 1번 포함 (노트 읽기도 토큰이 있으면 mine 을 위해 조회한다).
+# 정적 데이터 캐시가 찬 뒤 기준
 QUERY_CASES = [
     ("/api/me/favorites/ids", 2),
     ("/api/me/favorites?month=2025-10", 3),
     ("/api/me/summary", 2),
     ("/api/me/tips", 2),
     ("/api/me/photos", 2),
-    (f"/api/regions/{GOSEONG}/notes?sort=helpful", 1),
-    (f"/api/dongs/{GEOJIN}/notes?sort=helpful", 2),
+    (f"/api/regions/{GOSEONG}/notes?sort=helpful", 2),
+    (f"/api/dongs/{GEOJIN}/notes?sort=helpful", 3),
 ]
 
 
@@ -512,6 +513,7 @@ def test_post_region_tip_contract(client, me):
         "helpful": 0,
         "replies": 0,
         "photos": [],
+        "mine": True,
     }
     assert note["createdAt"].endswith("+09:00")
     row = run("SELECT user_id, region_id, dong_id, visit_month, stay_days, body, status FROM tip")

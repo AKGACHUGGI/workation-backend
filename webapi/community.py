@@ -196,6 +196,7 @@ TIP_FILTERS = {
     "region": "t.region_id = %(id)s",  # 그 시군구의 팁 전부 (동네에 쓴 팁 포함)
     "dong": "t.dong_id = %(id)s",
     "user": "t.user_id = %(id)s",
+    "tip": "t.tip_id = %(id)s",
 }
 TIP_ORDERS = {
     "helpful": "helpful DESC, created_at DESC, tip_id DESC",
@@ -213,7 +214,10 @@ _TIP_PAGE = """
                                                                'url', ph.url)
                                              ORDER BY ph.position), '[]'::json)
                       FROM user_photo ph
-                     WHERE ph.tip_id = t.tip_id AND ph.status = 'approved') AS photos
+                     WHERE ph.tip_id = t.tip_id AND ph.status = 'approved') AS photos,
+                   coalesce(t.user_id = %(viewer)s, false) AS mine,
+                   EXISTS (SELECT 1 FROM tip_reaction r
+                            WHERE r.tip_id = t.tip_id AND r.user_id = %(viewer)s) AS my_helpful
               FROM tip t
               JOIN app_user u ON u.user_id = t.user_id
               LEFT JOIN dong d ON d.dong_id = t.dong_id
@@ -256,6 +260,10 @@ def _note(row: tuple, with_target: bool) -> dict:
         "replies": row[10],
         "photos": row[11],
     }
+    if row[12]:
+        note["mine"] = True
+    if row[13]:
+        note["myHelpful"] = True
     if dong_name:
         note["dongName"] = dong_name
     if label := stay_label(stay_days):
@@ -272,8 +280,9 @@ def _note(row: tuple, with_target: bool) -> dict:
     return note
 
 
-def tip_page(by: str, target_id, sort: str, cursor: str | None) -> dict:
-    """공개 팁 한 쪽. by = region(시군구) · dong(행정동) · user(내 팁, target 포함).
+def tip_page(by: str, target_id, sort: str, cursor: str | None, viewer=None) -> dict:
+    """공개 팁 한 쪽. by = region(시군구) · dong(행정동) · user(내 팁, target 포함) · tip(한 건).
+    viewer(user_id)가 쓴 팁에는 mine: true 를 붙인다.
 
     {"items", "total", "helpfulSum", "nextCursor"(다음 쪽이 없으면 None)}
     """
@@ -281,14 +290,15 @@ def tip_page(by: str, target_id, sort: str, cursor: str | None) -> dict:
     sql = _TIP_PAGE.format(where=TIP_FILTERS[by], order=TIP_ORDERS[sort])
     with connection.cursor() as cur:
         # 한 건 더 읽어 다음 쪽이 있는지 본다
-        cur.execute(sql, {"id": target_id, "limit": PAGE_SIZE + 1, "offset": offset})
+        params = {"id": target_id, "viewer": viewer}
+        cur.execute(sql, params | {"limit": PAGE_SIZE + 1, "offset": offset})
         rows = cur.fetchall()
         totals = rows
         if not rows and offset:  # 끝을 지난 커서. 합계만 다시 읽는다
-            cur.execute(sql, {"id": target_id, "limit": 1, "offset": 0})
+            cur.execute(sql, params | {"limit": 1, "offset": 0})
             totals = cur.fetchall()
-    # photos 열이 더해져 total · helpful_sum 은 12 · 13 번째
-    total, helpful_sum = (totals[0][12], int(totals[0][13])) if totals else (0, 0)
+    # photos · mine · my_helpful 열이 더해져 total · helpful_sum 은 14 · 15 번째
+    total, helpful_sum = (totals[0][14], int(totals[0][15])) if totals else (0, 0)
     return {
         "items": [_note(r, with_target=by == "user") for r in rows[:PAGE_SIZE]],
         "total": total,
@@ -417,9 +427,27 @@ def create_tip(
             0,
             0,
             attached,
+            True,
+            False,
         ),
         with_target=False,
     )
+
+
+def update_tip(user_id, tip_id: int, body: str) -> dict | None:
+    """내 공개 팁의 본문만 고친다. 고친 팁(Note)을, 내 공개 팁이 아니면 None 을 돌려준다.
+
+    사진 · 방문 월은 그대로 둔다 (사진을 바꾸려면 지우고 다시 쓴다).
+    """
+    with connection.cursor() as cur:
+        cur.execute(
+            "UPDATE tip SET body = %s WHERE tip_id = %s AND user_id = %s AND status = 'public'",
+            [body, tip_id, user_id],
+        )
+        if cur.rowcount == 0:
+            return None
+    items = tip_page("tip", tip_id, "recent", None, viewer=user_id)["items"]
+    return items[0] if items else None
 
 
 def delete_tip(user_id, tip_id: int) -> bool:

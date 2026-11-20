@@ -132,7 +132,11 @@ class MyTipsView(MeAPIView):
     def get(self, request):
         try:
             page = community.tip_page(
-                "user", request.user.user_id, "recent", request.query_params.get("cursor")
+                "user",
+                request.user.user_id,
+                "recent",
+                request.query_params.get("cursor"),
+                viewer=request.user.user_id,
             )
         except community.BadCursor as ex:
             return bad_request(str(ex))
@@ -142,10 +146,28 @@ class MyTipsView(MeAPIView):
         return Response(body)
 
 
+def int_id(raw: str) -> int | None:
+    """INTEGER 키(tip_id · reply_id) 범위의 숫자만 int 로, 아니면 None."""
+    return int(raw) if raw.isascii() and raw.isdigit() and len(raw) <= 9 else None
+
+
 class MyTipView(MeAPIView):
+    def patch(self, request, tip_id: str):
+        """본문만 고친다 {body}. 200 + 고친 팁(Note)."""
+        if int_id(tip_id) is None:
+            return not_found("내 팁을 찾을 수 없습니다.")
+        payload = request.data if isinstance(request.data, dict) else None
+        try:
+            body, _ = community.parse_tip({"body": payload.get("body")} if payload else None)
+        except community.BadTip as ex:
+            return bad_request(str(ex))
+        note = community.update_tip(request.user.user_id, int(tip_id), body)
+        if note is None:
+            return not_found("내 팁을 찾을 수 없습니다.")
+        return Response(note)
+
     def delete(self, request, tip_id: str):
-        # tip_id 는 INTEGER 라 그 범위의 숫자만 본다
-        if not (tip_id.isascii() and tip_id.isdigit() and len(tip_id) <= 9):
+        if int_id(tip_id) is None:
             return not_found("내 팁을 찾을 수 없습니다.")
         try:
             deleted = community.delete_tip(request.user.user_id, int(tip_id))
