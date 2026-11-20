@@ -4,4 +4,5 @@ from core import views
 
 urlpatterns = [
     path("health", views.health, name="health"),
+    path("live", views.live, name="live"),
 ]
