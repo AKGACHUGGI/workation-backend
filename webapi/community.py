@@ -1,6 +1,6 @@
 """즐겨찾기 · 워케이션 노트(팁) · 내 활동을 DB 에서 읽고 쓰는 함수들.
 
-표: favorite · tip · tip_reaction · tip_reply · photo · metric_vote (db/schema.sql).
+표: favorite · tip · tip_reaction · tip_reply · photo · poll_vote (db/schema.sql).
 계약: workation-web src/features/me/types.ts · src/features/region/types.ts (Note).
 
 - scope + unit_id 는 논리 참조(FK 없음)라 시군구 · 행정동 이름은 여기서 합친다.
@@ -364,7 +364,7 @@ def summary(user_id) -> dict:
     """MeSummary 의 집계 부분. createdAt 은 뷰가 app_user 에서 넣는다.
 
     stays 는 체류 기록 표가 없어 내 공개 팁의 시군구별 개수다.
-    voteCount 는 투표한 대상(지역 · 동네 × 월) 수 — metric_vote 는 지표별 행이라 행 수가 아니다.
+    voteCount 는 투표한 질문 수 (poll_vote 는 질문 하나에 한 행). photoCount 는 이달의 사진만.
     """
     with connection.cursor() as cur:
         cur.execute(
@@ -375,10 +375,10 @@ def summary(user_id) -> dict:
                SELECT
                  (SELECT array_agg(region_id ORDER BY n DESC, region_id) FROM s),
                  (SELECT array_agg(n ORDER BY n DESC, region_id) FROM s),
-                 (SELECT count(*) FROM photo WHERE user_id = %(u)s AND status <> 'hidden'),
+                 (SELECT count(*) FROM photo
+                   WHERE user_id = %(u)s AND status <> 'hidden' AND tip_id IS NULL),
                  (SELECT count(*) FROM favorite WHERE user_id = %(u)s),
-                 (SELECT count(DISTINCT (scope, unit_id, month))
-                    FROM metric_vote WHERE user_id = %(u)s)""",
+                 (SELECT count(*) FROM poll_vote WHERE user_id = %(u)s)""",
             {"u": user_id},
         )
         region_ids, counts, photo_count, favorite_count, vote_count = cur.fetchone()
@@ -397,14 +397,17 @@ def summary(user_id) -> dict:
 
 
 def my_photos(user_id) -> list[dict]:
-    """내가 올린 사진 (숨김 제외), 최근 것부터. 동네 사진의 regionName 은 소속 시군구."""
+    """내가 올린 이달의 사진 (숨김 · 노트 사진 제외), 최근 것부터.
+
+    동네 사진의 regionName 은 소속 시군구.
+    """
     with connection.cursor() as cur:
         cur.execute(
             """SELECT p.photo_id, p.url, p.month, p.status,
                       CASE WHEN p.scope = 'region' THEN p.unit_id ELSE d.region_id END
                  FROM photo p
                  LEFT JOIN dong d ON p.scope = 'dong' AND d.dong_id = p.unit_id
-                WHERE p.user_id = %s AND p.status <> 'hidden'
+                WHERE p.user_id = %s AND p.status <> 'hidden' AND p.tip_id IS NULL
                 ORDER BY p.created_at DESC, p.photo_id DESC""",
             [user_id],
         )

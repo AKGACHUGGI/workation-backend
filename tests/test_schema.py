@@ -18,7 +18,7 @@ EXPECTED_TABLES = {
     "tip_reaction",
     "tip_reply",
     "report",
-    "metric_vote",
+    "poll_vote",
     "share_card",
     "nl_search_log",
     "dong_type_score",
@@ -38,3 +38,17 @@ def test_schema_sql_loaded_into_test_db(db):
 
     assert EXPECTED_TABLES <= tables
     assert "dong_answer" not in tables  # 2026-11-17 제거: 답은 Redis 에만
+    assert "metric_vote" not in tables  # 2026-11-20 poll_vote 로 바뀜
+
+
+def test_photo_upload_columns(db):
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT column_name, column_default FROM information_schema.columns"
+            " WHERE table_name = 'photo' AND column_name IN"
+            " ('tip_id', 'position', 'status', 'hidden_at', 'deleted_by_user')"
+        )
+        cols = dict(cursor.fetchall())
+    assert set(cols) == {"tip_id", "position", "status", "hidden_at", "deleted_by_user"}
+    assert cols["status"].startswith("'approved'")  # 올리면 바로 공개
+    assert cols["deleted_by_user"] == "false"
