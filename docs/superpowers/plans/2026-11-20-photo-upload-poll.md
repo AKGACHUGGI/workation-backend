@@ -1056,8 +1056,14 @@ def _insert_tip_photos(tip_id, scope, unit, month, user_id, urls) -> list[dict]:
                       'approved'
                  FROM unnest(%(urls)s::text[]) WITH ORDINALITY AS u(url, n)
                RETURNING photo_id, url, position""",
-            {"scope": scope, "unit": unit, "month": month, "user": user_id, "tip": tip_id,
-             "urls": urls},
+            {
+                "scope": scope,
+                "unit": unit,
+                "month": month,
+                "user": user_id,
+                "tip": tip_id,
+                "urls": urls,
+            },
         )
         rows = sorted(cur.fetchall(), key=lambda r: r[2])
     return [{"id": str(pid), "url": url} for pid, url, _ in rows]
@@ -1171,7 +1177,9 @@ class NoteCreateView(MeAPIView):
         try:
             note = community.create_tip(request.user, region_id, dong, body, visit_month, photos)
         except photo_upload.UploadFailed:
-            return error(502, "UPLOAD_FAILED", "사진을 올리지 못했어요. 잠시 후 다시 시도해 주세요.")
+            return error(
+                502, "UPLOAD_FAILED", "사진을 올리지 못했어요. 잠시 후 다시 시도해 주세요."
+            )
         if note is None:
             return error(
                 429,
@@ -1315,8 +1323,9 @@ def test_hide(me, r2):  # noqa: F811
 
 
 def test_restore(me, r2):  # noqa: F811
-    tip = run("INSERT INTO tip (user_id, region_id, body) VALUES (%s, 1, '팁') RETURNING tip_id",
-              [me])[0][0]
+    tip = run(
+        "INSERT INTO tip (user_id, region_id, body) VALUES (%s, 1, '팁') RETURNING tip_id", [me]
+    )[0][0]
     pid, _ = user_photo(r2, "pending", tip_id=tip)
     pq.quarantine(pid)
     q_key = key_now(pid)
@@ -1339,8 +1348,10 @@ def test_purge(me, r2, monkeypatch):  # noqa: F811
     for pid in (old, fresh, stuck):
         pq.hide(pid)
     tour = tour_photo("hidden")
-    run("UPDATE photo SET hidden_at = now() - interval '31 days' WHERE photo_id IN (%s, %s, %s)",
-        [old, stuck, tour])
+    run(
+        "UPDATE photo SET hidden_at = now() - interval '31 days' WHERE photo_id IN (%s, %s, %s)",
+        [old, stuck, tour],
+    )
     old_key, stuck_key = key_now(old), key_now(stuck)
 
     real_delete = r2.delete
@@ -1380,8 +1391,9 @@ def test_delete_mine_pending_is_kept_as_evidence(me, r2):  # noqa: F811
 
 def test_delete_mine_not_mine(me, r2):  # noqa: F811
     others, _ = user_photo(r2, "approved", user_id=OTHER_ID)
-    tip = run("INSERT INTO tip (user_id, region_id, body) VALUES (%s, 1, '팁') RETURNING tip_id",
-              [me])[0][0]
+    tip = run(
+        "INSERT INTO tip (user_id, region_id, body) VALUES (%s, 1, '팁') RETURNING tip_id", [me]
+    )[0][0]
     note_photo, _ = user_photo(r2, "approved", tip_id=tip)
     assert pq.delete_mine(me, others) is False
     assert pq.delete_mine(me, note_photo) is False  # 노트 사진은 노트를 지운다
@@ -1502,7 +1514,9 @@ def hide(photo_id: int) -> bool:
 def restore(photo_id: int) -> bool:
     """pending 사진을 다시 공개한다. 격리 파일을 새 공개 key 로 옮기고(원래 key 는 캐시에 404 가
     남았을 수 있어 쓰지 않음) approved 로, 그 사진의 신고를 지운다. pending 이 아니면 False."""
-    row = _one("SELECT url, tip_id FROM photo WHERE photo_id = %s AND status = 'pending'", [photo_id])
+    row = _one(
+        "SELECT url, tip_id FROM photo WHERE photo_id = %s AND status = 'pending'", [photo_id]
+    )
     if row is None:
         return False
     url, tip_id = row
@@ -1510,9 +1524,7 @@ def restore(photo_id: int) -> bool:
         _move(photo_id, key_of(url), "tip" if tip_id else "photo")
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("UPDATE photo SET status = 'approved' WHERE photo_id = %s", [photo_id])
-        cur.execute(
-            "DELETE FROM report WHERE target_type = 'photo' AND target_id = %s", [photo_id]
-        )
+        cur.execute("DELETE FROM report WHERE target_type = 'photo' AND target_id = %s", [photo_id])
     return True
 
 
@@ -1879,7 +1891,9 @@ class MonthPhotoView(MeAPIView):
         try:
             uploaded = photo_upload.upload("photo", blobs)
         except photo_upload.UploadFailed:
-            return error(502, "UPLOAD_FAILED", "사진을 올리지 못했어요. 잠시 후 다시 시도해 주세요.")
+            return error(
+                502, "UPLOAD_FAILED", "사진을 올리지 못했어요. 잠시 후 다시 시도해 주세요."
+            )
         try:
             ids = _insert(t, month, user_id, [url for _, url in uploaded])
         except Exception:
@@ -1995,19 +2009,19 @@ class DongMonthPhotoView(uploads.MonthPhotoView):
 `urlpatterns` 의 `regions/<str:sgg_id>/poll` 줄 위에:
 
 ```python
-    path("regions/<str:sgg_id>/photos", RegionMonthPhotoView.as_view(), name="web-region-photos"),
+(path("regions/<str:sgg_id>/photos", RegionMonthPhotoView.as_view(), name="web-region-photos"),)
 ```
 
 `dongs/<str:dong_id>/poll` 줄 위에:
 
 ```python
-    path("dongs/<str:dong_id>/photos", DongMonthPhotoView.as_view(), name="web-dong-photos"),
+(path("dongs/<str:dong_id>/photos", DongMonthPhotoView.as_view(), name="web-dong-photos"),)
 ```
 
 `path("search/parse", ...)` 위에:
 
 ```python
-    path("photos/<str:photo_id>/report", uploads.PhotoReportView.as_view(), name="web-photo-report"),
+(path("photos/<str:photo_id>/report", uploads.PhotoReportView.as_view(), name="web-photo-report"),)
 ```
 
 - [ ] **Step 6: 통과 확인**
@@ -2184,7 +2198,9 @@ class MyTipView(MeAPIView):
         try:
             deleted = community.delete_tip(request.user.user_id, int(tip_id))
         except photo_quarantine.DeleteFailed:
-            return error(502, "DELETE_FAILED", "사진을 지우지 못했어요. 잠시 후 다시 시도해 주세요.")
+            return error(
+                502, "DELETE_FAILED", "사진을 지우지 못했어요. 잠시 후 다시 시도해 주세요."
+            )
         if not deleted:
             return not_found("내 팁을 찾을 수 없습니다.")
         return Response(status=204)
@@ -2203,7 +2219,9 @@ class MyPhotoView(MeAPIView):
         try:
             deleted = pid is not None and photo_quarantine.delete_mine(request.user.user_id, pid)
         except photo_quarantine.DeleteFailed:
-            return error(502, "DELETE_FAILED", "사진을 지우지 못했어요. 잠시 후 다시 시도해 주세요.")
+            return error(
+                502, "DELETE_FAILED", "사진을 지우지 못했어요. 잠시 후 다시 시도해 주세요."
+            )
         if not deleted:
             return not_found("내 사진을 찾을 수 없습니다.")
         return Response(status=204)
@@ -2212,7 +2230,7 @@ class MyPhotoView(MeAPIView):
 `webapi/urls.py` 의 `path("me/photos", ...)` 줄 아래에:
 
 ```python
-    path("me/photos/<str:photo_id>", uploads.MyPhotoView.as_view(), name="me-photo"),
+(path("me/photos/<str:photo_id>", uploads.MyPhotoView.as_view(), name="me-photo"),)
 ```
 
 - [ ] **Step 6: 통과 확인**
@@ -2331,8 +2349,9 @@ def test_dong_ignores_preset(client, me):  # noqa: F811
 
 
 def test_poll_photos(client, me):  # noqa: F811
-    tip = run("INSERT INTO tip (user_id, region_id, body) VALUES (%s, 1, '팁') RETURNING tip_id",
-              [me])[0][0]
+    tip = run(
+        "INSERT INTO tip (user_id, region_id, body) VALUES (%s, 1, '팁') RETURNING tip_id", [me]
+    )[0][0]
     rows = [  # (month, source, user_id, credit, status, tip_id)
         (10, "user", me, None, "approved", None),
         (10, "tourapi", None, "한국관광공사 포토코리아 / 갑", "approved", None),
@@ -2342,17 +2361,22 @@ def test_poll_photos(client, me):  # noqa: F811
     ]
     ids = []
     for i, (month, source, user, credit, status, tip_id) in enumerate(rows):
-        ids.append(run(
-            "INSERT INTO photo (scope, unit_id, month, url, source, user_id, credit, status,"
-            " tip_id, created_at) VALUES ('region', 1, %s, %s, %s, %s, %s, %s, %s,"
-            " now() - make_interval(mins => %s)) RETURNING photo_id",
-            [month, f"https://r2.example/{i}.webp", source, user, credit, status, tip_id, i],
-        )[0][0])
+        ids.append(
+            run(
+                "INSERT INTO photo (scope, unit_id, month, url, source, user_id, credit, status,"
+                " tip_id, created_at) VALUES ('region', 1, %s, %s, %s, %s, %s, %s, %s,"
+                " now() - make_interval(mins => %s)) RETURNING photo_id",
+                [month, f"https://r2.example/{i}.webp", source, user, credit, status, tip_id, i],
+            )[0][0]
+        )
     body = client.get(f"/api/regions/{GOSEONG}/poll?month=2025-10&preset=quiet").json()
     assert body["photos"] == [  # 최신순, 업로더 닉네임 또는 출처
         {"id": str(ids[0]), "url": "https://r2.example/0.webp", "author": "두이"},
-        {"id": str(ids[1]), "url": "https://r2.example/1.webp",
-         "author": "한국관광공사 포토코리아 / 갑"},
+        {
+            "id": str(ids[1]),
+            "url": "https://r2.example/1.webp",
+            "author": "한국관광공사 포토코리아 / 갑",
+        },
     ]
     annual = client.get(f"/api/regions/{GOSEONG}/poll?month=annual&preset=quiet").json()
     assert len(annual["photos"]) == 3  # 연간은 달을 가리지 않는다
@@ -2489,8 +2513,13 @@ def result(t: community.Target, month: int | None, preset: str, user_id) -> dict
 
 def save_vote(user_id, t: community.Target, month: int | None, preset: str, choice) -> None:
     """choice True/False 면 넣거나 바꾸고, None 이면 지운다 (없어도 그대로)."""
-    key = {"user": user_id, "scope": t.scope, "unit": t.unit_id, "month": month or 0,
-           "preset": preset}
+    key = {
+        "user": user_id,
+        "scope": t.scope,
+        "unit": t.unit_id,
+        "month": month or 0,
+        "preset": preset,
+    }
     with connection.cursor() as cur:
         if choice is None:
             cur.execute(
@@ -2575,13 +2604,13 @@ class DongPollVoteView(poll.PollVoteView):
 경로:
 
 ```python
-    path("regions/<str:sgg_id>/poll/vote", RegionPollVoteView.as_view(), name="web-region-vote"),
-    path("regions/<str:sgg_id>/poll", RegionPollView.as_view(), name="web-region-poll"),
+(path("regions/<str:sgg_id>/poll/vote", RegionPollVoteView.as_view(), name="web-region-vote"),)
+(path("regions/<str:sgg_id>/poll", RegionPollView.as_view(), name="web-region-poll"),)
 ```
 
 ```python
-    path("dongs/<str:dong_id>/poll/vote", DongPollVoteView.as_view(), name="web-dong-vote"),
-    path("dongs/<str:dong_id>/poll", DongPollView.as_view(), name="web-dong-poll"),
+(path("dongs/<str:dong_id>/poll/vote", DongPollVoteView.as_view(), name="web-dong-vote"),)
+(path("dongs/<str:dong_id>/poll", DongPollView.as_view(), name="web-dong-poll"),)
 ```
 
 `webapi/views.py`: `# ─── 체감 투표 (데이터 없음) ───` 섹션 제목과 `empty_poll` 함수를 지운다. 모듈 docstring 의 `아직 데이터가 없는 것(랜드마크 · 접근 안내 · 체감 투표)은 빈 값이다.` → `아직 데이터가 없는 것(랜드마크 · 접근 안내)은 빈 값이다. 체감 투표는 webapi/poll.py.`
