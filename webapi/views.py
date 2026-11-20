@@ -2,7 +2,7 @@
 
 화면 데이터는 /api/v1 과 같은 DB · 같은 점수 계산(metrics/scoring.py)을 쓰고
 모양만 웹 계약에 맞춘다.
-아직 데이터가 없는 것(랜드마크 · 접근 안내 · 체감 투표)은 빈 값이다.
+아직 데이터가 없는 것(랜드마크 · 접근 안내)은 빈 값이다. 체감 투표는 webapi/poll.py.
 마이페이지 · 즐겨찾기(/api/me/*)는 webapi/me.py.
 NMF 계절 · 활동 유형과 저녁 잔차는 DB 에 없어 월별 혼잡과 24시간 곡선으로 만든 근사값이다.
 """
@@ -516,16 +516,6 @@ def dong_notes(request, dong_id: str):
     if dong is None:
         return not_found("행정동을 찾을 수 없습니다.")
     return _notes(request, "dong", dong.dong_id)
-
-
-# ───────────────────────── 체감 투표 (데이터 없음) ─────────────────────────
-
-
-@api_view(["GET"])
-def empty_poll(request, **kwargs):
-    return Response(
-        {"question": "이 시기, 정말 이랬나요?", "yes": 0, "no": 0, "total": 0, "photos": []}
-    )
 
 
 @api_view(["POST"])
