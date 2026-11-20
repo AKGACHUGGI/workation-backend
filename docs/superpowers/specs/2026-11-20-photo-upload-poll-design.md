@@ -4,11 +4,12 @@
 - 상태: 승인됨 (브레인스토밍 결과, 2026-11-20)
 - 배경: 웹(W-03·W-04·W-08)은 노트 사진 첨부 · 이달의 사진 올리기 · 체감 투표 UI 가 이미 있는데, 백엔드는 업로드 경로가 없고 투표는 `empty_poll` 더미, `POST .../poll/vote` 는 404 다.
 - 고치는 문서: workation-web W-03·W-04 스펙의 "이달의 사진 = 운영자 검수 후 게시" 규칙. **바로 게시 + 신고 누적 시 가림 → 운영자 검수**로 바꾼다.
-- 범위 밖: W-06 지자체 리포트(폐기), 웹 쪽 연결 작업(별도 계획), 팁·답글 신고, 업로드만 하고 등록 안 된 R2 파일 정리(R2 lifecycle 규칙으로 나중에).
+- 범위 밖: W-06 지자체 리포트(폐기), 웹 쪽 연결 작업(별도 계획), 팁·답글 신고.
+- 업로드 방식: **백엔드 경유**. 웹은 사진 파일을 `multipart/form-data` 로 백엔드에 보내고, 백엔드가 검증 · 변환해 R2 에 올린다. presigned URL 로 브라우저가 R2 에 직접 올리는 방식은 버킷 CORS 설정이 필요한데 R2 버킷이 데이터 담당 소유라 쓰지 않는다. 업로드 양이 적어(요청당 최대 3장) 서버 부담도 작다. 나중에 양이 늘면 업로드 받는 부분만 presigned 로 바꿀 수 있다.
 
 ## 1. 목표 · 완료 기준
 
-- 로그인 사용자가 R2 presigned URL 로 사진을 직접 올리고, 받은 key 로 **노트 사진**(노트 쓰기와 함께) 또는 **이달의 사진**을 등록한다. 둘 다 등록 즉시 공개된다.
+- 로그인 사용자가 **노트 사진**(노트 쓰기 요청에 함께) 또는 **이달의 사진**을 백엔드로 올린다. 백엔드는 WebP 로 다시 인코딩(위치정보 제거)해 R2 에 저장하고, 둘 다 등록 즉시 공개된다.
 - 사진은 신고 3건이 쌓이면 가려지고(`pending`), 운영자가 `manage.py photos` 명령으로 복구하거나 숨김을 확정한다.
 - `GET .../poll` 이 실제 집계와 내 투표(`myVote`)를 돌려주고, `POST .../poll/vote` 로 투표 · 변경 · 취소한다.
 - 단위 테스트(pytest)가 실제 R2 키 없이 통과한다 (R2 클라이언트는 테스트에서 가짜로 바꾼다).
@@ -20,13 +21,19 @@
 | 설정 | 쓰임 |
 |---|---|
 | `R2_ACCOUNT_ID` | 엔드포인트 `https://{account}.r2.cloudflarestorage.com` |
-| `R2_ACCESS_KEY_ID` · `R2_SECRET_ACCESS_KEY` | 서명 키. 서버에만 둔다 |
+| `R2_ACCESS_KEY_ID` · `R2_SECRET_ACCESS_KEY` | 접근 키. 서버에만 둔다 |
 | `R2_BUCKET` | 버킷 이름 |
 | `R2_PUBLIC_URL` | 공개 URL 앞부분. `photo.url = R2_PUBLIC_URL + "/" + key` |
+| `PHOTO_REPORT_THRESHOLD` | 가림 기준 신고 수 (기본 3) |
 
-의존성 `boto3` 추가 (S3 호환 API, `signature_version="s3v4"`, `region_name="auto"`). R2 접근은 `webapi/storage.py` 한 곳에 모은다: `presign_put(key, content_type)`, `head(key) -> (size, content_type) | None`. 다른 코드는 boto3 를 직접 부르지 않는다.
+의존성 추가:
 
-R2 버킷에는 웹 출처(origin)의 `PUT` 을 허용하는 CORS 규칙이 있어야 한다 (운영 설정, 코드 아님).
+- `boto3` — S3 호환 API (`signature_version="s3v4"`, `region_name="auto"`). R2 접근은 `webapi/storage.py` 한 곳에 모은다: `put(key, data: bytes, content_type)`, `delete(key)`. 다른 코드는 boto3 를 직접 부르지 않는다.
+- `Pillow` — 사진 검증 · 변환 (4-0).
+
+R2 쓰기 키 권한은 2026-11-20 에 확인했다 (PUT · HEAD · DELETE 성공). 버킷 CORS 는 필요 없다 (브라우저가 R2 에 직접 요청하지 않음). 사용자 사진은 `uploads/` 아래에만 쓴다 — 기존 `photos/`(관광공사 사진)와 섞지 않는다. **버킷 소유자(데이터 담당)에게 `uploads/` 경로 사용 동의를 받는다.**
+
+요청 크기: 사진 3장 × 10MB + 본문이므로 앞단 프록시(있다면)의 요청 본문 한도를 32MB 이상으로 둔다. Django 는 2.5MB 넘는 파일을 임시 파일로 받으므로 따로 설정할 것은 없다 (`DATA_UPLOAD_MAX_MEMORY_SIZE` 는 파일 아닌 필드에만 적용).
 
 ## 3. DB 변경 (`db/migrations/20261120_photo-upload-poll.sql`, `db/schema.sql` 동시 반영)
 
@@ -72,34 +79,35 @@ ALTER TABLE poll_vote ENABLE ROW LEVEL SECURITY;
 
 공통: 로그인 필요한 곳은 기존 Supabase JWT 인증. 에러 모양은 기존 `error(status, code, message)`.
 
-### 4-1. `POST /api/uploads/presign` (로그인)
+### 4-0. 사진 받기 · 변환 · 저장 (4-2 · 4-3 공통, `webapi/photo_upload.py`)
 
-요청 `{ "purpose": "tip" | "photo", "contentType": "image/jpeg" | "image/png" | "image/webp" }`
+1. **받기**: multipart 필드 `photos` (같은 이름으로 여러 개). 0~3장(노트) 또는 1~3장(이달의 사진). 장당 10MB 이하. 넘으면 400 `INVALID_PHOTO`.
+2. **검증**: Pillow 로 연다. 열리지 않거나 형식이 JPEG · PNG · WebP 가 아니면 400 `INVALID_PHOTO` (몇 번째 사진인지 메시지에). 파일 이름 · 요청의 Content-Type 은 믿지 않고 실제 내용으로 판단한다. 픽셀 수 상한 40MP (압축 폭탄 방지, `Image.MAX_IMAGE_PIXELS`).
+3. **변환**: EXIF 회전을 적용(`ImageOps.exif_transpose`)한 뒤 가로 1600px 이하로 줄이고(작으면 그대로) WebP(quality 82)로 다시 인코딩한다. 메타데이터는 옮기지 않으므로 **촬영 위치(GPS) 등 EXIF 가 모두 사라진다**. 기존 관광공사 사진(1600px WebP)과 같은 규격.
+4. **저장**: 모든 사진을 검증 · 변환한 뒤에 R2 에 올린다. key = `uploads/{tip|photo}/{uuid4}.webp` (사용자 id 를 공개 URL 에 넣지 않는다), Content-Type `image/webp`.
+5. **DB**: R2 업로드가 모두 끝나면 DB 를 한 트랜잭션으로 쓴다. DB 가 실패하면 이번에 올린 key 를 지운다 (실패해도 로그만, 응답은 원래 에러). R2 업로드 중 실패하면 그때까지 올린 key 를 지우고 502 `UPLOAD_FAILED`.
 
-응답 200 `{ "key": "uploads/photo/{userId}/{uuid}.jpg", "uploadUrl": "https://…", "expiresIn": 300 }`
+HEIC 은 받지 않는다 (Pillow 기본으로 못 열고, 웹 accept 도 jpeg · png · webp). 변환은 요청 안에서 동기로 한다 — 3장 기준 1초 안팎.
 
-- 웹은 `uploadUrl` 에 `PUT` 하고 `Content-Type` 헤더를 요청과 같게 보낸다 (서명에 포함).
-- 확장자는 contentType 에서 정한다 (jpeg→jpg, png, webp). HEIC 은 받지 않는다 (브라우저가 못 보여 줌).
-- 400 `INVALID_UPLOAD` (purpose·contentType 이상) · 429 `UPLOAD_RATE_LIMIT` (사용자당 1분 10회, DRF throttle).
+### 4-1. (없음 — presigned 방식은 쓰지 않는다)
 
 ### 4-2. 노트 사진: `POST /api/{regions|dongs}/{id}/notes` 확장
 
-요청에 `photoKeys?: string[]` (0~3개, 중복 불가) 추가.
-
-- 각 key 는 `uploads/tip/{내 userId}/` 로 시작해야 한다. 아니면 400 `INVALID_PHOTO`.
-- 각 key 를 R2 `HEAD` 로 확인: 없음 · 10MB 초과 · 이미지 contentType 아님 → 400 `INVALID_PHOTO` (어느 key 인지 메시지에).
-- 검증은 팁을 넣기 전에 한다. 팁 · 사진 행은 한 트랜잭션: `photo(scope, unit_id, month=visit_month, url, source='user', user_id, tip_id, position, status='approved')`. 동 노트면 scope='dong', 지역 노트면 scope='region'.
-- `Note` 응답(쓰기 · 노트 목록 · 내 팁 목록 공통)에 `photos: { id, url }[]` 를 더한다. 사진 없으면 `[]`. 숨김·가림(`approved` 아님) 사진은 빼고 `position` 순.
+- 사진이 없으면 지금처럼 JSON `{ body, visitMonth? }` 로 보낸다 (기존 클라이언트 그대로 동작).
+- 사진이 있으면 `multipart/form-data`: 필드 `body`, `visitMonth`(선택), `photos`(파일 0~3). body · visitMonth 검증 규칙은 JSON 과 같다.
+- 순서: 본문 검증 → 사진 검증 · 변환(4-0) → 연달아 쓰기 한도 확인 → R2 업로드 → 팁 · 사진 행 한 트랜잭션. 본문이 틀리면 사진을 열지도 않는다. 한도(429 `TIP_RATE_LIMIT`)에 걸리면 R2 에 올리지 않는다.
+- 사진 행: `photo(scope, unit_id, month=visit_month, url, source='user', user_id, tip_id, position, status='approved')`. 동 노트면 scope='dong', 지역 노트면 scope='region'.
+- `Note` 응답(쓰기 · 노트 목록 · 내 팁 목록 공통)에 `photos: { id, url }[]` 를 더한다. 사진 없으면 `[]`. `approved` 가 아닌 사진은 빼고 `position` 순.
 
 ### 4-3. 이달의 사진: `POST /api/{regions|dongs}/{id}/photos` (로그인)
 
-요청 `{ "month": "2025-10" | "annual", "keys": string[] }` (1~3개)
+요청 `multipart/form-data`: 필드 `month` (`"2025-10"` 또는 `"annual"`), `photos`(파일 1~3).
 
 응답 201 `{ "items": MyPhoto[] }` (기존 `GET /api/me/photos` 항목 모양, status `approved`)
 
-- key 접두어 `uploads/photo/{내 userId}/`, HEAD 검증은 4-2 와 같다.
+- 사진 처리는 4-0.
 - `annual` 이면 `photo.month = NULL`.
-- 404 대상 없음 · 400 `INVALID_PHOTO` · 429 `PHOTO_RATE_LIMIT` (사용자당 1시간 30장).
+- 404 대상 없음 · 400 `INVALID_PHOTO`(month 형식 오류 포함) · 429 `PHOTO_RATE_LIMIT` (사용자당 1시간 30장, 최근 1시간 내 내 사진 행 수로 센다) · 502 `UPLOAD_FAILED`.
 
 ### 4-4. 사진 신고: `POST /api/photos/{photoId}/report` (로그인)
 
@@ -156,21 +164,23 @@ R2 파일은 지우지 않는다 (복구 여지 · 증거 보존).
 
 | 파일 | 내용 |
 |---|---|
-| `webapi/storage.py` (새) | R2 클라이언트, `presign_put`, `head`, key 규칙 · 검증 `check_keys(user_id, purpose, keys)` |
-| `webapi/uploads.py` (새) | presign 뷰 · 이달의 사진 등록 뷰 · 신고 뷰 |
+| `webapi/storage.py` (새) | R2 클라이언트, `put`, `delete`. 테스트는 이 모듈을 가짜로 바꾼다 |
+| `webapi/photo_upload.py` (새) | 4-0: 받은 파일 검증 · WebP 변환 · R2 업로드(실패 시 정리) → `[(key, url)]` |
+| `webapi/uploads.py` (새) | 이달의 사진 등록 뷰 · 신고 뷰 |
 | `webapi/poll.py` (새) | 질문 문구 · 집계 · 투표 upsert/삭제 · GET/POST 뷰 (`empty_poll` 삭제) |
-| `webapi/community.py` | `parse_tip` 에 photoKeys, `create_tip` 사진 넣기, `_note` 에 photos, `summary` voteCount · photoCount, `my_photos` 필터 |
+| `webapi/community.py` | 노트 쓰기 multipart 파싱, `create_tip` 사진 넣기, `_note` 에 photos, `summary` voteCount · photoCount, `my_photos` 필터 |
 | `regions/photos.py` | 모든 조회에 `tip_id IS NULL` |
 | `webapi/management/commands/photos.py` (새) | 5절 명령 |
-| `webapi/urls.py` | 새 경로 4개, poll 경로를 새 뷰로 |
+| `webapi/urls.py` | 새 경로 2개(이달의 사진 · 신고)와 poll/vote, poll GET 을 새 뷰로 |
 | `config/settings.py` · `.env.example` | R2 설정, `PHOTO_REPORT_THRESHOLD` |
+| `pyproject.toml` | `boto3`, `Pillow` |
 
 ## 7. 테스트
 
-- `storage` 는 가짜(fake) 로 바꿔 끼운다: presign 은 고정 URL, head 는 테스트가 정한 (size, contentType) 또는 None.
-- presign: 비로그인 401, purpose·contentType 검증, key 접두어에 내 userId.
-- 노트 사진: 남의 key · purpose 다른 key · HEAD 없음 · 10MB 초과 · 4장 → 400 이고 팁도 안 생김. 정상이면 Note.photos 순서대로, 노트 목록 · 내 팁 목록에도 보임. 팁 삭제 시 사진 행도 삭제.
-- 이달의 사진: annual → month NULL, 201 응답 모양, `GET /api/me/photos` 에 보임, 노트 사진은 안 보임.
+- `storage` 는 메모리 가짜(fake)로 바꿔 끼운다 (`put` 한 key · 바이트 · content type 을 기록, 실패 주입 가능). 실제 R2 키 없이 돈다.
+- 사진 처리(4-0): 테스트 안에서 Pillow 로 만든 JPEG · PNG · WebP 는 통과하고 결과가 WebP · 가로 1600 이하. GPS EXIF 를 넣은 JPEG 의 결과에 EXIF 가 없음. 이미지 아닌 파일 · 10MB 초과 · 4장 → 400 `INVALID_PHOTO`.
+- 노트 사진: JSON(사진 없음)은 지금처럼 동작. multipart 정상이면 Note.photos 순서대로, 노트 목록 · 내 팁 목록에도 보임. 사진이 틀리면 팁도 R2 도 안 생김. 쓰기 한도에 걸리면 R2 에 안 올림. DB 실패를 주입하면 올린 key 가 지워짐. R2 실패 주입 → 502 이고 팁 없음. 팁 삭제 시 사진 행도 삭제.
+- 이달의 사진: annual → month NULL, 201 응답 모양, `GET /api/me/photos` 에 보임, 노트 사진은 안 보임, 시간당 한도 429.
 - 신고: 2건까지 approved, 3건째 pending · 갤러리와 투표 photos 에서 빠짐, 같은 사람 중복 신고는 수에 안 셈, 없는/가려진 사진 404.
 - 명령: restore 후 approved · 신고 0, hide 후 hidden.
 - 투표: 비로그인 GET 은 myVote null, 투표 → 집계 반영, 바꾸기 → yes/no 이동, null → 취소, 동은 preset 무시, region preset 누락 400, 질문 문구 3종 + 연간.
@@ -178,7 +188,7 @@ R2 파일은 지우지 않는다 (복구 여지 · 증거 보존).
 
 ## 8. 웹 쪽 후속 (이 스펙 범위 밖, 메모)
 
-- `usePhotoPicker` 결과를 presign → PUT → key 로 바꾸는 업로드 훅. `TipComposer` 는 `photoKeys` 를, `PhotoUploadModal` 은 `POST .../photos` 를 부른다. accept 는 jpeg·png·webp.
+- `usePhotoPicker` 가 고른 파일을 `FormData` 로 보낸다. `TipComposer` 는 사진이 있으면 노트 쓰기를 multipart 로, `PhotoUploadModal` 은 `POST .../photos` 를 부른다. accept 는 jpeg·png·webp. `usePhotoPicker` · `PhotoUploadModal` · `TipComposer` 의 presign TODO 주석을 이 흐름으로 고친다. `api()` 헬퍼가 FormData 일 때 `Content-Type` 을 직접 넣지 않게(브라우저가 boundary 를 붙이도록) 확인.
 - `Note.photos` 렌더, 사진 신고 버튼(노트 사진 · 이달의 사진).
 - 문구: "운영자 검수 후 게시돼요" → 바로 게시 안내로. 마이페이지 `MyPhoto.status === 'pending'` 문구는 "신고로 검토 중".
 - W-06 리포트 라우트 · 코드 정리 (폐기 결정).
