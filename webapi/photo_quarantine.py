@@ -178,14 +178,15 @@ def delete_mine(user_id, photo_id: int) -> bool:
     if row is None:
         return False
     url, status = row
-    with connection.cursor() as cur:
-        if status == "approved":
-            delete_files([url])
+    if status == "approved":
+        delete_files([url])
+        with transaction.atomic(), connection.cursor() as cur:
             cur.execute("DELETE FROM photo WHERE photo_id = %s", [photo_id])
             cur.execute(
                 "DELETE FROM report WHERE target_type = 'photo' AND target_id = %s", [photo_id]
             )
-            return True
+        return True
+    with connection.cursor() as cur:
         cur.execute(
             """UPDATE photo SET status = 'hidden', hidden_at = now(), deleted_by_user = true
                 WHERE photo_id = %s""",
