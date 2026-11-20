@@ -14,6 +14,9 @@ DATABASES = {
         "NAME": "postgres",
         "USER": os.environ.get("TEST_DB_USER", "postgres"),
         "PASSWORD": os.environ.get("TEST_DB_PASSWORD", "postgres"),
+        # 여러 작업 폴더(worktree)에서 테스트를 동시에 돌릴 때 테스트 DB 이름이 겹치지 않게.
+        # 비우면 Django 기본(test_postgres)
+        "TEST": {"NAME": os.environ.get("TEST_DB_NAME") or None},
     }
 }
 
@@ -32,3 +35,11 @@ CLOVA_API_KEY = ""
 SUPABASE_URL = ""
 SUPABASE_JWT_SECRET = ""
 SUPABASE_SERVICE_ROLE_KEY = ""
+
+# .env 에 R2 키가 있어도 단위 테스트는 실제 R2 에 올리지 않는다.
+# 업로드 테스트는 tests/photo_tools.py 의 r2 픽스처로 가짜를 끼운다
+R2_ACCOUNT_ID = ""
+R2_ACCESS_KEY_ID = ""
+R2_SECRET_ACCESS_KEY = ""
+R2_BUCKET = ""
+R2_PUBLIC_URL = ""

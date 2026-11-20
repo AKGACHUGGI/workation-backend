@@ -255,10 +255,19 @@ def test_region_notes_contract(client, me):
         "body": "거진항 카페는 평일 오전이 조용해요",
         "helpful": 2,
         "replies": 1,
+        "photos": [],
     }
     assert note["createdAt"].endswith("+09:00")
     # 없는 값은 키를 뺀다 (웹 타입의 선택 필드)
-    assert set(body["items"][1]) == {"id", "author", "createdAt", "body", "helpful", "replies"}
+    assert set(body["items"][1]) == {
+        "id",
+        "author",
+        "createdAt",
+        "body",
+        "helpful",
+        "replies",
+        "photos",
+    }
 
     recent = client.get(f"/api/regions/{GOSEONG}/notes?sort=recent").json()
     assert [n["id"] for n in recent["items"]] == [str(second), str(first)]
@@ -331,18 +340,23 @@ def test_summary_contract(client, me, photos):  # noqa: F811
     add_tip(OTHER_ID, 1)
     for status in ("approved", "pending", "hidden"):
         run(
-            "INSERT INTO photo (scope, unit_id, url, source, user_id, status)"
-            " VALUES ('region', 1, 'https://r2.example/mine.jpg', 'user', %s, %s)",
+            "INSERT INTO user_photo (scope, unit_id, url, user_id, status)"
+            " VALUES ('region', 1, 'https://r2.example/mine.jpg', %s, %s)",
             [me, status],
         )
     put_favorite(client, "regions", GOSEONG)
     put_favorite(client, "dongs", GEOJIN)
-    for key in ("quiet", "peer"):  # 한 화면의 투표가 지표별 행으로 저장돼도 한 번으로 센다
-        run(
-            "INSERT INTO metric_vote (user_id, scope, unit_id, month, metric_key, agree)"
-            " VALUES (%s, 'region', 1, 10, %s, true)",
-            [me, key],
-        )
+    tip_id = add_tip(me, 1, status="hidden")  # 숨긴 팁이라 stays · tipCount 는 그대로
+    run(  # 노트 사진은 이달의 사진 수에 넣지 않는다
+        "INSERT INTO user_photo (scope, unit_id, url, user_id, status, tip_id)"
+        " VALUES ('region', 1, 'https://r2.example/note.jpg', %s, 'approved', %s)",
+        [me, tip_id],
+    )
+    run(
+        "INSERT INTO poll_vote (user_id, scope, unit_id, month, preset, choice)"
+        " VALUES (%s, 'region', 1, 10, 'quiet', true)",
+        [me],
+    )
     body = client.get("/api/me/summary", **auth()).json()
     assert body["stays"] == [
         {"regionName": "강릉", "count": 2},
@@ -370,7 +384,7 @@ def test_my_tips_contract(client, me):
         "한 달 체류",
         "2025-10",
     )
-    assert (tip["helpful"], tip["replies"]) == (2, 0)
+    assert (tip["helpful"], tip["replies"], tip["photos"]) == (2, 0, [])
 
 
 def test_my_tips_cursor_keeps_helpful_sum(client, me, monkeypatch):
@@ -403,8 +417,8 @@ def test_delete_my_tip(client, me):
 def test_my_photos_contract(client, me):
     def add_photo(scope, unit_id, month, status, user_id=me):
         return run(
-            "INSERT INTO photo (scope, unit_id, month, url, source, user_id, status)"
-            " VALUES (%s, %s, %s, %s, 'user', %s, %s) RETURNING photo_id",
+            "INSERT INTO user_photo (scope, unit_id, month, url, user_id, status)"
+            " VALUES (%s, %s, %s, %s, %s, %s) RETURNING user_photo_id",
             [scope, unit_id, month, f"https://r2.example/{scope}-{status}.jpg", user_id, status],
         )[0][0]
 
@@ -412,6 +426,14 @@ def test_my_photos_contract(client, me):
     pending = add_photo("dong", 201, None, "pending")
     add_photo("region", 1, 10, "hidden")
     add_photo("region", 1, 10, "approved", user_id=OTHER_ID)
+    note = run(
+        "INSERT INTO tip (user_id, region_id, body) VALUES (%s, 1, '팁') RETURNING tip_id", [me]
+    )[0][0]
+    run(
+        "INSERT INTO user_photo (scope, unit_id, url, user_id, status, tip_id)"
+        " VALUES ('region', 1, 'https://r2.example/note.jpg', %s, 'approved', %s)",
+        [me, note],
+    )
     body = client.get("/api/me/photos", **auth()).json()
     assert body == {
         "items": [  # 최근 것부터. 동네 사진의 regionName 은 소속 시군구
@@ -489,6 +511,7 @@ def test_post_region_tip_contract(client, me):
         "body": "속초에서 버스로 40분",
         "helpful": 0,
         "replies": 0,
+        "photos": [],
     }
     assert note["createdAt"].endswith("+09:00")
     row = run("SELECT user_id, region_id, dong_id, visit_month, stay_days, body, status FROM tip")

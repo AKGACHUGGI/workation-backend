@@ -2,7 +2,7 @@
 
 from django.urls import path, re_path
 
-from webapi import me, views
+from webapi import me, poll, uploads, views
 
 
 class RegionNoteCreateView(me.NoteCreateView):
@@ -10,6 +10,30 @@ class RegionNoteCreateView(me.NoteCreateView):
 
 
 class DongNoteCreateView(me.NoteCreateView):
+    kind = "dongs"
+
+
+class RegionMonthPhotoView(uploads.MonthPhotoView):
+    kind = "regions"
+
+
+class DongMonthPhotoView(uploads.MonthPhotoView):
+    kind = "dongs"
+
+
+class RegionPollView(poll.PollView):
+    kind = "regions"
+
+
+class DongPollView(poll.PollView):
+    kind = "dongs"
+
+
+class RegionPollVoteView(poll.PollVoteView):
+    kind = "regions"
+
+
+class DongPollVoteView(poll.PollVoteView):
     kind = "dongs"
 
 
@@ -30,7 +54,9 @@ urlpatterns = [
         read_or_write(views.region_notes, RegionNoteCreateView.as_view()),
         name="web-region-notes",
     ),
-    path("regions/<str:sgg_id>/poll", views.empty_poll, name="web-region-poll"),
+    path("regions/<str:sgg_id>/photos", RegionMonthPhotoView.as_view(), name="web-region-photos"),
+    path("regions/<str:sgg_id>/poll/vote", RegionPollVoteView.as_view(), name="web-region-vote"),
+    path("regions/<str:sgg_id>/poll", RegionPollView.as_view(), name="web-region-poll"),
     path("regions/<str:sgg_id>/view", views.record_view, name="web-region-view"),
     path("regions/<str:sgg_id>", views.region_detail, name="web-region"),
     path(
@@ -38,8 +64,13 @@ urlpatterns = [
         read_or_write(views.dong_notes, DongNoteCreateView.as_view()),
         name="web-dong-notes",
     ),
-    path("dongs/<str:dong_id>/poll", views.empty_poll, name="web-dong-poll"),
+    path("dongs/<str:dong_id>/photos", DongMonthPhotoView.as_view(), name="web-dong-photos"),
+    path("dongs/<str:dong_id>/poll/vote", DongPollVoteView.as_view(), name="web-dong-vote"),
+    path("dongs/<str:dong_id>/poll", DongPollView.as_view(), name="web-dong-poll"),
     path("dongs/<str:dong_id>", views.dong_detail, name="web-dong"),
+    path(
+        "photos/<str:photo_id>/report", uploads.PhotoReportView.as_view(), name="web-photo-report"
+    ),
     path("search/parse", views.search_parse, name="web-search-parse"),
     path("events", views.events, name="web-events"),
     # 마이페이지 · 즐겨찾기 (로그인 필요).
@@ -55,6 +86,7 @@ urlpatterns = [
     path("me/tips", me.MyTipsView.as_view(), name="me-tips"),
     path("me/tips/<str:tip_id>", me.MyTipView.as_view(), name="me-tip"),
     path("me/photos", me.MyPhotosView.as_view(), name="me-photos"),
+    path("me/photos/<str:photo_id>", uploads.MyPhotoView.as_view(), name="me-photo"),
     # 예전 쿠키 로그인 경로
     re_path(r"^auth(/.*)?$", views.unauthorized, name="web-auth"),
 ]

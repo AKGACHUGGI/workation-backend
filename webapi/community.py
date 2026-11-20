@@ -1,6 +1,6 @@
 """즐겨찾기 · 워케이션 노트(팁) · 내 활동을 DB 에서 읽고 쓰는 함수들.
 
-표: favorite · tip · tip_reaction · tip_reply · photo · metric_vote (db/schema.sql).
+표: favorite · tip · tip_reaction · tip_reply · user_photo · poll_vote (db/schema.sql).
 계약: workation-web src/features/me/types.ts · src/features/region/types.ts (Note).
 
 - scope + unit_id 는 논리 참조(FK 없음)라 시군구 · 행정동 이름은 여기서 합친다.
@@ -11,13 +11,15 @@
 from __future__ import annotations
 
 import re
+from contextlib import nullcontext
+from typing import NamedTuple
 
-from django.db import connection
+from django.db import connection, transaction
 from django.utils import timezone
 
 from metrics import scoring
 from regions.models import Dong, Region
-from webapi import data
+from webapi import data, photo_quarantine, photo_upload
 
 FAVORITE_LIMIT = 50  # 종류(지역 · 동네)마다. 웹 FAVORITE_LIMIT 과 같다
 PAGE_SIZE = 20
@@ -56,6 +58,26 @@ def unit_id(scope: str, code: str) -> int | None:
         return region.region_id if region else None
     dong = dong_by_code(code)
     return dong.dong_id if dong else None
+
+
+class Target(NamedTuple):
+    """사진 · 투표 대상. unit_id 는 region_id 또는 dong_id, region_id 는 소속 시군구."""
+
+    scope: str
+    unit_id: int
+    region_id: int
+    name: str
+
+
+def target(kind: str, code: str) -> Target | None:
+    """웹 경로의 (regions|dongs, 코드) → Target. 없는 코드 · 집계 제외 동은 None."""
+    if kind == "regions":
+        r = region_by_code(code)
+        return Target("region", r.region_id, r.region_id, r.sigungu_name) if r else None
+    d = dong_by_code(code)
+    if d is None or d.is_excluded:
+        return None
+    return Target("dong", d.dong_id, d.region_id, d.dong_name)
 
 
 # ───────────────────────── 즐겨찾기 ─────────────────────────
@@ -186,7 +208,12 @@ _TIP_PAGE = """
                    t.region_id, d.adm_code, d.dong_name,
                    (SELECT count(*) FROM tip_reaction r WHERE r.tip_id = t.tip_id) AS helpful,
                    (SELECT count(*) FROM tip_reply p
-                     WHERE p.tip_id = t.tip_id AND p.status = 'public') AS replies
+                     WHERE p.tip_id = t.tip_id AND p.status = 'public') AS replies,
+                   (SELECT coalesce(json_agg(json_build_object('id', ph.user_photo_id::text,
+                                                               'url', ph.url)
+                                             ORDER BY ph.position), '[]'::json)
+                      FROM user_photo ph
+                     WHERE ph.tip_id = t.tip_id AND ph.status = 'approved') AS photos
               FROM tip t
               JOIN app_user u ON u.user_id = t.user_id
               LEFT JOIN dong d ON d.dong_id = t.dong_id
@@ -227,6 +254,7 @@ def _note(row: tuple, with_target: bool) -> dict:
         "body": body,
         "helpful": row[9],
         "replies": row[10],
+        "photos": row[11],
     }
     if dong_name:
         note["dongName"] = dong_name
@@ -259,7 +287,8 @@ def tip_page(by: str, target_id, sort: str, cursor: str | None) -> dict:
         if not rows and offset:  # 끝을 지난 커서. 합계만 다시 읽는다
             cur.execute(sql, {"id": target_id, "limit": 1, "offset": 0})
             totals = cur.fetchall()
-    total, helpful_sum = (totals[0][11], int(totals[0][12])) if totals else (0, 0)
+    # photos 열이 더해져 total · helpful_sum 은 12 · 13 번째
+    total, helpful_sum = (totals[0][12], int(totals[0][13])) if totals else (0, 0)
     return {
         "items": [_note(r, with_target=by == "user") for r in rows[:PAGE_SIZE]],
         "total": total,
@@ -293,36 +322,87 @@ def parse_tip(payload) -> tuple[str, int | None]:
     return body, int(raw[-2:])
 
 
-def create_tip(user, region_id: int, dong: Dong | None, body: str, visit_month: int | None):
+_TIP_INSERT = f"""
+    WITH cur AS (
+      SELECT count(*) AS n FROM tip
+       WHERE user_id = %(user)s AND created_at > now() - interval '{TIP_BURST_WINDOW}'
+    ), ins AS (
+      INSERT INTO tip (user_id, region_id, dong_id, visit_month, body)
+      SELECT %(user)s, %(region)s, %(dong)s, %(month)s, %(body)s
+        FROM cur WHERE n < %(limit)s
+      RETURNING tip_id, created_at
+    )
+    SELECT tip_id, created_at FROM ins"""
+
+
+def _insert_tip_photos(tip_id, scope, unit, month, user_id, urls) -> list[dict]:
+    """노트 사진 행을 한 문장으로 넣는다 → [{id, url}] (올린 순서)."""
+    with connection.cursor() as cur:
+        cur.execute(
+            """INSERT INTO user_photo (scope, unit_id, month, url, user_id, tip_id, position)
+               SELECT %(scope)s, %(unit)s, %(month)s, u.url, %(user)s, %(tip)s, u.n - 1
+                 FROM unnest(%(urls)s::text[]) WITH ORDINALITY AS u(url, n)
+               RETURNING user_photo_id, url, position""",
+            {
+                "scope": scope,
+                "unit": unit,
+                "month": month,
+                "user": user_id,
+                "tip": tip_id,
+                "urls": urls,
+            },
+        )
+        rows = sorted(cur.fetchall(), key=lambda r: r[2])
+    return [{"id": str(pid), "url": url} for pid, url, _ in rows]
+
+
+def create_tip(
+    user, region_id: int, dong: Dong | None, body: str, visit_month: int | None, photos=()
+):
     """공개 팁을 쓰고 읽기와 같은 모양(Note)으로 돌려준다. 연달아 쓰는 한도를 넘으면 None.
 
     최근 TIP_BURST_WINDOW 안의 내 팁을 세는 것과 넣는 것이 한 문장이라 DB 왕복이 한 번이다.
+    photos(WebP 바이트)가 있으면 한 트랜잭션 안에서 팁을 넣고(한도를 넘으면 올리지 않음) →
+    R2 에 올리고 → 사진 행을 넣는다. 업로드 실패는 UploadFailed(팁도 되돌림),
+    사진 행 · 커밋 실패는 올린 파일을 지우고 그 에러를 다시 던진다.
     """
-    with connection.cursor() as cur:
-        cur.execute(
-            f"""WITH cur AS (
-                 SELECT count(*) AS n FROM tip
-                  WHERE user_id = %(user)s AND created_at > now() - interval '{TIP_BURST_WINDOW}'
-               ), ins AS (
-                 INSERT INTO tip (user_id, region_id, dong_id, visit_month, body)
-                 SELECT %(user)s, %(region)s, %(dong)s, %(month)s, %(body)s
-                   FROM cur WHERE n < %(limit)s
-                 RETURNING tip_id, created_at
-               )
-               SELECT tip_id, created_at FROM ins""",
-            {
-                "user": user.user_id,
-                "region": region_id,
-                "dong": dong.dong_id if dong else None,
-                "month": visit_month,
-                "body": body,
-                "limit": TIP_BURST_LIMIT,
-            },
-        )
-        row = cur.fetchone()
-    if row is None:
-        return None
-    tip_id, created_at = row
+    attached: list[dict] = []
+    uploaded: list[tuple[str, str]] = []
+    try:
+        with transaction.atomic() if photos else nullcontext():
+            with connection.cursor() as cur:
+                if photos:
+                    # R2 에 올리는 동안 트랜잭션이 열려 있어 새 팁이 다른 요청의 한도 세기에
+                    # 보이지 않는다. 같은 사용자의 사진 노트 쓰기를 줄 세운다 (트랜잭션 끝에 풀림)
+                    cur.execute(
+                        "SELECT pg_advisory_xact_lock(hashtext(%s))", [f"tip:{user.user_id}"]
+                    )
+                cur.execute(
+                    _TIP_INSERT,
+                    {
+                        "user": user.user_id,
+                        "region": region_id,
+                        "dong": dong.dong_id if dong else None,
+                        "month": visit_month,
+                        "body": body,
+                        "limit": TIP_BURST_LIMIT,
+                    },
+                )
+                row = cur.fetchone()
+            if row is None:
+                return None
+            tip_id, created_at = row
+            if photos:
+                uploaded = photo_upload.upload("tip", list(photos))
+                scope, unit = ("dong", dong.dong_id) if dong else ("region", region_id)
+                attached = _insert_tip_photos(
+                    tip_id, scope, unit, visit_month, user.user_id, [url for _, url in uploaded]
+                )
+    except Exception:
+        # 사진 행 실패 · 커밋 실패 모두. 팁이 되돌려졌으니 올린 파일도 지운다
+        if uploaded:
+            photo_upload.discard([key for key, _ in uploaded])
+        raise
     return _note(
         (
             tip_id,
@@ -336,16 +416,44 @@ def create_tip(user, region_id: int, dong: Dong | None, body: str, visit_month: 
             dong.dong_name if dong else None,
             0,
             0,
+            attached,
         ),
         with_target=False,
     )
 
 
 def delete_tip(user_id, tip_id: int) -> bool:
-    """내 팁을 지운다 (도움돼요 · 답글은 ON DELETE CASCADE). 내 팁이 아니면 False."""
+    """내 팁을 지운다 (도움돼요 · 답글은 ON DELETE CASCADE). 내 팁이 아니면 False.
+
+    첨부 사진 (스펙 4-6):
+    - 공개(approved) 사진은 R2 파일을 먼저 지운다. 실패하면 DeleteFailed 이고 팁은 그대로
+      (다시 시도하면 된다). 행은 팁과 함께 지워진다 (CASCADE).
+    - 가려진(pending · hidden) 사진은 증거라 팁에서 떼어(tip_id = NULL) hidden · deleted_by_user 로
+      남긴다. 30일 뒤 manage.py photos purge 가 지운다.
+    """
     with connection.cursor() as cur:
+        cur.execute(
+            """SELECT p.user_photo_id, p.url, p.status
+                 FROM tip t JOIN user_photo p ON p.tip_id = t.tip_id
+                WHERE t.tip_id = %s AND t.user_id = %s""",
+            [tip_id, user_id],
+        )
+        photos = cur.fetchall()
+    photo_quarantine.delete_files([url for _, url, status in photos if status == "approved"])
+    kept = [pid for pid, _, status in photos if status != "approved"]
+    with transaction.atomic(), connection.cursor() as cur:
+        if kept:
+            cur.execute(
+                """UPDATE user_photo SET tip_id = NULL, status = 'hidden',
+                          hidden_at = coalesce(hidden_at, now()), deleted_by_user = true
+                    WHERE user_photo_id = ANY(%s)""",
+                [kept],
+            )
         cur.execute("DELETE FROM tip WHERE tip_id = %s AND user_id = %s", [tip_id, user_id])
-        return cur.rowcount > 0
+        deleted = cur.rowcount > 0
+    for pid in kept:  # 보통 이미 격리돼 있다 (신고로 가려질 때)
+        photo_quarantine.try_quarantine(pid)
+    return deleted
 
 
 # ───────────────────────── MY ─────────────────────────
@@ -364,7 +472,7 @@ def summary(user_id) -> dict:
     """MeSummary 의 집계 부분. createdAt 은 뷰가 app_user 에서 넣는다.
 
     stays 는 체류 기록 표가 없어 내 공개 팁의 시군구별 개수다.
-    voteCount 는 투표한 대상(지역 · 동네 × 월) 수 — metric_vote 는 지표별 행이라 행 수가 아니다.
+    voteCount 는 투표한 질문 수 (poll_vote 는 질문 하나에 한 행). photoCount 는 이달의 사진만.
     """
     with connection.cursor() as cur:
         cur.execute(
@@ -375,10 +483,10 @@ def summary(user_id) -> dict:
                SELECT
                  (SELECT array_agg(region_id ORDER BY n DESC, region_id) FROM s),
                  (SELECT array_agg(n ORDER BY n DESC, region_id) FROM s),
-                 (SELECT count(*) FROM photo WHERE user_id = %(u)s AND status <> 'hidden'),
+                 (SELECT count(*) FROM user_photo
+                   WHERE user_id = %(u)s AND status <> 'hidden' AND tip_id IS NULL),
                  (SELECT count(*) FROM favorite WHERE user_id = %(u)s),
-                 (SELECT count(DISTINCT (scope, unit_id, month))
-                    FROM metric_vote WHERE user_id = %(u)s)""",
+                 (SELECT count(*) FROM poll_vote WHERE user_id = %(u)s)""",
             {"u": user_id},
         )
         region_ids, counts, photo_count, favorite_count, vote_count = cur.fetchone()
@@ -397,15 +505,18 @@ def summary(user_id) -> dict:
 
 
 def my_photos(user_id) -> list[dict]:
-    """내가 올린 사진 (숨김 제외), 최근 것부터. 동네 사진의 regionName 은 소속 시군구."""
+    """내가 올린 이달의 사진 (숨김 · 노트 사진 제외), 최근 것부터.
+
+    동네 사진의 regionName 은 소속 시군구.
+    """
     with connection.cursor() as cur:
         cur.execute(
-            """SELECT p.photo_id, p.url, p.month, p.status,
+            """SELECT p.user_photo_id, p.url, p.month, p.status,
                       CASE WHEN p.scope = 'region' THEN p.unit_id ELSE d.region_id END
-                 FROM photo p
+                 FROM user_photo p
                  LEFT JOIN dong d ON p.scope = 'dong' AND d.dong_id = p.unit_id
-                WHERE p.user_id = %s AND p.status <> 'hidden'
-                ORDER BY p.created_at DESC, p.photo_id DESC""",
+                WHERE p.user_id = %s AND p.status <> 'hidden' AND p.tip_id IS NULL
+                ORDER BY p.created_at DESC, p.user_photo_id DESC""",
             [user_id],
         )
         rows = cur.fetchall()
