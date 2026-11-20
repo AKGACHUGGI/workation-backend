@@ -2,7 +2,7 @@
 
 from django.urls import path, re_path
 
-from webapi import me, poll, uploads, views
+from webapi import me, poll, tips, uploads, views
 
 
 class RegionNoteCreateView(me.NoteCreateView):
@@ -71,6 +71,12 @@ urlpatterns = [
     path(
         "photos/<str:photo_id>/report", uploads.PhotoReportView.as_view(), name="web-photo-report"
     ),
+    path("tips/<str:tip_id>/helpful", tips.HelpfulView.as_view(), name="web-tip-helpful"),
+    path(
+        "tips/<str:tip_id>/replies",
+        read_or_write(tips.replies, tips.ReplyCreateView.as_view()),
+        name="web-tip-replies",
+    ),
     path("search/parse", views.search_parse, name="web-search-parse"),
     path("events", views.events, name="web-events"),
     # 마이페이지 · 즐겨찾기 (로그인 필요).
@@ -85,6 +91,7 @@ urlpatterns = [
     path("me/summary", me.SummaryView.as_view(), name="me-summary"),
     path("me/tips", me.MyTipsView.as_view(), name="me-tips"),
     path("me/tips/<str:tip_id>", me.MyTipView.as_view(), name="me-tip"),
+    path("me/replies/<str:reply_id>", tips.MyReplyView.as_view(), name="me-reply"),
     path("me/photos", me.MyPhotosView.as_view(), name="me-photos"),
     path("me/photos/<str:photo_id>", uploads.MyPhotoView.as_view(), name="me-photo"),
     # 예전 쿠키 로그인 경로

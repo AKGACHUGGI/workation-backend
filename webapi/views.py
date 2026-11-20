@@ -19,11 +19,12 @@ from statistics import mean
 from django.db import connection, transaction
 from django.db.utils import ProgrammingError
 from rest_framework.decorators import api_view
-from rest_framework.exceptions import ParseError, Throttled
+from rest_framework.exceptions import AuthenticationFailed, ParseError, Throttled
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 
+from accounts.authentication import SupabaseJWTAuthentication
 from core.errors import bad_request, error, not_found
 from metrics import scoring
 from regions.models import DayGroup, Dong, DongHourly, Region
@@ -486,13 +487,30 @@ def dong_detail(request, dong_id: str):
 # ───────────────────────── 워케이션 노트 (읽기) ─────────────────────────
 
 
+def viewer_id(request):
+    """로그인 없이 읽는 API 에서 보는 사람의 user_id.
+
+    토큰이 없거나 틀리면 None (읽기는 막지 않는다).
+    """
+    try:
+        found = SupabaseJWTAuthentication().authenticate(request)
+    except AuthenticationFailed:
+        return None
+    return found[0].user_id if found and found[0] else None
+
+
 def _notes(request, by: str, target_id: int) -> Response:
-    """NotesResponse. 공개 팁만, 로그인 없이 읽는다. sort 기본값은 helpful."""
+    """NotesResponse. 공개 팁만, 로그인 없이 읽는다. sort 기본값은 helpful.
+
+    토큰이 있으면 내 팁에 mine, 내가 도움돼요 한 팁에 myHelpful 을 붙인다.
+    """
     sort = request.query_params.get("sort") or "helpful"
     if sort not in community.TIP_ORDERS:
         return bad_request("sort 는 helpful 또는 recent 입니다.")
     try:
-        page = community.tip_page(by, target_id, sort, request.query_params.get("cursor"))
+        page = community.tip_page(
+            by, target_id, sort, request.query_params.get("cursor"), viewer=viewer_id(request)
+        )
     except community.BadCursor as ex:
         return bad_request(str(ex))
     body = {"total": page["total"], "items": page["items"]}
