@@ -4,9 +4,11 @@
 """
 
 import io
+import uuid
 
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
 from PIL import Image
 
 from webapi import storage
@@ -74,3 +76,23 @@ def make_image(fmt: str = "JPEG", size=(800, 600), exif: bool = False) -> bytes:
 def upload(data: bytes, name: str = "a.jpg") -> SimpleUploadedFile:
     # content_type 은 일부러 틀리게 둘 수 있다. 서버는 내용으로 판단한다
     return SimpleUploadedFile(name, data, content_type="image/jpeg")
+
+
+def user_photo(
+    r2, status="approved", tip_id=None, user_id=None, scope="region", unit_id=1, month=10
+):
+    """가짜 R2 에 파일이 있는 user_photo 행 하나 → (user_photo_id, key).
+
+    user_id 기본값은 tests.supabase_tokens.USER_ID (로그인 테스트 사용자).
+    """
+    from tests.supabase_tokens import USER_ID
+
+    key = f"uploads/{'tip' if tip_id else 'photo'}/{uuid.uuid4()}.webp"
+    r2.objects[key] = (b"img", "image/webp")
+    with connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO user_photo (user_id, scope, unit_id, month, url, status, tip_id)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING user_photo_id",
+            [user_id or USER_ID, scope, unit_id, month, f"{PUBLIC}/{key}", status, tip_id],
+        )
+        return cur.fetchone()[0], key

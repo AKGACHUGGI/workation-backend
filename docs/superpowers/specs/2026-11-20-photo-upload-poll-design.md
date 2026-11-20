@@ -5,6 +5,7 @@
 - 배경: 웹(W-03·W-04·W-08)은 노트 사진 첨부 · 이달의 사진 올리기 · 체감 투표 UI 가 이미 있는데, 백엔드는 업로드 경로가 없고 투표는 `empty_poll` 더미, `POST .../poll/vote` 는 404 다.
 - 고치는 문서: workation-web W-03·W-04 스펙의 "이달의 사진 = 운영자 검수 후 게시" 규칙. **바로 게시 + 신고 누적 시 가림 → 운영자 검수**로 바꾼다.
 - 범위 밖: W-06 지자체 리포트(폐기), 웹 쪽 연결 작업(별도 계획), 팁·답글 신고.
+- **2026-11-20 변경 — 사용자 사진은 별도 표 `user_photo`**: `photo` 는 데이터 담당이 적재한 관광공사 · 팀 사진 표라 손대지 않는다. 노트 사진 · 이달의 사진은 새 표 `user_photo` 에 둔다. 아래 본문에서 사용자 사진을 말하는 `photo` · `photo_id` 는 모두 `user_photo` · `user_photo_id` 로 읽는다. 자세한 내용은 3절과 9절.
 - 업로드 방식: **백엔드 경유**. 웹은 사진 파일을 `multipart/form-data` 로 백엔드에 보내고, 백엔드가 검증 · 변환해 R2 에 올린다. presigned URL 로 브라우저가 R2 에 직접 올리는 방식은 버킷 CORS 설정이 필요한데 R2 버킷이 데이터 담당 소유라 쓰지 않는다. 업로드 양이 적어(요청당 최대 3장) 서버 부담도 작다. 나중에 양이 늘면 업로드 받는 부분만 presigned 로 바꿀 수 있다.
 
 ## 1. 목표 · 완료 기준
@@ -39,14 +40,29 @@ R2 쓰기 키 권한은 2026-11-20 에 확인했다 (PUT · HEAD · DELETE 성�
 ## 3. DB 변경 (`db/migrations/20261120_photo-upload-poll.sql`, `db/schema.sql` 동시 반영)
 
 ```sql
--- 사진: 노트 첨부 연결 · 바로 게시
-ALTER TABLE photo ADD COLUMN IF NOT EXISTS tip_id INTEGER REFERENCES tip(tip_id) ON DELETE CASCADE;
-ALTER TABLE photo ADD COLUMN IF NOT EXISTS position SMALLINT;   -- 노트 안 순서 0~2
-ALTER TABLE photo ALTER COLUMN status SET DEFAULT 'approved';
-CREATE INDEX IF NOT EXISTS photo_tip_idx ON photo (tip_id) WHERE tip_id IS NOT NULL;
--- 격리 · 영구 삭제
-ALTER TABLE photo ADD COLUMN IF NOT EXISTS hidden_at TIMESTAMPTZ;      -- hidden 이 된 시각 (purge 기준)
-ALTER TABLE photo ADD COLUMN IF NOT EXISTS deleted_by_user BOOLEAN NOT NULL DEFAULT false;
+-- 사용자 사진 (노트 첨부 · 이달의 사진). photo(관광공사 · 팀)는 바꾸지 않는다
+CREATE TABLE IF NOT EXISTS user_photo (
+  user_photo_id   SERIAL       PRIMARY KEY,
+  user_id         UUID         NOT NULL REFERENCES app_user(user_id) ON DELETE CASCADE,
+  scope           VARCHAR(6)   NOT NULL,                 -- region, dong
+  unit_id         SMALLINT     NOT NULL,
+  month           SMALLINT,                              -- 1~12, NULL = 연간
+  url             TEXT         NOT NULL,                 -- R2 공개 URL
+  tip_id          INTEGER      REFERENCES tip(tip_id) ON DELETE CASCADE,  -- 노트 사진이면
+  position        SMALLINT,                              -- 노트 안 순서 0~2
+  status          VARCHAR(8)   NOT NULL DEFAULT 'approved',
+  hidden_at       TIMESTAMPTZ,                           -- hidden 이 된 시각 (purge 기준)
+  deleted_by_user BOOLEAN      NOT NULL DEFAULT false,
+  created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  CHECK (scope IN ('region', 'dong')), CHECK (month BETWEEN 1 AND 12),
+  CHECK (status IN ('approved', 'pending', 'hidden'))
+);
+-- 인덱스 3개(이달의 사진 · 노트 · 내 사진) · RLS 는 마이그레이션 파일 참고
+
+-- 신고 대상에 사용자 사진 추가 (target_type VARCHAR(6) 이라 'upload')
+ALTER TABLE report DROP CONSTRAINT IF EXISTS report_target_type_check;
+ALTER TABLE report ADD CONSTRAINT report_target_type_check
+  CHECK (target_type IN ('tip', 'reply', 'photo', 'upload'));
 
 -- 체감 투표: metric_vote(지표별) 를 버리고 질문 하나에 한 표
 DROP TABLE IF EXISTS metric_vote;
@@ -67,7 +83,7 @@ CREATE INDEX IF NOT EXISTS poll_vote_target_idx ON poll_vote (scope, unit_id, mo
 ALTER TABLE poll_vote ENABLE ROW LEVEL SECURITY;
 ```
 
-`photo.status` 의미를 다시 정한다 (CHECK 값은 그대로):
+`user_photo.status` 의미:
 
 | 값 | 의미 |
 |---|---|
@@ -77,7 +93,7 @@ ALTER TABLE poll_vote ENABLE ROW LEVEL SECURITY;
 
 `metric_vote` 를 읽던 곳(`community.summary` 의 voteCount)은 `poll_vote` 로 바꾼다: 투표한 (scope, unit_id, month, preset) 수 = 행 수.
 
-**노트 사진은 지역·동네 갤러리에 섞지 않는다.** `regions/photos.py` 의 모든 조회(`_pick`, `one_per_unit`, `one_per_dong`)와 투표 응답 `photos` 에 `tip_id IS NULL` 을 더한다. `GET /api/me/photos` 와 `summary.photoCount` 는 이달의 사진만 센다 (`tip_id IS NULL`). 노트 사진은 노트와 함께 보이고 노트와 함께 지워진다 (4-6).
+**사용자 사진은 지역 · 동네 갤러리에 섞지 않는다.** 지역 상세 사진 · 대표 사진(티어 · 인기 지역 · 히트맵)은 지금처럼 `photo` 만 쓰므로 `regions/photos.py` 는 바꾸지 않는다. 이달의 사진은 체감 투표 영역(웹 `PollSection`)에만, 노트 사진은 노트 안에만 나온다. `GET /api/me/photos` · `summary.photoCount` 는 `user_photo` 의 이달의 사진(`tip_id IS NULL`, `hidden` 제외)만 센다.
 
 ## 4. API
 
@@ -227,3 +243,30 @@ R2 버킷은 r2.dev 로 통째로 공개라, DB 상태만 바꾸면 URL 을 아�
 - `Note.photos` 렌더, 사진 신고 버튼(노트 사진 · 이달의 사진). 마이페이지 내 사진 삭제 버튼(`DELETE /api/me/photos/{id}`).
 - 문구: "운영자 검수 후 게시돼요" → 바로 게시 안내로. 마이페이지 `MyPhoto.status === 'pending'` 문구는 "신고로 검토 중".
 - W-06 리포트 라우트 · 코드 정리 (폐기 결정).
+
+## 9. 변경 기록 — 사용자 사진 표 분리 (2026-11-20)
+
+처음 설계는 `photo` 표에 `tip_id` 등 칸을 더해 관광공사 사진과 사용자 사진을 한 표에 담았다. 다음 이유로 `user_photo` 로 나눈다.
+
+- `photo` 는 데이터 담당이 스크립트로 적재한 표다 (관광공사 1,148장). 서비스 콘텐츠를 섞으면 재적재 · 정리 때 서로 꼬인다.
+- 신고 · 격리 · 삭제 · 노트 연결 칸은 사용자 사진에만 필요하다.
+- 격리 · 삭제가 "관광공사 사진인지(photos/)" 를 매번 판별하지 않아도 된다. `user_photo` 의 모든 행은 우리 `uploads/` 파일이다.
+- `photo` 를 바꾸지 않으니 이 기능을 배포하기 전에도 갤러리 · 대표 사진이 그대로 동작한다.
+
+바뀌는 것:
+
+| 항목 | 처음 설계 | 바뀐 설계 |
+|---|---|---|
+| 사용자 사진 저장 | `photo` (source=user) | `user_photo` |
+| 사진 id (Note.photos · MyPhoto · 투표 photos · 신고 · 삭제 경로) | `photo_id` | `user_photo_id` |
+| 신고 `report.target_type` | `photo` | `upload` |
+| 갤러리 · 대표 사진 (`regions/photos.py`) | `tip_id IS NULL` 조건 추가 | 바꾸지 않음 (`photo` 만) |
+| 투표 응답 `photos` | 이달의 사진 + 관광공사 사진(credit) | 사용자 이달의 사진만, `author` = 닉네임 |
+| 격리 대상 판별 | source=user 이고 url 이 uploads/ | `user_photo` 의 모든 행 |
+| purge | source=user 만, 관광공사 행 유지 | `user_photo` 의 hidden 30일 지난 행 |
+| `photo` 표 변경 | 칸 4개 추가 · status 기본값 | 없음 |
+
+API 경로 · 응답 모양 · 에러 코드는 그대로다 (`/api/photos/{id}/report` 의 id 가 `user_photo_id` 가 될 뿐).
+
+계정 삭제(`DELETE /api/me`) 시 `user_photo` 는 `ON DELETE CASCADE` 로 행이 지워지고 R2 파일은 남는다 — 정책 미정, 후속.
+

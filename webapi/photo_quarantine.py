@@ -19,6 +19,7 @@ from webapi import storage
 logger = logging.getLogger(__name__)
 
 QUARANTINE = "uploads/quarantine/"
+REPORT_TYPE = "upload"  # report.target_type 의 사용자 사진(user_photo). VARCHAR(6)
 RETENTION_DAYS = 30  # hidden 이 된 뒤 영구 삭제까지
 
 
