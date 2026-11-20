@@ -1,11 +1,9 @@
 """가린 사진 격리 · 복구 · 숨김 · 영구 삭제 · 사용자 삭제 (스펙 4-6 · 4-7)."""
 
-import uuid
-
 import pytest
 
-from tests.photo_tools import PUBLIC, r2  # noqa: F401
-from tests.supabase_tokens import USER_ID, supabase  # noqa: F401
+from tests.photo_tools import PUBLIC, r2, user_photo  # noqa: F401
+from tests.supabase_tokens import supabase  # noqa: F401
 from tests.test_api import data  # noqa: F401
 from tests.test_me_api import OTHER_ID, me, run  # noqa: F401
 from webapi import photo_quarantine as pq
@@ -14,20 +12,8 @@ from webapi import storage
 pytestmark = pytest.mark.django_db
 
 
-def user_photo(r2, status="approved", tip_id=None, user_id=USER_ID):  # noqa: F811
-    """가짜 R2 에 파일이 있는 사용자 사진 행 → (photo_id, key)."""
-    key = f"uploads/{'tip' if tip_id else 'photo'}/{uuid.uuid4()}.webp"
-    r2.objects[key] = (b"img", "image/webp")
-    pid = run(
-        "INSERT INTO photo (scope, unit_id, month, url, source, user_id, status, tip_id)"
-        " VALUES ('region', 1, 10, %s, 'user', %s, %s, %s) RETURNING photo_id",
-        [f"{PUBLIC}/{key}", user_id, status, tip_id],
-    )[0][0]
-    return pid, key
-
-
 def tour_photo(status="pending"):
-    """관광공사 사진 (버킷 주인 파일 photos/)."""
+    """photo 표의 관광공사 사진 (버킷 주인 파일 photos/). 격리 모듈은 건드리지 않는다."""
     return run(
         "INSERT INTO photo (scope, unit_id, url, source, credit, status)"
         " VALUES ('region', 1, %s, 'tourapi', '한국관광공사', %s) RETURNING photo_id",
@@ -35,8 +21,12 @@ def tour_photo(status="pending"):
     )[0][0]
 
 
+def tour_row(pid):
+    return run("SELECT url, status FROM photo WHERE photo_id = %s", [pid])[0]
+
+
 def col(pid, name):
-    return run(f"SELECT {name} FROM photo WHERE photo_id = %s", [pid])[0][0]
+    return run(f"SELECT {name} FROM user_photo WHERE user_photo_id = %s", [pid])[0][0]
 
 
 def key_now(pid):
@@ -62,10 +52,29 @@ def test_quarantine_moves_file(me, r2):  # noqa: F811
 
 def test_quarantine_skips(me, r2):  # noqa: F811
     approved, key = user_photo(r2, "approved")
-    tour = tour_photo("pending")
     assert pq.quarantine(approved) is False and key in r2.objects
-    assert pq.quarantine(tour) is False and col(tour, "url") == f"{PUBLIC}/photos/1.webp"
     assert pq.quarantine(999999) is False
+
+
+def test_tour_photos_untouched(me, r2):  # noqa: F811
+    """photo 표의 관광공사 사진은 id 가 같아도 격리 · 숨김 · purge 대상이 아니다."""
+    tour = tour_photo("approved")
+    run("SELECT setval('user_photo_user_photo_id_seq', %s, false)", [tour])
+    pid, _ = user_photo(r2, "pending")
+    assert pid == tour  # 두 표의 id 가 겹친다
+    run(
+        "INSERT INTO report (target_type, target_id, user_id, reason)"
+        " VALUES ('photo', %s, %s, 'x')",
+        [tour, OTHER_ID],
+    )
+    pq.hide(pid)
+    run(
+        "UPDATE user_photo SET hidden_at = now() - interval '31 days' WHERE user_photo_id = %s",
+        [pid],
+    )
+    assert pq.purge() == (1, [])
+    assert tour_row(tour) == (f"{PUBLIC}/photos/1.webp", "approved")
+    assert run("SELECT target_type FROM report WHERE target_id = %s", [tour]) == [("photo",)]
 
 
 def test_quarantine_copy_failure_changes_nothing(me, r2):  # noqa: F811
@@ -102,9 +111,8 @@ def test_restore(me, r2):  # noqa: F811
     pq.quarantine(pid)
     q_key = key_now(pid)
     run(
-        "INSERT INTO report (target_type, target_id, user_id, reason)"
-        " VALUES ('photo', %s, %s, 'x')",
-        [pid, OTHER_ID],
+        "INSERT INTO report (target_type, target_id, user_id, reason) VALUES (%s, %s, %s, 'x')",
+        [pq.REPORT_TYPE, pid, OTHER_ID],
     )
     assert pq.restore(pid) is True
     assert col(pid, "status") == "approved"
@@ -120,10 +128,10 @@ def test_purge(me, r2, monkeypatch):  # noqa: F811
     stuck, _ = user_photo(r2, "pending")
     for pid in (old, fresh, stuck):
         pq.hide(pid)
-    tour = tour_photo("hidden")
     run(
-        "UPDATE photo SET hidden_at = now() - interval '31 days' WHERE photo_id IN (%s, %s, %s)",
-        [old, stuck, tour],
+        "UPDATE user_photo SET hidden_at = now() - interval '31 days'"
+        " WHERE user_photo_id IN (%s, %s)",
+        [old, stuck],
     )
     old_key, stuck_key = key_now(old), key_now(stuck)
 
@@ -136,9 +144,7 @@ def test_purge(me, r2, monkeypatch):  # noqa: F811
 
     monkeypatch.setattr(storage, "delete", delete)
     assert pq.purge() == (1, [stuck])
-    assert run("SELECT photo_id FROM photo ORDER BY photo_id") == sorted(
-        [(fresh,), (stuck,), (tour,)]
-    )
+    assert run("SELECT user_photo_id FROM user_photo ORDER BY 1") == sorted([(fresh,), (stuck,)])
     assert old_key not in r2.objects and stuck_key in r2.objects
 
 
@@ -150,7 +156,7 @@ def test_delete_mine_approved(me, r2):  # noqa: F811
     assert col(pid, "status") == "approved"  # 행은 그대로, 다시 시도하면 된다
     r2.fail_delete = False
     assert pq.delete_mine(me, pid) is True
-    assert run("SELECT count(*) FROM photo") == [(0,)] and key not in r2.objects
+    assert run("SELECT count(*) FROM user_photo") == [(0,)] and key not in r2.objects
 
 
 def test_delete_mine_hidden_by_report_meanwhile(me, r2, monkeypatch):  # noqa: F811
@@ -163,7 +169,7 @@ def test_delete_mine_hidden_by_report_meanwhile(me, r2, monkeypatch):  # noqa: F
         row = real_one(sql, params)
         if not reported:  # 처음 읽은 직후 한 번만 가려진다
             reported.append(1)
-            run("UPDATE photo SET status = 'pending' WHERE photo_id = %s", [pid])
+            run("UPDATE user_photo SET status = 'pending' WHERE user_photo_id = %s", [pid])
         return row
 
     monkeypatch.setattr(pq, "_one", one_then_report)
