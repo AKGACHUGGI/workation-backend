@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 노트 사진 첨부 · 이달의 사진 업로드(백엔드 경유 → R2), 사진 신고 · 운영자 검수 명령, 체감 투표(GET 실집계 · POST vote)를 만든다.
+**Goal:** 노트 사진 첨부 · 이달의 사진 업로드(백엔드 경유 → R2), 사진 신고 · 격리 · 사용자 삭제 · 운영자 검수 명령, 체감 투표(GET 실집계 · POST vote)를 만든다.
 
-**Architecture:** 웹은 사진을 `multipart/form-data` 로 백엔드에 보낸다. 백엔드는 Pillow 로 검증 · WebP 변환(EXIF 제거)한 뒤 `webapi/storage.py`(boto3, R2 S3 API)로 `uploads/` 아래에 올리고 `photo` 행을 쓴다. 신고는 `report` 표에 쌓고 기준 수에 닿으면 `photo.status` 를 `pending` 으로 바꾼다. 투표는 새 `poll_vote` 표에 질문 하나당 한 표로 저장한다.
+**Architecture:** 웹은 사진을 `multipart/form-data` 로 백엔드에 보낸다. 백엔드는 Pillow 로 검증 · WebP 변환(EXIF 제거)한 뒤 `webapi/storage.py`(boto3, R2 S3 API)로 `uploads/` 아래에 올리고 `photo` 행을 쓴다. 신고는 `report` 표에 쌓고 기준 수에 닿으면 `photo.status` 를 `pending` 으로 바꾸고 파일을 `uploads/quarantine/` 으로 옮긴다(버킷이 통째로 공개라 원래 URL 을 막아야 한다). 격리 · 복구 · 숨김 · 영구 삭제 · 사용자 삭제는 `webapi/photo_quarantine.py` 한 곳에 두고 뷰와 `manage.py photos` 가 같이 쓴다. 투표는 새 `poll_vote` 표에 질문 하나당 한 표로 저장한다.
 
 **Tech Stack:** Django 5.2 + DRF (raw SQL, `managed=False`), PostgreSQL, boto3, Pillow, pytest-django.
 
@@ -18,7 +18,10 @@
 - `photo.url = R2_PUBLIC_URL + "/" + key`.
 - R2 업로드가 모두 끝난 뒤 DB 를 쓴다. 업로드 중 실패 → 올린 key 지우고 502 `UPLOAD_FAILED`. DB 실패 → 올린 key 지우고 원래 에러.
 - 에러 코드: 400 `INVALID_PHOTO` · 429 `TIP_RATE_LIMIT` · 429 `PHOTO_RATE_LIMIT`(사용자당 1시간 30장) · 502 `UPLOAD_FAILED`. 에러 모양은 `core.errors.error(status, code, message)`.
-- `photo.status`: `approved` = 공개(기본값), `pending` = 신고 누적으로 가려짐, `hidden` = 숨김 확정.
+- `photo.status`: `approved` = 공개(기본값), `pending` = 신고 누적으로 가려짐(파일 격리), `hidden` = 숨김 확정 또는 가려진 사진을 올린 사람이 지움(`deleted_by_user`), `hidden_at` 30일 뒤 영구 삭제.
+- 격리: `uploads/quarantine/{uuid4}.webp` 로 복사 → `photo.url` 갱신 → 원래 key 삭제. `source='user'` 이고 url 이 `uploads/` 아래인 사진만. 관광공사 · 팀 사진(`photos/`)은 옮기지도 지우지도 않는다.
+- R2 `put` 의 `Cache-Control` 은 `public, max-age=3600` (가린 사진이 캐시에 오래 남지 않게).
+- 사용자 삭제 R2 실패: 502 `DELETE_FAILED`, DB 는 그대로.
 - 신고 기준 `settings.PHOTO_REPORT_THRESHOLD` (기본 3). `report.reason` 1~30자.
 - 노트 사진(`tip_id IS NOT NULL`)은 갤러리 · 투표 photos · `GET /api/me/photos` · `summary.photoCount` 에서 뺀다.
 - 투표 `month`: DB 0 = annual, 1~12. `preset`: region 은 `quiet`·`lively`·`custom` 필수, dong 은 `''`.
@@ -30,13 +33,14 @@
 
 | 파일 | 책임 |
 |---|---|
-| `webapi/storage.py` (새) | R2 클라이언트, `put` · `delete` · `public_url`, `StorageError` |
+| `webapi/storage.py` (새) | R2 클라이언트, `put` · `copy` · `delete` · `public_url`, `StorageError` |
 | `webapi/photo_upload.py` (새) | `process`(검증 · WebP 변환) · `upload`(R2, 실패 시 정리) · `discard`, `BadPhoto` · `UploadFailed` |
-| `webapi/uploads.py` (새) | 이달의 사진 등록 뷰, 사진 신고 뷰 + SQL |
+| `webapi/photo_quarantine.py` (새) | 격리 · 복구 · 숨김 · 영구 삭제 · 사용자 삭제 · 파일 삭제, `DeleteFailed` |
+| `webapi/uploads.py` (새) | 이달의 사진 등록 뷰, 사진 신고 뷰, 내 사진 삭제 뷰 + SQL |
 | `webapi/poll.py` (새) | 질문 문구, 집계 · 투표 SQL, `PollView` · `PollVoteView` |
-| `webapi/management/commands/photos.py` (새) | `manage.py photos list|restore|hide` |
-| `webapi/community.py` | `Target`/`target()`, 노트 사진(`_TIP_PAGE` · `_note` · `create_tip`), `summary` · `my_photos` 필터 |
-| `webapi/me.py` | `NoteCreateView` multipart · 사진 처리 |
+| `webapi/management/commands/photos.py` (새) | `manage.py photos list|restore|hide|purge` |
+| `webapi/community.py` | `Target`/`target()`, 노트 사진(`_TIP_PAGE` · `_note` · `create_tip`), `delete_tip` 첨부 사진 처리, `summary` · `my_photos` 필터 |
+| `webapi/me.py` | `NoteCreateView` multipart · 사진 처리, `MyTipView` 502 |
 | `webapi/views.py` | `empty_poll` 삭제 |
 | `webapi/urls.py` | poll GET · vote, 이달의 사진, 신고 경로 |
 | `regions/photos.py` | 모든 조회에 `tip_id IS NULL` |
@@ -44,7 +48,7 @@
 | `config/settings.py` · `config/settings_test.py` · `.env.example` · `pyproject.toml` · `uv.lock` | R2 설정 · 의존성 |
 | `docs/개발-가이드.md` | 새 API · 운영 명령 |
 | `tests/photo_tools.py` (새) | 가짜 R2 픽스처 `r2`, 테스트 이미지 `make_image` · `upload` |
-| `tests/test_storage.py` · `tests/test_photo_upload.py` · `tests/test_note_photos.py` · `tests/test_month_photos.py` · `tests/test_poll.py` (새) | 각 기능 테스트 |
+| `tests/test_storage.py` · `tests/test_photo_upload.py` · `tests/test_note_photos.py` · `tests/test_photo_quarantine.py` · `tests/test_month_photos.py` · `tests/test_photo_delete.py` · `tests/test_poll.py` (새) | 각 기능 테스트 |
 
 ---
 
@@ -61,9 +65,10 @@
 - Produces:
   - `webapi.storage.StorageError(RuntimeError)`
   - `webapi.storage.put(key: str, data: bytes, content_type: str) -> None` (실패 · 설정 없음 → `StorageError`)
+  - `webapi.storage.copy(src: str, dst: str) -> None` (실패 → `StorageError`)
   - `webapi.storage.delete(key: str) -> None` (실패 → `StorageError`)
   - `webapi.storage.public_url(key: str) -> str`
-  - `tests.photo_tools.FakeR2` (속성 `objects: dict[str, tuple[bytes, str]]`, `deleted: list[str]`, `puts: int`, `fail_after: int | None`)
+  - `tests.photo_tools.FakeR2` (속성 `objects: dict[str, tuple[bytes, str]]`, `deleted: list[str]`, `puts: int`, `fail_after: int | None`, `fail_copy: bool`, `fail_delete: bool`)
   - 픽스처 `tests.photo_tools.r2` → `FakeR2` (settings.R2_PUBLIC_URL = `"https://pub.r2.example"`)
   - `tests.photo_tools.make_image(fmt="JPEG", size=(800, 600), exif=False) -> bytes`
   - `tests.photo_tools.upload(data: bytes, name="a.jpg") -> SimpleUploadedFile`
@@ -138,6 +143,9 @@ class _Client:
     def delete_object(self, **kw):
         self.calls.append(("delete", kw))
 
+    def copy_object(self, **kw):
+        self.calls.append(("copy", kw))
+
 
 @pytest.fixture
 def r2_settings(settings):
@@ -157,7 +165,18 @@ def test_put_and_delete_pass_bucket_and_key(r2_settings, monkeypatch):
     assert (op1, op2) == ("put", "delete")
     assert put["Bucket"] == "bucket" and put["Key"] == "uploads/photo/x.webp"
     assert put["Body"] == b"abc" and put["ContentType"] == "image/webp"
+    assert put["CacheControl"] == "public, max-age=3600"  # 가린 사진이 캐시에 오래 남지 않게
     assert delete == {"Bucket": "bucket", "Key": "uploads/photo/x.webp"}
+
+
+def test_copy_within_bucket(r2_settings, monkeypatch):
+    client = _Client()
+    monkeypatch.setattr(storage, "_client", lambda: client)
+    storage.copy("uploads/photo/a.webp", "uploads/quarantine/b.webp")
+    ((op, kw),) = client.calls
+    assert op == "copy"
+    assert kw["Bucket"] == "bucket" and kw["Key"] == "uploads/quarantine/b.webp"
+    assert kw["CopySource"] == {"Bucket": "bucket", "Key": "uploads/photo/a.webp"}
 
 
 def test_client_error_becomes_storage_error(r2_settings, monkeypatch):
@@ -186,7 +205,7 @@ Expected: FAIL — `ImportError: cannot import name 'storage'`
 """Cloudflare R2 (S3 호환 API) 쓰기. R2 는 이 모듈에서만 부른다 (다른 코드는 boto3 를 직접 쓰지 않음).
 
 버킷은 데이터 담당 소유라 사용자 사진은 uploads/ 아래에만 쓴다.
-테스트는 put · delete 를 가짜로 바꾼다 (tests/photo_tools.py 의 r2 픽스처).
+테스트는 put · copy · delete 를 가짜로 바꾼다 (tests/photo_tools.py 의 r2 픽스처).
 """
 
 from functools import cache
@@ -231,14 +250,23 @@ def public_url(key: str) -> str:
 def put(key: str, data: bytes, content_type: str) -> None:
     bucket = _bucket()
     try:
-        # key 에 uuid 가 들어가 내용이 바뀌지 않으므로 오래 캐시해도 된다
+        # 가린 사진이 브라우저 · CDN 캐시에 오래 남지 않게 1시간만 (스펙 2절)
         _client().put_object(
             Bucket=bucket,
             Key=key,
             Body=data,
             ContentType=content_type,
-            CacheControl="public, max-age=31536000, immutable",
+            CacheControl="public, max-age=3600",
         )
+    except (BotoCoreError, ClientError) as ex:
+        raise StorageError(str(ex)) from ex
+
+
+def copy(src: str, dst: str) -> None:
+    """같은 버킷 안에서 복사 (격리 · 복구). Content-Type · Cache-Control 도 따라간다."""
+    bucket = _bucket()
+    try:
+        _client().copy_object(Bucket=bucket, Key=dst, CopySource={"Bucket": bucket, "Key": src})
     except (BotoCoreError, ClientError) as ex:
         raise StorageError(str(ex)) from ex
 
@@ -254,7 +282,7 @@ def delete(key: str) -> None:
 - [ ] **Step 6: 통과 확인**
 
 Run: `uv run pytest tests/test_storage.py -q`
-Expected: 4 passed
+Expected: 5 passed
 
 - [ ] **Step 7: 테스트 도구 `tests/photo_tools.py` 작성** (다음 태스크들이 쓴다)
 
@@ -276,13 +304,18 @@ PUBLIC = "https://pub.r2.example"
 
 
 class FakeR2:
-    """put 한 key → (bytes, content_type). fail_after 번 성공한 뒤의 put 은 StorageError."""
+    """put 한 key → (bytes, content_type).
+
+    실패 주입: fail_after 번 성공한 뒤의 put, fail_copy 면 copy, fail_delete 면 delete 가 StorageError.
+    """
 
     def __init__(self):
         self.objects: dict[str, tuple[bytes, str]] = {}
         self.deleted: list[str] = []
         self.puts = 0
         self.fail_after: int | None = None
+        self.fail_copy = False
+        self.fail_delete = False
 
     def put(self, key, data, content_type):
         if self.fail_after is not None and self.puts >= self.fail_after:
@@ -290,9 +323,16 @@ class FakeR2:
         self.puts += 1
         self.objects[key] = (data, content_type)
 
+    def copy(self, src, dst):
+        if self.fail_copy or src not in self.objects:
+            raise storage.StorageError("가짜 R2 복사 실패")
+        self.objects[dst] = self.objects[src]
+
     def delete(self, key):
+        if self.fail_delete:
+            raise storage.StorageError("가짜 R2 삭제 실패")
         self.deleted.append(key)
-        self.objects.pop(key, None)
+        self.objects.pop(key, None)  # S3 처럼 없는 key 도 성공
 
 
 @pytest.fixture
@@ -300,6 +340,7 @@ def r2(settings, monkeypatch):
     settings.R2_PUBLIC_URL = PUBLIC
     fake = FakeR2()
     monkeypatch.setattr(storage, "put", fake.put)
+    monkeypatch.setattr(storage, "copy", fake.copy)
     monkeypatch.setattr(storage, "delete", fake.delete)
     return fake
 
@@ -344,7 +385,7 @@ git commit -m "feat: R2 저장소 래퍼와 사진 업로드 설정 추가"
 - Test: `tests/test_schema.py`, `tests/test_me_api.py` (`test_summary_contract`, `test_my_photos_contract`)
 
 **Interfaces:**
-- Produces: 표 `poll_vote(user_id, scope, unit_id, month, preset, choice, created_at)`, `photo.tip_id` · `photo.position` 컬럼. 다음 태스크들은 이 DDL 을 전제로 한다.
+- Produces: 표 `poll_vote(user_id, scope, unit_id, month, preset, choice, created_at)`, `photo.tip_id` · `photo.position` · `photo.hidden_at` · `photo.deleted_by_user` 컬럼. 다음 태스크들은 이 DDL 을 전제로 한다.
 
 - [ ] **Step 1: 실패하는 테스트로 고치기**
 
@@ -358,11 +399,13 @@ def test_photo_upload_columns(db):
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT column_name, column_default FROM information_schema.columns"
-            " WHERE table_name = 'photo' AND column_name IN ('tip_id', 'position', 'status')"
+            " WHERE table_name = 'photo' AND column_name IN"
+            " ('tip_id', 'position', 'status', 'hidden_at', 'deleted_by_user')"
         )
         cols = dict(cursor.fetchall())
-    assert set(cols) == {"tip_id", "position", "status"}
+    assert set(cols) == {"tip_id", "position", "status", "hidden_at", "deleted_by_user"}
     assert cols["status"].startswith("'approved'")  # 올리면 바로 공개
+    assert cols["deleted_by_user"] == "false"
 ```
 
 `tests/test_me_api.py` 의 `test_summary_contract` 에서 `metric_vote` 를 넣는 `for key in ("quiet", "peer"):` 블록 전체를 아래로 바꾸고, 그 아래 `photoCount` · `voteCount` 기대값은 그대로 둔다:
@@ -420,6 +463,12 @@ COMMENT ON COLUMN photo.tip_id   IS '노트 첨부 사진이면 tip_id (갤러�
 COMMENT ON COLUMN photo.position IS '노트 안 순서 0~2';
 COMMENT ON COLUMN photo.status   IS 'approved(공개), pending(신고로 가려짐), hidden(숨김 확정)';
 
+-- 격리 · 영구 삭제 (가린 사용자 사진은 uploads/quarantine/ 으로 옮긴다)
+ALTER TABLE photo ADD COLUMN IF NOT EXISTS hidden_at TIMESTAMPTZ;
+ALTER TABLE photo ADD COLUMN IF NOT EXISTS deleted_by_user BOOLEAN NOT NULL DEFAULT false;
+COMMENT ON COLUMN photo.hidden_at       IS 'hidden 이 된 시각 (30일 뒤 manage.py photos purge)';
+COMMENT ON COLUMN photo.deleted_by_user IS '가려진 사진을 올린 사람이 지움 (증거로 보관 중)';
+
 -- 체감 투표: metric_vote(지표별) 를 버리고 질문 하나에 한 표
 DROP TABLE IF EXISTS metric_vote;
 CREATE TABLE IF NOT EXISTS poll_vote (
@@ -464,6 +513,8 @@ CREATE TABLE photo (
   is_featured   BOOLEAN      NOT NULL DEFAULT false,
   tip_id        INTEGER      REFERENCES tip(tip_id) ON DELETE CASCADE,
   position      SMALLINT,
+  hidden_at     TIMESTAMPTZ,
+  deleted_by_user BOOLEAN    NOT NULL DEFAULT false,
   created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
   CHECK (scope IN ('region', 'dong')),
   CHECK (source IN ('user', 'tourapi', 'team')),
@@ -481,6 +532,8 @@ COMMENT ON COLUMN photo.status      IS 'approved(공개), pending(신고로 가�
 COMMENT ON COLUMN photo.is_featured IS '이달의 사진';
 COMMENT ON COLUMN photo.tip_id      IS '노트 첨부 사진이면 tip_id (갤러리에 섞지 않음)';
 COMMENT ON COLUMN photo.position    IS '노트 안 순서 0~2';
+COMMENT ON COLUMN photo.hidden_at   IS 'hidden 이 된 시각 (30일 뒤 manage.py photos purge)';
+COMMENT ON COLUMN photo.deleted_by_user IS '가려진 사진을 올린 사람이 지움 (증거로 보관 중)';
 
 CREATE INDEX photo_unit_idx ON photo (scope, unit_id, month) WHERE status = 'approved';
 CREATE INDEX photo_tip_idx ON photo (tip_id) WHERE tip_id IS NOT NULL;
@@ -938,13 +991,9 @@ def test_db_failure_removes_uploaded(client, me, r2, monkeypatch):  # noqa: F811
         post_note(client, "regions", GOSEONG, photos=[make_image(), make_image()])
     assert r2.puts == 2 and r2.objects == {} and len(r2.deleted) == 2
     assert run("SELECT count(*) FROM tip") == [(0,)]
-
-
-def test_deleting_tip_deletes_photos(client, me, r2):  # noqa: F811
-    note = post_note(client, "regions", GOSEONG, photos=[make_image()]).json()
-    assert client.delete(f"/api/me/tips/{note['id']}", **auth()).status_code == 204
-    assert run("SELECT count(*) FROM photo") == [(0,)]
 ```
+
+(노트를 지울 때의 첨부 사진 처리는 Task 8.)
 
 - [ ] **Step 3: 실패 확인**
 
@@ -1147,7 +1196,417 @@ git commit -m "feat: 노트 쓰기에 사진 첨부 (multipart · Note.photos)"
 
 ---
 
-### Task 6: 이달의 사진 등록 · 사진 신고 (`webapi/uploads.py`)
+### Task 6: 격리 · 복구 · 숨김 · 영구 삭제 · 사용자 삭제 (`webapi/photo_quarantine.py`)
+
+**Files:**
+- Create: `webapi/photo_quarantine.py`
+- Test: `tests/test_photo_quarantine.py`
+
+**Interfaces:**
+- Consumes: `storage.copy/delete/public_url/StorageError` (Task 1), `photo.hidden_at` · `deleted_by_user` (Task 2), `tests.photo_tools.r2` (Task 1), `tests.test_me_api` 의 `me`, `run`, `OTHER_ID`
+- Produces (뷰 · 명령이 쓴다):
+  - `photo_quarantine.QUARANTINE = "uploads/quarantine/"`, `RETENTION_DAYS = 30`
+  - `photo_quarantine.DeleteFailed(RuntimeError)` — 502 `DELETE_FAILED`
+  - `key_of(url: str) -> str | None` (우리 `uploads/` 사진이 아니면 None), `is_quarantined(url: str) -> bool`
+  - `quarantine(photo_id: int) -> bool` (옮겼으면 True, R2 실패 `StorageError`)
+  - `try_quarantine(photo_id: int) -> None` (실패는 로그만)
+  - `hide(photo_id: int) -> bool` · `restore(photo_id: int) -> bool` (R2 실패 `StorageError`)
+  - `purge(days: int = RETENTION_DAYS) -> tuple[int, list[int]]` (지운 수, R2 실패로 남긴 id)
+  - `delete_files(urls: list[str]) -> None` (실패 `DeleteFailed`)
+  - `delete_mine(user_id, photo_id: int) -> bool` (없으면 False, R2 실패 `DeleteFailed`)
+  - 테스트 도우미 `tests.test_photo_quarantine.user_photo(r2, status="approved", tip_id=None, user_id=USER_ID) -> tuple[int, str]` (photo_id, key)
+
+- [ ] **Step 1: 실패하는 테스트 작성** — `tests/test_photo_quarantine.py`
+
+```python
+"""가린 사진 격리 · 복구 · 숨김 · 영구 삭제 · 사용자 삭제 (스펙 4-6 · 4-7)."""
+
+import uuid
+
+import pytest
+
+from tests.photo_tools import PUBLIC, r2  # noqa: F401
+from tests.supabase_tokens import USER_ID, supabase  # noqa: F401
+from tests.test_api import data  # noqa: F401
+from tests.test_me_api import OTHER_ID, me, run  # noqa: F401
+from webapi import photo_quarantine as pq
+from webapi import storage
+
+pytestmark = pytest.mark.django_db
+
+
+def user_photo(r2, status="approved", tip_id=None, user_id=USER_ID):  # noqa: F811
+    """가짜 R2 에 파일이 있는 사용자 사진 행 → (photo_id, key)."""
+    key = f"uploads/{'tip' if tip_id else 'photo'}/{uuid.uuid4()}.webp"
+    r2.objects[key] = (b"img", "image/webp")
+    pid = run(
+        "INSERT INTO photo (scope, unit_id, month, url, source, user_id, status, tip_id)"
+        " VALUES ('region', 1, 10, %s, 'user', %s, %s, %s) RETURNING photo_id",
+        [f"{PUBLIC}/{key}", user_id, status, tip_id],
+    )[0][0]
+    return pid, key
+
+
+def tour_photo(status="pending"):
+    """관광공사 사진 (버킷 주인 파일 photos/)."""
+    return run(
+        "INSERT INTO photo (scope, unit_id, url, source, credit, status)"
+        " VALUES ('region', 1, %s, 'tourapi', '한국관광공사', %s) RETURNING photo_id",
+        [f"{PUBLIC}/photos/1.webp", status],
+    )[0][0]
+
+
+def col(pid, name):
+    return run(f"SELECT {name} FROM photo WHERE photo_id = %s", [pid])[0][0]
+
+
+def key_now(pid):
+    return pq.key_of(col(pid, "url"))
+
+
+def test_key_of(r2):  # noqa: F811
+    assert pq.key_of(f"{PUBLIC}/uploads/photo/a.webp") == "uploads/photo/a.webp"
+    assert pq.key_of(f"{PUBLIC}/photos/1.webp") is None  # 버킷 주인 파일
+    assert pq.key_of("https://other.example/uploads/photo/a.webp") is None
+
+
+def test_quarantine_moves_file(me, r2):  # noqa: F811
+    pid, key = user_photo(r2, "pending")
+    assert pq.quarantine(pid) is True
+    new = key_now(pid)
+    assert new.startswith(pq.QUARANTINE) and pq.is_quarantined(col(pid, "url"))
+    assert key not in r2.objects and r2.objects[new] == (b"img", "image/webp")
+    assert pq.quarantine(pid) is False  # 이미 격리됨
+    assert key_now(pid) == new
+
+
+def test_quarantine_skips(me, r2):  # noqa: F811
+    approved, key = user_photo(r2, "approved")
+    tour = tour_photo("pending")
+    assert pq.quarantine(approved) is False and key in r2.objects
+    assert pq.quarantine(tour) is False and col(tour, "url") == f"{PUBLIC}/photos/1.webp"
+    assert pq.quarantine(999999) is False
+
+
+def test_quarantine_copy_failure_changes_nothing(me, r2):  # noqa: F811
+    pid, key = user_photo(r2, "pending")
+    r2.fail_copy = True
+    with pytest.raises(storage.StorageError):
+        pq.quarantine(pid)
+    assert key_now(pid) == key and key in r2.objects
+    pq.try_quarantine(pid)  # 삼키고 로그만
+    assert key_now(pid) == key
+
+
+def test_quarantine_original_delete_failure_still_moves(me, r2):  # noqa: F811
+    pid, key = user_photo(r2, "pending")
+    r2.fail_delete = True
+    assert pq.quarantine(pid) is True
+    assert pq.is_quarantined(col(pid, "url"))  # url 은 격리 위치 (원래 파일 삭제만 실패, 로그)
+
+
+def test_hide(me, r2):  # noqa: F811
+    pid, key = user_photo(r2, "approved")
+    assert pq.hide(pid) is True
+    assert col(pid, "status") == "hidden" and col(pid, "hidden_at") is not None
+    assert pq.is_quarantined(col(pid, "url")) and key not in r2.objects
+    assert pq.hide(pid) is True  # 다시 해도 된다 (격리 실패 뒤 재시도용)
+    assert pq.hide(999999) is False
+
+
+def test_restore(me, r2):  # noqa: F811
+    tip = run("INSERT INTO tip (user_id, region_id, body) VALUES (%s, 1, '팁') RETURNING tip_id",
+              [me])[0][0]
+    pid, _ = user_photo(r2, "pending", tip_id=tip)
+    pq.quarantine(pid)
+    q_key = key_now(pid)
+    run(
+        "INSERT INTO report (target_type, target_id, user_id, reason) VALUES ('photo', %s, %s, 'x')",
+        [pid, OTHER_ID],
+    )
+    assert pq.restore(pid) is True
+    assert col(pid, "status") == "approved"
+    assert key_now(pid).startswith("uploads/tip/")  # 노트 사진은 tip 폴더로
+    assert q_key not in r2.objects and key_now(pid) in r2.objects
+    assert run("SELECT count(*) FROM report WHERE target_id = %s", [pid]) == [(0,)]
+    assert pq.restore(pid) is False  # pending 이 아니다
+
+
+def test_purge(me, r2, monkeypatch):  # noqa: F811
+    old, _ = user_photo(r2, "pending")
+    fresh, _ = user_photo(r2, "pending")
+    stuck, _ = user_photo(r2, "pending")
+    for pid in (old, fresh, stuck):
+        pq.hide(pid)
+    tour = tour_photo("hidden")
+    run("UPDATE photo SET hidden_at = now() - interval '31 days' WHERE photo_id IN (%s, %s, %s)",
+        [old, stuck, tour])
+    old_key, stuck_key = key_now(old), key_now(stuck)
+
+    real_delete = r2.delete
+
+    def delete(key):  # stuck 의 파일만 지우지 못한다
+        if key == stuck_key:
+            raise storage.StorageError("가짜 실패")
+        real_delete(key)
+
+    monkeypatch.setattr(storage, "delete", delete)
+    assert pq.purge() == (1, [stuck])
+    assert run("SELECT photo_id FROM photo ORDER BY photo_id") == sorted(
+        [(fresh,), (stuck,), (tour,)]
+    )
+    assert old_key not in r2.objects and stuck_key in r2.objects
+
+
+def test_delete_mine_approved(me, r2):  # noqa: F811
+    pid, key = user_photo(r2, "approved")
+    r2.fail_delete = True
+    with pytest.raises(pq.DeleteFailed):
+        pq.delete_mine(me, pid)
+    assert col(pid, "status") == "approved"  # 행은 그대로, 다시 시도하면 된다
+    r2.fail_delete = False
+    assert pq.delete_mine(me, pid) is True
+    assert run("SELECT count(*) FROM photo") == [(0,)] and key not in r2.objects
+
+
+def test_delete_mine_pending_is_kept_as_evidence(me, r2):  # noqa: F811
+    pid, key = user_photo(r2, "pending")  # 아직 격리 전
+    assert pq.delete_mine(me, pid) is True
+    assert (col(pid, "status"), col(pid, "deleted_by_user")) == ("hidden", True)
+    assert col(pid, "hidden_at") is not None
+    assert pq.is_quarantined(col(pid, "url")) and key not in r2.objects
+    assert pq.delete_mine(me, pid) is False  # hidden 은 다시 못 지운다
+
+
+def test_delete_mine_not_mine(me, r2):  # noqa: F811
+    others, _ = user_photo(r2, "approved", user_id=OTHER_ID)
+    tip = run("INSERT INTO tip (user_id, region_id, body) VALUES (%s, 1, '팁') RETURNING tip_id",
+              [me])[0][0]
+    note_photo, _ = user_photo(r2, "approved", tip_id=tip)
+    assert pq.delete_mine(me, others) is False
+    assert pq.delete_mine(me, note_photo) is False  # 노트 사진은 노트를 지운다
+    assert pq.delete_mine(me, 999999) is False
+```
+
+- [ ] **Step 2: 실패 확인**
+
+Run: `uv run pytest tests/test_photo_quarantine.py -q`
+Expected: FAIL — `ImportError: cannot import name 'photo_quarantine'`
+
+- [ ] **Step 3: `webapi/photo_quarantine.py` 작성**
+
+```python
+"""가린 사진 격리 · 복구 · 숨김 · 영구 삭제, 올린 사람의 삭제 (스펙 4-6 · 4-7).
+
+R2 버킷은 r2.dev 로 통째로 공개라 DB 상태만 바꾸면 URL 을 아는 사람은 계속 본다.
+그래서 가린 사용자 사진은 추측할 수 없는 새 key(uploads/quarantine/)로 옮기고 원래 key 를 지운다.
+관광공사 · 팀 사진(photos/)은 버킷 주인 파일이라 옮기지도 지우지도 않고 상태만 바꾼다.
+뷰(uploads · community)와 manage.py photos 가 같이 쓴다. 관리자 화면을 만들면 여기를 부른다.
+"""
+
+from __future__ import annotations
+
+import logging
+import uuid
+
+from django.db import connection, transaction
+
+from webapi import storage
+
+logger = logging.getLogger(__name__)
+
+QUARANTINE = "uploads/quarantine/"
+RETENTION_DAYS = 30  # hidden 이 된 뒤 영구 삭제까지
+
+
+class DeleteFailed(RuntimeError):
+    """R2 파일을 지우지 못했다 (502 DELETE_FAILED). DB 는 바꾸지 않았다."""
+
+
+def key_of(url: str) -> str | None:
+    """우리가 올린 사진(uploads/)의 R2 key. 관광공사 · 팀 사진이나 다른 주소는 None."""
+    prefix = storage.public_url("")
+    key = url.removeprefix(prefix) if url.startswith(prefix) else ""
+    return key if key.startswith("uploads/") else None
+
+
+def is_quarantined(url: str) -> bool:
+    key = key_of(url)
+    return key is not None and key.startswith(QUARANTINE)
+
+
+def _one(sql: str, params) -> tuple | None:
+    with connection.cursor() as cur:
+        cur.execute(sql, params)
+        return cur.fetchone() if cur.description else None
+
+
+def _move(photo_id: int, src: str, folder: str) -> None:
+    """src 를 uploads/{folder}/{uuid}.webp 로 복사 → photo.url 갱신 → src 삭제.
+
+    복사가 실패하면 StorageError 이고 아무것도 바뀌지 않는다. src 삭제 실패는 로그만
+    (url 은 이미 새 위치라 화면 · 명령은 새 파일을 본다).
+    """
+    dst = f"uploads/{folder}/{uuid.uuid4()}.webp"
+    storage.copy(src, dst)
+    with connection.cursor() as cur:
+        cur.execute(
+            "UPDATE photo SET url = %s WHERE photo_id = %s", [storage.public_url(dst), photo_id]
+        )
+    try:
+        storage.delete(src)
+    except storage.StorageError:
+        logger.warning("R2 원래 파일 삭제 실패 (photo %s): %s", photo_id, src)
+
+
+def quarantine(photo_id: int) -> bool:
+    """가린(pending · hidden) 사용자 사진의 파일을 격리한다. 옮겼으면 True.
+
+    공개 사진 · 관광공사 사진 · 이미 격리된 사진은 그대로 둔다. R2 실패는 StorageError.
+    """
+    row = _one("SELECT url, status FROM photo WHERE photo_id = %s", [photo_id])
+    if row is None or row[1] == "approved":
+        return False
+    key = key_of(row[0])
+    if key is None or key.startswith(QUARANTINE):
+        return False
+    _move(photo_id, key, "quarantine")
+    return True
+
+
+def try_quarantine(photo_id: int) -> None:
+    """요청 처리 중의 격리. 실패해도 로그만 남긴다 — photos list 가 'URL 열림' 으로 보여 주고
+    photos hide 가 다시 격리한다."""
+    try:
+        quarantine(photo_id)
+    except storage.StorageError:
+        logger.warning("격리 실패 (photo %s)", photo_id, exc_info=True)
+
+
+def hide(photo_id: int) -> bool:
+    """숨김 확정 후 격리. 없는 사진이면 False. 이미 hidden 이면 격리만 다시 한다(재시도용).
+
+    R2 실패는 StorageError (상태는 hidden 으로 남는다).
+    """
+    row = _one(
+        """UPDATE photo SET status = 'hidden', hidden_at = coalesce(hidden_at, now())
+            WHERE photo_id = %s RETURNING photo_id""",
+        [photo_id],
+    )
+    if row is None:
+        return False
+    quarantine(photo_id)
+    return True
+
+
+def restore(photo_id: int) -> bool:
+    """pending 사진을 다시 공개한다. 격리 파일을 새 공개 key 로 옮기고(원래 key 는 캐시에 404 가
+    남았을 수 있어 쓰지 않음) approved 로, 그 사진의 신고를 지운다. pending 이 아니면 False."""
+    row = _one("SELECT url, tip_id FROM photo WHERE photo_id = %s AND status = 'pending'", [photo_id])
+    if row is None:
+        return False
+    url, tip_id = row
+    if is_quarantined(url):
+        _move(photo_id, key_of(url), "tip" if tip_id else "photo")
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("UPDATE photo SET status = 'approved' WHERE photo_id = %s", [photo_id])
+        cur.execute(
+            "DELETE FROM report WHERE target_type = 'photo' AND target_id = %s", [photo_id]
+        )
+    return True
+
+
+def purge(days: int = RETENTION_DAYS) -> tuple[int, list[int]]:
+    """hidden 이 된 지 days 일 지난 사용자 사진을 영구 삭제 → (지운 수, R2 실패로 남긴 id).
+
+    파일을 먼저 지우고 성공한 것만 행 · 신고를 지운다. 실패한 행은 다음 purge 때 다시.
+    관광공사 · 팀 사진은 버킷 주인 파일이라 행도 남긴다.
+    """
+    with connection.cursor() as cur:
+        cur.execute(
+            """SELECT photo_id, url FROM photo
+                WHERE status = 'hidden' AND source = 'user'
+                  AND hidden_at < now() - make_interval(days => %s)""",
+            [days],
+        )
+        rows = cur.fetchall()
+    gone, failed = [], []
+    for pid, url in rows:
+        try:
+            if key := key_of(url):
+                storage.delete(key)
+        except storage.StorageError:
+            logger.warning("purge: R2 삭제 실패 (photo %s)", pid)
+            failed.append(pid)
+            continue
+        gone.append(pid)
+    if gone:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("DELETE FROM photo WHERE photo_id = ANY(%s)", [gone])
+            cur.execute(
+                "DELETE FROM report WHERE target_type = 'photo' AND target_id = ANY(%s)", [gone]
+            )
+    return len(gone), failed
+
+
+def delete_files(urls: list[str]) -> None:
+    """공개 사진 파일을 지운다. 하나라도 실패하면 DeleteFailed (다시 시도하면 된다 —
+    S3 삭제는 없는 key 도 성공)."""
+    for url in urls:
+        if key := key_of(url):
+            try:
+                storage.delete(key)
+            except storage.StorageError as ex:
+                raise DeleteFailed(str(ex)) from ex
+
+
+def delete_mine(user_id, photo_id: int) -> bool:
+    """올린 사람이 이달의 사진을 지운다 (스펙 4-6). 내 이달의 사진이 아니거나 이미 hidden 이면 False.
+
+    공개 사진: 파일을 먼저 지우고(실패 → DeleteFailed, 행 그대로) 행 · 신고를 지운다.
+    가려진(pending) 사진: 증거라 hidden · deleted_by_user 로 남기고 격리한다 (30일 뒤 purge).
+    """
+    row = _one(
+        """SELECT url, status FROM photo
+            WHERE photo_id = %s AND user_id = %s AND tip_id IS NULL AND status <> 'hidden'""",
+        [photo_id, user_id],
+    )
+    if row is None:
+        return False
+    url, status = row
+    with connection.cursor() as cur:
+        if status == "approved":
+            delete_files([url])
+            cur.execute("DELETE FROM photo WHERE photo_id = %s", [photo_id])
+            cur.execute(
+                "DELETE FROM report WHERE target_type = 'photo' AND target_id = %s", [photo_id]
+            )
+            return True
+        cur.execute(
+            """UPDATE photo SET status = 'hidden', hidden_at = now(), deleted_by_user = true
+                WHERE photo_id = %s""",
+            [photo_id],
+        )
+    try_quarantine(photo_id)
+    return True
+```
+
+- [ ] **Step 4: 통과 확인**
+
+Run: `uv run pytest tests/test_photo_quarantine.py -q`
+Expected: 모두 PASS
+
+- [ ] **Step 5: 커밋**
+
+```bash
+uv run ruff check webapi tests && uv run ruff format webapi tests
+git add webapi/photo_quarantine.py tests/test_photo_quarantine.py
+git commit -m "feat: 가린 사진 격리 · 복구 · 숨김 · 영구 삭제 모듈"
+```
+
+---
+
+### Task 7: 이달의 사진 등록 · 사진 신고 (`webapi/uploads.py`)
 
 **Files:**
 - Modify: `webapi/community.py` (`Target` · `target()` 추가, 코드 ↔ unit_id 섹션 끝)
@@ -1156,7 +1615,7 @@ git commit -m "feat: 노트 쓰기에 사진 첨부 (multipart · Note.photos)"
 - Test: `tests/test_month_photos.py`
 
 **Interfaces:**
-- Consumes: `photo_upload.*` (Task 4), `community.my_photos` 모양 (Task 2), 테스트 도구 (Task 1 · 5 와 같은 import)
+- Consumes: `photo_upload.*` (Task 4), `photo_quarantine.try_quarantine` · `is_quarantined` (Task 6), `community.my_photos` 모양 (Task 2), 테스트 도구 (Task 1 · 5 와 같은 import), `tests.test_photo_quarantine.user_photo` (Task 6)
 - Produces:
   - `community.Target(NamedTuple)`: `scope: str`, `unit_id: int`, `region_id: int`, `name: str`
   - `community.target(kind: str, code: str) -> Target | None` (kind = `"regions"` | `"dongs"`, 집계 제외 동 None)
@@ -1175,7 +1634,8 @@ from tests.photo_tools import make_image, r2, upload  # noqa: F401
 from tests.supabase_tokens import make_token, supabase  # noqa: F401
 from tests.test_api import data  # noqa: F401
 from tests.test_me_api import GEOJIN, GOSEONG, OTHER_ID, add_user, auth, me, run  # noqa: F401
-from webapi import uploads
+from tests.test_photo_quarantine import user_photo
+from webapi import photo_quarantine, uploads
 
 pytestmark = pytest.mark.django_db
 
@@ -1292,6 +1752,27 @@ def test_report_hides_at_threshold(client, me, settings):  # noqa: F811
     body = client.get("/api/v1/regions/51820?month=10").json()
     assert body["photos"]["totalCount"] == 0
     assert report(client, photo).status_code == 404
+    # 팀 사진(r2.example)은 버킷 주인 파일이라 옮기지 않는다
+    assert run("SELECT url FROM photo WHERE photo_id = %s", [photo]) == [
+        ("https://r2.example/p.webp",)
+    ]
+
+
+def test_report_quarantines_user_photo(client, me, r2, settings):  # noqa: F811
+    settings.PHOTO_REPORT_THRESHOLD = 1
+    photo, key = user_photo(r2)
+    assert report(client, photo).status_code == 204
+    url = run("SELECT url FROM photo WHERE photo_id = %s", [photo])[0][0]
+    assert photo_quarantine.is_quarantined(url) and key not in r2.objects
+
+
+def test_report_quarantine_failure_still_204(client, me, r2, settings):  # noqa: F811
+    settings.PHOTO_REPORT_THRESHOLD = 1
+    photo, key = user_photo(r2)
+    r2.fail_copy = True
+    assert report(client, photo).status_code == 204
+    assert status_of(photo) == "pending"  # 가리기는 됐고, 파일은 photos hide 로 다시 격리
+    assert key in r2.objects
 
 
 @pytest.mark.parametrize("reason", ["", "   ", "가" * 31, None, 3])
@@ -1357,7 +1838,7 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 
 from core.errors import bad_request, error, not_found
-from webapi import community, data, photo_upload
+from webapi import community, data, photo_quarantine, photo_upload
 from webapi.me import MeAPIView
 
 PHOTO_HOURLY_LIMIT = 30  # 사용자당 최근 1시간 이달의 사진 장수
@@ -1449,17 +1930,24 @@ class PhotoReportView(MeAPIView):
         reason = request.data.get("reason") if isinstance(request.data, dict) else None
         if not isinstance(reason, str) or not 1 <= len(reason.strip()) <= REASON_MAX_LEN:
             return bad_request(f"reason 은 1~{REASON_MAX_LEN}자입니다.")
-        if not (photo_id.isascii() and photo_id.isdigit() and len(photo_id) <= 9):
+        pid = photo_id_or_none(photo_id)
+        found, hid = _report(pid, request.user.user_id, reason.strip()) if pid else (False, False)
+        if not found:
             return not_found("사진을 찾을 수 없습니다.")
-        if not _report(int(photo_id), request.user.user_id, reason.strip()):
-            return not_found("사진을 찾을 수 없습니다.")
+        if hid:  # 가렸으면 원래 URL 도 막는다. 실패해도 응답은 204 (스펙 4-4)
+            photo_quarantine.try_quarantine(pid)
         return Response(status=204)
 
 
-def _report(photo_id: int, user_id, reason: str) -> bool:
-    """신고를 넣고, 신고 수가 기준에 닿으면 가린다. 한 문장(= 한 트랜잭션). 공개 사진이 아니면 False.
+def photo_id_or_none(raw: str) -> int | None:
+    """경로의 photoId. photo_id 는 SERIAL 이라 그 범위의 숫자만 본다."""
+    return int(raw) if raw.isascii() and raw.isdigit() and len(raw) <= 9 else None
 
-    CTE 는 같은 문장에서 넣은 행을 못 보므로 기존 신고 수 + 이번에 넣은 수로 센다.
+
+def _report(photo_id: int, user_id, reason: str) -> tuple[bool, bool]:
+    """신고를 넣고, 신고 수가 기준에 닿으면 가린다 → (공개 사진이 있었나, 이번에 가렸나).
+
+    한 문장(= 한 트랜잭션). CTE 는 같은 문장에서 넣은 행을 못 보므로 기존 신고 수 + 이번에 넣은 수로 센다.
     """
     with connection.cursor() as cur:
         cur.execute(
@@ -1487,11 +1975,9 @@ def _report(photo_id: int, user_id, reason: str) -> bool:
                 "threshold": settings.PHOTO_REPORT_THRESHOLD,
             },
         )
-        found, _ = cur.fetchone()
-    return found > 0
+        found, hid = cur.fetchone()
+    return found > 0, hid > 0
 ```
-
-(`SELECT ... (SELECT count(*) FROM up)` 은 `up` CTE 를 문장 결과에 묶어 두려는 것. PostgreSQL 은 데이터 변경 CTE 를 참조하지 않아도 실행하지만, 읽는 사람이 헷갈리지 않게 둔다.)
 
 - [ ] **Step 5: 경로 추가** — `webapi/urls.py`
 
@@ -1539,7 +2025,212 @@ git commit -m "feat: 이달의 사진 올리기와 사진 신고 API"
 
 ---
 
-### Task 7: 체감 투표 (`webapi/poll.py`)
+### Task 8: 사진 삭제 (`DELETE /api/me/photos/{id}`) · 노트 삭제 시 첨부 사진
+
+**Files:**
+- Modify: `webapi/uploads.py` (`MyPhotoView` 추가), `webapi/urls.py` (경로)
+- Modify: `webapi/community.py` (`delete_tip`, import), `webapi/me.py` (`MyTipView`)
+- Test: `tests/test_photo_delete.py`
+
+**Interfaces:**
+- Consumes: `photo_quarantine.delete_mine/delete_files/try_quarantine/quarantine/is_quarantined/DeleteFailed` (Task 6), `uploads.photo_id_or_none` (Task 7), `tests.test_photo_quarantine.user_photo` (Task 6)
+- Produces: `DELETE /api/me/photos/<photo_id>` (204 · 404 · 502 `DELETE_FAILED`), `community.delete_tip(user_id, tip_id) -> bool` (R2 실패 `DeleteFailed`), `DELETE /api/me/tips/{id}` 의 502 `DELETE_FAILED`
+
+- [ ] **Step 1: 실패하는 테스트 작성** — `tests/test_photo_delete.py`
+
+```python
+"""올린 사람의 사진 삭제 · 노트 삭제 시 첨부 사진 (스펙 4-6)."""
+
+import pytest
+
+from tests.photo_tools import PUBLIC, make_image, r2, upload  # noqa: F401
+from tests.supabase_tokens import supabase  # noqa: F401
+from tests.test_api import data  # noqa: F401
+from tests.test_me_api import GOSEONG, OTHER_ID, auth, me, run  # noqa: F401
+from tests.test_photo_quarantine import user_photo
+from webapi import photo_quarantine
+
+pytestmark = pytest.mark.django_db
+
+
+def delete_photo(client, photo_id, **headers):
+    return client.delete(f"/api/me/photos/{photo_id}", **(headers or auth()))
+
+
+def test_delete_my_photo(client, me, r2):  # noqa: F811
+    pid, key = user_photo(r2)
+    assert delete_photo(client, pid).status_code == 204
+    assert key not in r2.objects and run("SELECT count(*) FROM photo") == [(0,)]
+    assert client.get("/api/me/photos", **auth()).json()["items"] == []
+
+
+def test_delete_my_photo_r2_failure(client, me, r2):  # noqa: F811
+    pid, key = user_photo(r2)
+    r2.fail_delete = True
+    r = delete_photo(client, pid)
+    assert r.status_code == 502 and r.json()["error"]["code"] == "DELETE_FAILED"
+    assert run("SELECT count(*) FROM photo") == [(1,)] and key in r2.objects
+
+
+def test_delete_reported_photo_keeps_evidence(client, me, r2):  # noqa: F811
+    pid, _ = user_photo(r2, "pending")
+    assert delete_photo(client, pid).status_code == 204
+    assert client.get("/api/me/photos", **auth()).json()["items"] == []
+    assert run("SELECT status, deleted_by_user FROM photo") == [("hidden", True)]
+    assert photo_quarantine.is_quarantined(run("SELECT url FROM photo")[0][0])
+
+
+def test_delete_photo_404_401(client, me, r2):  # noqa: F811
+    others, _ = user_photo(r2, user_id=OTHER_ID)
+    for photo_id in (others, 999999, "abc"):
+        r = delete_photo(client, photo_id)
+        assert r.status_code == 404 and r.json()["error"]["code"] == "NOT_FOUND"
+    assert client.delete(f"/api/me/photos/{others}").status_code == 401
+
+
+def post_note(client, n):
+    payload = {"body": "사진 팁", "photos": [upload(make_image()) for _ in range(n)]}
+    return client.post(f"/api/regions/{GOSEONG}/notes", payload, **auth()).json()
+
+
+def delete_note(client, note):
+    return client.delete(f"/api/me/tips/{note['id']}", **auth())
+
+
+def test_delete_note_deletes_photo_files(client, me, r2):  # noqa: F811
+    note = post_note(client, 2)
+    keys = [p["url"].removeprefix(f"{PUBLIC}/") for p in note["photos"]]
+    assert delete_note(client, note).status_code == 204
+    assert not set(keys) & set(r2.objects)
+    assert run("SELECT count(*) FROM photo") == [(0,)]
+    assert run("SELECT count(*) FROM tip") == [(0,)]
+
+
+def test_delete_note_keeps_reported_photo(client, me, r2):  # noqa: F811
+    note = post_note(client, 2)
+    reported = note["photos"][0]["id"]
+    run("UPDATE photo SET status = 'pending' WHERE photo_id = %s", [reported])
+    photo_quarantine.quarantine(int(reported))
+    assert delete_note(client, note).status_code == 204
+    rows = run("SELECT photo_id::text, tip_id, status, deleted_by_user, url FROM photo")
+    assert [r[:4] for r in rows] == [(reported, None, "hidden", True)]
+    assert photo_quarantine.is_quarantined(rows[0][4])
+    assert run("SELECT count(*) FROM tip") == [(0,)]
+
+
+def test_delete_note_r2_failure_keeps_note(client, me, r2):  # noqa: F811
+    note = post_note(client, 1)
+    r2.fail_delete = True
+    r = delete_note(client, note)
+    assert r.status_code == 502 and r.json()["error"]["code"] == "DELETE_FAILED"
+    assert run("SELECT count(*) FROM tip") == [(1,)]
+    assert run("SELECT count(*) FROM photo") == [(1,)]
+```
+
+- [ ] **Step 2: 실패 확인**
+
+Run: `uv run pytest tests/test_photo_delete.py -q`
+Expected: FAIL (`DELETE /api/me/photos/...` 경로 없음 405/404, 노트 삭제 뒤 파일이 남음)
+
+- [ ] **Step 3: `community.delete_tip` 바꾸기**
+
+import 를 `from webapi import data, photo_quarantine, photo_upload` 로 바꾸고, `delete_tip` 전체를 아래로 바꾼다:
+
+```python
+def delete_tip(user_id, tip_id: int) -> bool:
+    """내 팁을 지운다 (도움돼요 · 답글은 ON DELETE CASCADE). 내 팁이 아니면 False.
+
+    첨부 사진 (스펙 4-6):
+    - 공개(approved) 사진은 R2 파일을 먼저 지운다. 실패하면 DeleteFailed 이고 팁은 그대로
+      (다시 시도하면 된다). 행은 팁과 함께 지워진다 (CASCADE).
+    - 가려진(pending · hidden) 사진은 증거라 팁에서 떼어(tip_id = NULL) hidden · deleted_by_user 로
+      남긴다. 30일 뒤 manage.py photos purge 가 지운다.
+    """
+    with connection.cursor() as cur:
+        cur.execute(
+            """SELECT p.photo_id, p.url, p.status
+                 FROM tip t JOIN photo p ON p.tip_id = t.tip_id
+                WHERE t.tip_id = %s AND t.user_id = %s""",
+            [tip_id, user_id],
+        )
+        photos = cur.fetchall()
+    photo_quarantine.delete_files([url for _, url, status in photos if status == "approved"])
+    kept = [pid for pid, _, status in photos if status != "approved"]
+    with transaction.atomic(), connection.cursor() as cur:
+        if kept:
+            cur.execute(
+                """UPDATE photo SET tip_id = NULL, status = 'hidden',
+                          hidden_at = coalesce(hidden_at, now()), deleted_by_user = true
+                    WHERE photo_id = ANY(%s)""",
+                [kept],
+            )
+        cur.execute("DELETE FROM tip WHERE tip_id = %s AND user_id = %s", [tip_id, user_id])
+        deleted = cur.rowcount > 0
+    for pid in kept:  # 보통 이미 격리돼 있다 (신고로 가려질 때)
+        photo_quarantine.try_quarantine(pid)
+    return deleted
+```
+
+- [ ] **Step 4: `MyTipView` 에 502 추가** — `webapi/me.py`
+
+import 를 `from webapi import community, data, photo_quarantine, photo_upload` 로 바꾸고 `MyTipView` 를:
+
+```python
+class MyTipView(MeAPIView):
+    def delete(self, request, tip_id: str):
+        # tip_id 는 INTEGER 라 그 범위의 숫자만 본다
+        if not (tip_id.isascii() and tip_id.isdigit() and len(tip_id) <= 9):
+            return not_found("내 팁을 찾을 수 없습니다.")
+        try:
+            deleted = community.delete_tip(request.user.user_id, int(tip_id))
+        except photo_quarantine.DeleteFailed:
+            return error(502, "DELETE_FAILED", "사진을 지우지 못했어요. 잠시 후 다시 시도해 주세요.")
+        if not deleted:
+            return not_found("내 팁을 찾을 수 없습니다.")
+        return Response(status=204)
+```
+
+- [ ] **Step 5: `MyPhotoView` · 경로 추가**
+
+`webapi/uploads.py` 끝에:
+
+```python
+class MyPhotoView(MeAPIView):
+    """DELETE /api/me/photos/{photoId}. 204. 내 이달의 사진이 아니면 404 (스펙 4-6)."""
+
+    def delete(self, request, photo_id: str):
+        pid = photo_id_or_none(photo_id)
+        try:
+            deleted = pid is not None and photo_quarantine.delete_mine(request.user.user_id, pid)
+        except photo_quarantine.DeleteFailed:
+            return error(502, "DELETE_FAILED", "사진을 지우지 못했어요. 잠시 후 다시 시도해 주세요.")
+        if not deleted:
+            return not_found("내 사진을 찾을 수 없습니다.")
+        return Response(status=204)
+```
+
+`webapi/urls.py` 의 `path("me/photos", ...)` 줄 아래에:
+
+```python
+    path("me/photos/<str:photo_id>", uploads.MyPhotoView.as_view(), name="me-photo"),
+```
+
+- [ ] **Step 6: 통과 확인**
+
+Run: `uv run pytest tests/test_photo_delete.py tests/test_me_api.py tests/test_note_photos.py -q`
+Expected: 모두 PASS (`test_delete_my_tip` 포함)
+
+- [ ] **Step 7: 커밋**
+
+```bash
+uv run ruff check webapi tests && uv run ruff format webapi tests
+git add webapi/community.py webapi/me.py webapi/uploads.py webapi/urls.py tests/test_photo_delete.py
+git commit -m "feat: 내 사진 삭제와 노트 삭제 시 첨부 사진 정리 (가려진 사진은 증거로 보관)"
+```
+
+---
+
+### Task 9: 체감 투표 (`webapi/poll.py`)
 
 **Files:**
 - Create: `webapi/poll.py`
@@ -1547,7 +2238,7 @@ git commit -m "feat: 이달의 사진 올리기와 사진 신고 API"
 - Test: `tests/test_poll.py`
 
 **Interfaces:**
-- Consumes: `community.target/Target` (Task 6), `poll_vote` 표 (Task 2), `accounts.views.LoginAPIView`, `webapi.me.MeAPIView`
+- Consumes: `community.target/Target` (Task 7), `poll_vote` 표 (Task 2), `accounts.views.LoginAPIView`, `webapi.me.MeAPIView`
 - Produces:
   - `poll.question(month: int | None, name: str, preset: str) -> str`
   - `poll.PollView` (GET, 로그인 선택), `poll.PollVoteView` (POST, 로그인) — kind 는 urls 하위 클래스
@@ -1912,100 +2603,172 @@ git commit -m "feat: 체감 투표 집계 · 투표 API (poll_vote)"
 
 ---
 
-### Task 8: 운영자 검수 명령 `manage.py photos`
+### Task 10: 운영자 검수 명령 `manage.py photos`
 
 **Files:**
 - Create: `webapi/management/__init__.py` (빈 파일), `webapi/management/commands/__init__.py` (빈 파일)
 - Create: `webapi/management/commands/photos.py`
-- Test: `tests/test_month_photos.py` (끝에 추가)
+- Test: `tests/test_photos_command.py`
 
 **Interfaces:**
-- Consumes: `photo.status`, `report` 표
-- Produces: `manage.py photos list` · `photos restore <id…>` · `photos hide <id…>`
+- Consumes: `photo_quarantine.restore/hide/purge/is_quarantined/RETENTION_DAYS` (Task 6), `storage.StorageError` (Task 1), `tests.test_photo_quarantine.user_photo` (Task 6)
+- Produces: `manage.py photos list` · `photos restore <id…>` · `photos hide <id…>` · `photos purge [--days 30]`
 
-- [ ] **Step 1: 실패하는 테스트 작성** — `tests/test_month_photos.py` 끝에
+운영자는 서버 셸이나 운영 `.env` 를 가진 팀 개발자다 (스펙 5절). 명령은 얇게 두고 일은 `photo_quarantine` 이 한다 — 나중에 관리자 화면이 같은 함수를 부른다.
+
+- [ ] **Step 1: 실패하는 테스트 작성** — `tests/test_photos_command.py`
 
 ```python
-# ───────────── 운영자 명령 ─────────────
+"""운영자 검수 명령 manage.py photos (스펙 5절)."""
+
+from io import StringIO
+
+import pytest
+from django.core.management import call_command
+from django.core.management.base import CommandError
+
+from tests.photo_tools import r2  # noqa: F401
+from tests.supabase_tokens import supabase  # noqa: F401
+from tests.test_api import data  # noqa: F401
+from tests.test_me_api import OTHER_ID, me, run  # noqa: F401
+from tests.test_photo_quarantine import user_photo
+from webapi import photo_quarantine
+
+pytestmark = pytest.mark.django_db
 
 
 def photos_cmd(*args) -> str:
-    from io import StringIO
-
-    from django.core.management import call_command
-
     out = StringIO()
-    call_command("photos", *args, stdout=out)
+    call_command("photos", *args, stdout=out, stderr=out)
     return out.getvalue()
 
 
-def test_command_list_restore_hide(client, me):  # noqa: F811
-    pending = add_photo("pending")
-    other = add_photo("approved")
+def col(pid, name):
+    return run(f"SELECT {name} FROM photo WHERE photo_id = %s", [pid])[0][0]
+
+
+def test_list(me, r2):  # noqa: F811
+    moved, _ = user_photo(r2, "pending")
+    photo_quarantine.quarantine(moved)
+    open_, _ = user_photo(r2, "pending")  # 격리 실패로 남은 사진
+    public, _ = user_photo(r2, "approved")
     run(
         "INSERT INTO report (target_type, target_id, user_id, reason)"
         " VALUES ('photo', %s, %s, '광고'), ('photo', %s, %s, '무관한 사진')",
-        [pending, me, pending, OTHER_ID],
+        [moved, me, moved, OTHER_ID],
     )
-    listed = photos_cmd("list")
-    assert str(pending) in listed and "고성군" in listed and "신고 2" in listed
-    assert "광고" in listed and "무관한 사진" in listed
-    assert f"{other}\t" not in listed
-
-    assert "1장 복구" in photos_cmd("restore", str(pending))
-    assert status_of(pending) == "approved"
-    assert run("SELECT count(*) FROM report WHERE target_id = %s", [pending]) == [(0,)]
-
-    assert "2장 숨김" in photos_cmd("hide", str(pending), str(other))
-    assert status_of(pending) == status_of(other) == "hidden"
-    assert "0장 복구" in photos_cmd("restore", str(other))  # hidden 은 restore 대상이 아니다
+    out = photos_cmd("list")
+    lines = {line.split("\t")[0]: line for line in out.splitlines() if "\t" in line}
+    assert set(lines) == {str(moved), str(open_)}  # 공개 사진은 안 나온다
+    assert "고성군" in lines[str(moved)] and "신고 2" in lines[str(moved)]
+    assert "uploads/quarantine/" in lines[str(moved)] and "URL 열림" not in lines[str(moved)]
+    assert "URL 열림" in lines[str(open_)]
+    assert "광고 / 무관한 사진" in out
+    assert str(public) not in lines
 
 
-def test_command_needs_ids():
-    from django.core.management.base import CommandError
+def test_restore_and_hide(me, r2):  # noqa: F811
+    a, _ = user_photo(r2, "pending")
+    b, _ = user_photo(r2, "approved")
+    photo_quarantine.quarantine(a)
+    assert "1장 복구" in photos_cmd("restore", str(a), "999999")
+    assert col(a, "status") == "approved" and not photo_quarantine.is_quarantined(col(a, "url"))
+    out = photos_cmd("hide", str(a), str(b))
+    assert "2장 숨김" in out
+    for pid in (a, b):
+        assert col(pid, "status") == "hidden" and photo_quarantine.is_quarantined(col(pid, "url"))
 
+
+def test_hide_r2_failure_reported_and_retryable(me, r2):  # noqa: F811
+    pid, key = user_photo(r2, "approved")
+    r2.fail_copy = True
+    out = photos_cmd("hide", str(pid))
+    assert "R2 실패" in out and col(pid, "status") == "hidden" and key in r2.objects
+    r2.fail_copy = False
+    assert "1장 숨김" in photos_cmd("hide", str(pid))  # 다시 하면 격리된다
+    assert photo_quarantine.is_quarantined(col(pid, "url"))
+
+
+def test_purge(me, r2):  # noqa: F811
+    pid, _ = user_photo(r2, "approved")
+    photos_cmd("hide", str(pid))
+    assert "0장 영구 삭제" in photos_cmd("purge")
+    run("UPDATE photo SET hidden_at = now() - interval '3 days'")
+    assert "0장 영구 삭제" in photos_cmd("purge")
+    assert "1장 영구 삭제" in photos_cmd("purge", "--days", "2")
+    assert run("SELECT count(*) FROM photo") == [(0,)]
+
+
+def test_needs_ids():
     with pytest.raises(CommandError):
         photos_cmd("hide")
 ```
 
 - [ ] **Step 2: 실패 확인**
 
-Run: `uv run pytest tests/test_month_photos.py -q -k command`
+Run: `uv run pytest tests/test_photos_command.py -q`
 Expected: FAIL — `CommandError: Unknown command: 'photos'`
 
 - [ ] **Step 3: 명령 작성** — `webapi/management/commands/photos.py` (빈 `__init__.py` 두 개도 만든다)
 
 ```python
-"""신고로 가려진 사진 검수 (스펙 5절).
+"""신고로 가려진 사진 검수 (스펙 5절). 일은 webapi/photo_quarantine.py 가 한다.
 
-  manage.py photos list            가려진(pending) 사진과 신고 사유
-  manage.py photos restore <id…>   다시 공개 (그 사진의 신고를 지워 같은 신고로 다시 가려지지 않게)
-  manage.py photos hide <id…>      숨김 확정 (공개 중인 사진도 바로 내릴 수 있다)
+  manage.py photos list               가려진(pending) 사진 · 신고 사유 · 격리 위치 URL
+  manage.py photos restore <id…>      다시 공개 (파일을 공개 위치로, 신고 삭제)
+  manage.py photos hide <id…>         숨김 확정 + 격리 (공개 중인 사진도 바로 내릴 수 있다)
+  manage.py photos purge [--days 30]  숨김 뒤 30일 지난 사용자 사진을 영구 삭제
 
-R2 파일은 지우지 않는다 (복구 여지 · 증거 보존).
+R2 가 실패한 id 는 다시 실행하면 된다.
 """
 
 from django.core.management.base import BaseCommand, CommandError
-from django.db import connection, transaction
+from django.db import connection
+
+from webapi import photo_quarantine, storage
+
+ACTIONS = {"restore": (photo_quarantine.restore, "복구"), "hide": (photo_quarantine.hide, "숨김")}
 
 
 class Command(BaseCommand):
-    help = "신고로 가려진 사진 검수: list · restore <id…> · hide <id…>"
+    help = "신고로 가려진 사진 검수: list · restore <id…> · hide <id…> · purge [--days 30]"
 
     def add_arguments(self, parser):
-        parser.add_argument("action", choices=["list", "restore", "hide"])
+        parser.add_argument("action", choices=["list", "restore", "hide", "purge"])
         parser.add_argument("ids", nargs="*", type=int)
+        parser.add_argument("--days", type=int, default=photo_quarantine.RETENTION_DAYS)
 
-    def handle(self, *args, action, ids, **options):
-        if action != "list" and not ids:
+    def handle(self, *args, action, ids, days, **options):
+        if action == "list":
+            return self._list()
+        if action == "purge":
+            n, failed = photo_quarantine.purge(days)
+            self.stdout.write(f"{n}장 영구 삭제")
+            if failed:
+                self.stdout.write(f"R2 실패로 남김 (다음에 다시): {_ids(failed)}")
+            return
+        if not ids:
             raise CommandError("사진 id 를 하나 이상 주세요.")
-        getattr(self, f"_{action}")(ids)
+        fn, verb = ACTIONS[action]
+        done, skipped, failed = [], [], []
+        for pid in ids:
+            try:
+                (done if fn(pid) else skipped).append(pid)
+            except storage.StorageError as ex:
+                failed.append(pid)
+                self.stderr.write(f"{pid}: R2 실패 — {ex}")
+        self.stdout.write(f"{len(done)}장 {verb}: {_ids(done)}")
+        if skipped:
+            self.stdout.write(f"건너뜀 (없거나 상태가 맞지 않음): {_ids(skipped)}")
+        if failed:
+            self.stdout.write(f"R2 실패 (다시 실행하세요): {_ids(failed)}")
 
-    def _list(self, ids):
+    def _list(self):
         with connection.cursor() as cur:
             cur.execute(
                 """SELECT p.photo_id, coalesce(r.sigungu_name, d.dong_name, '?'),
-                          p.tip_id IS NOT NULL, p.url, u.nickname, count(rp.report_id),
+                          p.tip_id IS NOT NULL, p.url, p.source, u.nickname,
+                          count(rp.report_id),
                           coalesce(string_agg(rp.reason, ' / ' ORDER BY rp.created_at), '')
                      FROM photo p
                      LEFT JOIN region r ON p.scope = 'region' AND r.region_id = p.unit_id
@@ -2020,58 +2783,35 @@ class Command(BaseCommand):
             rows = cur.fetchall()
         if not rows:
             self.stdout.write("가려진 사진이 없습니다.")
-        for pid, name, is_note, url, nickname, n, reasons in rows:
+        for pid, name, is_note, url, source, nickname, n, reasons in rows:
             where = f"{name} (노트)" if is_note else name
-            self.stdout.write(f"{pid}\t{where}\t신고 {n}\t{nickname or '-'}\t{url}")
-            self.stdout.write(f"    사유: {reasons}")
+            flag = ""
+            if source == "user" and not photo_quarantine.is_quarantined(url):
+                flag = "\t※ URL 열림 — hide 로 다시 격리"
+            self.stdout.write(f"{pid}\t{where}\t신고 {n}\t{nickname or '-'}\t{url}{flag}")
+            self.stdout.write(f"    사유: {reasons or '-'}")
 
-    @transaction.atomic
-    def _restore(self, ids):
-        with connection.cursor() as cur:
-            cur.execute(
-                "UPDATE photo SET status = 'approved'"
-                " WHERE photo_id = ANY(%s) AND status = 'pending' RETURNING photo_id",
-                [ids],
-            )
-            done = [r[0] for r in cur.fetchall()]
-            cur.execute(
-                "DELETE FROM report WHERE target_type = 'photo' AND target_id = ANY(%s)", [done]
-            )
-        self._report("복구", ids, done)
 
-    def _hide(self, ids):
-        with connection.cursor() as cur:
-            cur.execute(
-                "UPDATE photo SET status = 'hidden'"
-                " WHERE photo_id = ANY(%s) AND status IN ('pending', 'approved')"
-                " RETURNING photo_id",
-                [ids],
-            )
-            done = [r[0] for r in cur.fetchall()]
-        self._report("숨김", ids, done)
-
-    def _report(self, verb, ids, done):
-        self.stdout.write(f"{len(done)}장 {verb}: {', '.join(map(str, sorted(done))) or '-'}")
-        if skipped := sorted(set(ids) - set(done)):
-            self.stdout.write(f"건너뜀 (없거나 상태가 맞지 않음): {', '.join(map(str, skipped))}")
+def _ids(ids) -> str:
+    return ", ".join(map(str, sorted(ids))) or "-"
 ```
 
 - [ ] **Step 4: 통과 확인**
 
-Run: `uv run pytest tests/test_month_photos.py -q`
+Run: `uv run pytest tests/test_photos_command.py -q`
 Expected: 모두 PASS
 
 - [ ] **Step 5: 커밋**
 
 ```bash
 uv run ruff check webapi tests && uv run ruff format webapi tests
-git add webapi/management tests/test_month_photos.py
-git commit -m "feat: 신고된 사진 검수 명령 manage.py photos"
+git add webapi/management tests/test_photos_command.py
+git commit -m "feat: 신고된 사진 검수 명령 manage.py photos (list · restore · hide · purge)"
 ```
 
 ---
 
-### Task 9: 문서 · 전체 확인
+### Task 11: 문서 · 전체 확인
 
 **Files:**
 - Modify: `docs/개발-가이드.md` (60행 근처, 95~112행 표와 목록)
@@ -2085,7 +2825,8 @@ git commit -m "feat: 신고된 사진 검수 명령 manage.py photos"
 ```markdown
 | `POST /api/regions/{id}/notes` (multipart) | 사진 첨부 노트. 필드 `body` · `visitMonth?` · `photos`(0~3장, 장당 10MB, JPEG · PNG · WebP). 응답 `Note.photos` |
 | `POST /api/regions/{id}/photos` · `/api/dongs/{id}/photos` | 이달의 사진. multipart `month`(`2025-MM` · `annual`) · `photos`(1~3장). 201 `{items: MyPhoto[]}` · 400 `INVALID_PHOTO` · 429 `PHOTO_RATE_LIMIT`(1시간 30장) · 502 `UPLOAD_FAILED` |
-| `POST /api/photos/{id}/report` | 사진 신고 `{reason}`(1~30자). 204. 신고 `PHOTO_REPORT_THRESHOLD`(기본 3)건이면 가려짐 |
+| `POST /api/photos/{id}/report` | 사진 신고 `{reason}`(1~30자). 204. 신고 `PHOTO_REPORT_THRESHOLD`(기본 3)건이면 가려지고 파일이 격리됨 |
+| `DELETE /api/me/photos/{id}` | 내 이달의 사진 삭제. 204. 공개 사진은 행 · 파일 삭제, 신고로 가려진 사진은 증거로 30일 보관 · 404 · 502 `DELETE_FAILED` |
 | `GET /api/regions/{id}/poll?month=&preset=` · `/api/dongs/{id}/poll?month=` | 체감 투표 집계 · `myVote`(로그인 시). region 은 `preset` 필수 |
 | `POST …/poll/vote` | `{month, preset?, choice: yes\|no\|null}`. 200 + 갱신된 투표. `null` 은 취소 |
 ```
@@ -2094,7 +2835,9 @@ git commit -m "feat: 신고된 사진 검수 명령 manage.py photos"
 
 ```markdown
 - 사진은 백엔드가 받아 WebP(가로 1600px, EXIF 제거)로 바꿔 R2 `uploads/{tip|photo}/` 에 올립니다 (`webapi/photo_upload.py` · `webapi/storage.py`). 올리면 바로 공개(`approved`)되고 신고가 쌓이면 `pending` 으로 가려집니다.
-- 가려진 사진 검수: `uv run python manage.py photos list` · `photos restore <id…>` · `photos hide <id…>`. R2 파일은 지우지 않습니다.
+- R2 버킷은 통째로 공개라 가린 사진은 파일을 `uploads/quarantine/` 으로 옮겨 원래 URL 을 막습니다 (`webapi/photo_quarantine.py`). 관광공사 사진(`photos/`)은 버킷 주인 파일이라 옮기지 않습니다.
+- 가려진 사진 검수(서버 셸 또는 운영 `.env`): `uv run python manage.py photos list` · `photos restore <id…>` · `photos hide <id…>` · `photos purge`(숨김 30일 지난 사진 영구 삭제, 매일 돌림). R2 실패한 id 는 다시 실행하면 됩니다.
+- 노트를 지우면 공개 첨부 사진은 파일까지 지우고, 신고로 가려진 첨부 사진은 노트에서 떼어 30일 보관합니다.
 - 노트 사진(`photo.tip_id`)은 지역 · 동네 갤러리, 투표 사진, `/api/me/photos` 에 섞지 않습니다.
 ```
 
@@ -2119,3 +2862,4 @@ git commit -m "docs: 사진 업로드 · 신고 · 체감 투표 API 를 개발 
 1. 버킷 소유자(데이터 담당)에게 `uploads/` 경로 사용 동의를 받았는지 확인.
 2. Supabase 에 `db/migrations/20261120_photo-upload-poll.sql` 적용은 사용자 확인 후 진행 (`metric_vote` 를 지우므로 되돌릴 수 없음. 지금 행이 없는지 먼저 `SELECT count(*) FROM metric_vote`).
 3. 앞단 프록시가 있으면 요청 본문 한도 32MB 이상.
+4. `manage.py photos purge` 를 매일 돌리도록 서버 cron(또는 배포 환경의 스케줄러)에 등록.

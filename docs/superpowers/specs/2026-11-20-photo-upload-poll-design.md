@@ -10,7 +10,8 @@
 ## 1. 목표 · 완료 기준
 
 - 로그인 사용자가 **노트 사진**(노트 쓰기 요청에 함께) 또는 **이달의 사진**을 백엔드로 올린다. 백엔드는 WebP 로 다시 인코딩(위치정보 제거)해 R2 에 저장하고, 둘 다 등록 즉시 공개된다.
-- 사진은 신고 3건이 쌓이면 가려지고(`pending`), 운영자가 `manage.py photos` 명령으로 복구하거나 숨김을 확정한다.
+- 사진은 신고 3건이 쌓이면 가려지고(`pending`) 파일이 **격리**된다(원래 URL 이 바로 막힘). 운영자가 `manage.py photos` 명령으로 복구하거나 숨김을 확정하고, 숨김 30일 뒤 영구 삭제한다.
+- 사용자가 자기 이달의 사진을 지울 수 있다. 공개 중이면 행 · 파일을 바로 지우고, 신고로 가려진 사진이면 증거로 격리해 둔다. 노트를 지울 때 첨부 사진도 같은 규칙.
 - `GET .../poll` 이 실제 집계와 내 투표(`myVote`)를 돌려주고, `POST .../poll/vote` 로 투표 · 변경 · 취소한다.
 - 단위 테스트(pytest)가 실제 R2 키 없이 통과한다 (R2 클라이언트는 테스트에서 가짜로 바꾼다).
 
@@ -28,7 +29,7 @@
 
 의존성 추가:
 
-- `boto3` — S3 호환 API (`signature_version="s3v4"`, `region_name="auto"`). R2 접근은 `webapi/storage.py` 한 곳에 모은다: `put(key, data: bytes, content_type)`, `delete(key)`. 다른 코드는 boto3 를 직접 부르지 않는다.
+- `boto3` — S3 호환 API (`signature_version="s3v4"`, `region_name="auto"`). R2 접근은 `webapi/storage.py` 한 곳에 모은다: `put(key, data: bytes, content_type)`, `copy(src, dst)`, `delete(key)`. 다른 코드는 boto3 를 직접 부르지 않는다. `put` 은 `Cache-Control: public, max-age=3600` 을 붙인다 — 가린 사진이 브라우저 · CDN 캐시에 오래 남지 않게 1시간으로 둔다 (`immutable` 1년은 쓰지 않음).
 - `Pillow` — 사진 검증 · 변환 (4-0).
 
 R2 쓰기 키 권한은 2026-11-20 에 확인했다 (PUT · HEAD · DELETE 성공). 버킷 CORS 는 필요 없다 (브라우저가 R2 에 직접 요청하지 않음). 사용자 사진은 `uploads/` 아래에만 쓴다 — 기존 `photos/`(관광공사 사진)와 섞지 않는다. **버킷 소유자(데이터 담당)에게 `uploads/` 경로 사용 동의를 받는다.**
@@ -43,6 +44,9 @@ ALTER TABLE photo ADD COLUMN IF NOT EXISTS tip_id INTEGER REFERENCES tip(tip_id)
 ALTER TABLE photo ADD COLUMN IF NOT EXISTS position SMALLINT;   -- 노트 안 순서 0~2
 ALTER TABLE photo ALTER COLUMN status SET DEFAULT 'approved';
 CREATE INDEX IF NOT EXISTS photo_tip_idx ON photo (tip_id) WHERE tip_id IS NOT NULL;
+-- 격리 · 영구 삭제
+ALTER TABLE photo ADD COLUMN IF NOT EXISTS hidden_at TIMESTAMPTZ;      -- hidden 이 된 시각 (purge 기준)
+ALTER TABLE photo ADD COLUMN IF NOT EXISTS deleted_by_user BOOLEAN NOT NULL DEFAULT false;
 
 -- 체감 투표: metric_vote(지표별) 를 버리고 질문 하나에 한 표
 DROP TABLE IF EXISTS metric_vote;
@@ -68,12 +72,12 @@ ALTER TABLE poll_vote ENABLE ROW LEVEL SECURITY;
 | 값 | 의미 |
 |---|---|
 | `approved` | 공개 (올리면 바로 이 상태) |
-| `pending` | 신고 누적으로 가려짐 · 운영자 검수 대기 |
-| `hidden` | 운영자가 숨김 확정 |
+| `pending` | 신고 누적으로 가려짐 · 운영자 검수 대기 (파일 격리) |
+| `hidden` | 운영자 숨김 확정, 또는 가려진 사진을 올린 사람이 지움(`deleted_by_user`). 파일 격리, `hidden_at` 30일 뒤 영구 삭제 |
 
 `metric_vote` 를 읽던 곳(`community.summary` 의 voteCount)은 `poll_vote` 로 바꾼다: 투표한 (scope, unit_id, month, preset) 수 = 행 수.
 
-**노트 사진은 지역·동네 갤러리에 섞지 않는다.** `regions/photos.py` 의 모든 조회(`_pick`, `one_per_unit`, `one_per_dong`)와 투표 응답 `photos` 에 `tip_id IS NULL` 을 더한다. `GET /api/me/photos` 와 `summary.photoCount` 는 이달의 사진만 센다 (`tip_id IS NULL`). 노트 사진은 노트와 함께 보이고 노트와 함께 지워진다 (CASCADE).
+**노트 사진은 지역·동네 갤러리에 섞지 않는다.** `regions/photos.py` 의 모든 조회(`_pick`, `one_per_unit`, `one_per_dong`)와 투표 응답 `photos` 에 `tip_id IS NULL` 을 더한다. `GET /api/me/photos` 와 `summary.photoCount` 는 이달의 사진만 센다 (`tip_id IS NULL`). 노트 사진은 노트와 함께 보이고 노트와 함께 지워진다 (4-6).
 
 ## 4. API
 
@@ -116,7 +120,7 @@ HEIC 은 받지 않는다 (Pillow 기본으로 못 열고, 웹 accept 도 jpeg �
 응답 204. 같은 사람이 같은 사진을 다시 신고해도 204 (멱등, `report` UNIQUE 로 무시).
 
 - 대상이 없거나 이미 `approved` 가 아니면 404.
-- 넣은 뒤 그 사진의 신고 수가 `PHOTO_REPORT_THRESHOLD`(settings, 기본 3) 이상이면 `approved → pending`. 신고 넣기와 상태 바꾸기는 한 트랜잭션.
+- 넣은 뒤 그 사진의 신고 수가 `PHOTO_REPORT_THRESHOLD`(settings, 기본 3) 이상이면 `approved → pending`. 신고 넣기와 상태 바꾸기는 한 트랜잭션. 가린 직후 파일을 격리한다(4-7). 격리가 실패해도 응답은 204 (로그를 남기고, `photos list` 가 "URL 열림" 으로 보여 주며 `photos hide` 가 다시 격리한다).
 - 자기 사진도 신고할 수 있다 (막을 이유 없음).
 
 사진 `id` 는 노트 `photos[].id`, 투표 응답 `photos[].id` 로 웹에 내려간다.
@@ -150,45 +154,76 @@ HEIC 은 받지 않는다 (Pillow 기본으로 못 열고, 웹 accept 도 jpeg �
 - region 은 preset 필수, dong 은 preset 을 무시한다.
 - 400 형식 오류 · 404 대상 없음.
 
+### 4-6. 사진 삭제 (올린 사람)
+
+`DELETE /api/me/photos/{photoId}` (로그인) — 내 이달의 사진. 응답 204.
+
+| 사진 상태 | 처리 |
+|---|---|
+| `approved` | R2 파일을 먼저 지우고 행을 지운다. 파일 삭제가 실패하면 502 `DELETE_FAILED` 이고 행은 그대로 (다시 시도하면 된다 — S3 삭제는 없는 key 도 성공) |
+| `pending` | 증거라 지우지 않는다: `hidden` · `deleted_by_user = true` · `hidden_at = now()`. 화면(내 사진 포함)에서 바로 사라지고 30일 뒤 영구 삭제. 아직 격리 전이면 격리한다 |
+| `hidden` · 남의 사진 · 노트 사진 · 없음 | 404 |
+
+노트 삭제(`DELETE /api/me/tips/{id}`)도 같은 규칙으로 첨부 사진을 처리한다.
+
+- `approved` 첨부 사진은 R2 파일을 먼저 지운 뒤(실패 → 502 `DELETE_FAILED`, 노트 그대로) 노트와 함께 행을 지운다.
+- `pending` · `hidden` 첨부 사진은 노트에서 떼어(`tip_id = NULL`) `hidden` · `deleted_by_user` 로 남긴다. 노트 자체는 지운다. 떼어 낸 사진은 `hidden` 이라 어디에도 나오지 않고, `restore` 대상(`pending`)도 아니다.
+
+### 4-7. 격리 (공개 버킷에서 가리기)
+
+R2 버킷은 r2.dev 로 통째로 공개라, DB 상태만 바꾸면 URL 을 아는 사람은 계속 볼 수 있다. 그래서 가린 사용자 사진은 파일을 옮긴다.
+
+- **격리**: 파일을 `uploads/quarantine/{uuid4}.webp` 로 복사 → `photo.url` 을 새 URL 로 → 원래 key 삭제. 원래 URL 은 바로 404 가 되고 새 key 는 밖에 알려지지 않는다 (r2.dev 는 목록 조회 불가, uuid4 는 추측 불가). 원래 key 삭제가 실패하면 로그만 (url 은 이미 격리 위치).
+- **대상**: `source = 'user'` 이고 url 이 `uploads/` 아래인 사진만. 관광공사 · 팀 사진(`photos/`)은 버킷 주인 파일이라 옮기지 않고 상태만 바꾼다.
+- **언제**: 신고로 `pending` 이 될 때(4-4), 운영자 `hide`, 사용자가 가려진 사진을 지울 때(4-6). 이미 격리된 사진은 건너뛴다.
+- **복구(`restore`)**: 격리 파일을 새 공개 key `uploads/{tip|photo}/{uuid4}.webp` 로 복사 → url 갱신 → 격리 파일 삭제. 원래 key 를 다시 쓰지 않는 것은 캐시에 남은 404 를 피하려는 것.
+- **영구 삭제(`purge`)**: `hidden` 이고 `hidden_at` 이 30일 지난 사진. 사용자 사진은 R2 파일을 지운 뒤 행을 지우고(파일 삭제 실패 시 그 행은 남겨 다음 purge 때 다시), 관광공사 · 팀 사진은 행만 둔다(버킷 주인 파일 · 행 유지).
+
 ## 5. 운영자 검수: `manage.py photos`
+
+운영자는 서버 셸이나 운영 `.env`(Supabase · R2 키)를 가진 팀 개발자다. 관리자 화면 · 역할은 이번 범위 밖이다. 나중에 관리자 화면을 만들면 같은 함수(`webapi/photo_quarantine.py`)를 부른다.
 
 | 명령 | 동작 |
 |---|---|
-| `photos list` | `pending` 사진 목록: id · 대상(지역/동 이름) · 노트 사진 여부 · url · 신고 수 · 신고 사유들 · 올린 사람 닉네임 |
-| `photos restore <id…>` | `pending → approved`, 그 사진의 `report` 행 삭제 (같은 신고로 다시 가려지지 않게) |
-| `photos hide <id…>` | `pending`·`approved → hidden` (숨김 확정. 신고 없이도 바로 내릴 수 있다) |
+| `photos list` | `pending` 사진 목록: id · 대상(지역/동 이름) · 노트 사진 여부 · url(격리 위치 — 브라우저로 열어 확인) · 신고 수 · 신고 사유들 · 올린 사람 닉네임 · 격리 안 됐으면 "URL 열림" 표시 |
+| `photos restore <id…>` | `pending → approved`, 파일을 공개 위치로 되돌리고 그 사진의 `report` 행 삭제 (같은 신고로 다시 가려지지 않게) |
+| `photos hide <id…>` | `pending`·`approved → hidden`, `hidden_at = now()`, 격리 (신고 없이도 바로 내릴 수 있다) |
+| `photos purge [--days 30]` | 4-7 영구 삭제. 매일 돌리거나 운영자가 손으로 돌린다 |
 
-R2 파일은 지우지 않는다 (복구 여지 · 증거 보존).
+명령은 id 마다 결과(성공 · 건너뜀 · R2 실패)를 출력한다.
 
 ## 6. 코드 배치
 
 | 파일 | 내용 |
 |---|---|
-| `webapi/storage.py` (새) | R2 클라이언트, `put`, `delete`. 테스트는 이 모듈을 가짜로 바꾼다 |
+| `webapi/storage.py` (새) | R2 클라이언트, `put`, `copy`, `delete`. 테스트는 이 모듈을 가짜로 바꾼다 |
 | `webapi/photo_upload.py` (새) | 4-0: 받은 파일 검증 · WebP 변환 · R2 업로드(실패 시 정리) → `[(key, url)]` |
-| `webapi/uploads.py` (새) | 이달의 사진 등록 뷰 · 신고 뷰 |
+| `webapi/photo_quarantine.py` (새) | 4-6 · 4-7: 격리 · 복구 · 숨김 · 영구 삭제 · 사용자 삭제. 명령과 뷰가 같이 쓴다 |
+| `webapi/uploads.py` (새) | 이달의 사진 등록 뷰 · 신고 뷰 · 내 사진 삭제 뷰 |
 | `webapi/poll.py` (새) | 질문 문구 · 집계 · 투표 upsert/삭제 · GET/POST 뷰 (`empty_poll` 삭제) |
-| `webapi/community.py` | 노트 쓰기 multipart 파싱, `create_tip` 사진 넣기, `_note` 에 photos, `summary` voteCount · photoCount, `my_photos` 필터 |
+| `webapi/community.py` | 노트 쓰기 multipart 파싱, `create_tip` 사진 넣기, `_note` 에 photos, `delete_tip` 첨부 사진 처리, `summary` voteCount · photoCount, `my_photos` 필터 |
 | `regions/photos.py` | 모든 조회에 `tip_id IS NULL` |
 | `webapi/management/commands/photos.py` (새) | 5절 명령 |
-| `webapi/urls.py` | 새 경로 2개(이달의 사진 · 신고)와 poll/vote, poll GET 을 새 뷰로 |
+| `webapi/urls.py` | 새 경로 3개(이달의 사진 · 신고 · 내 사진 삭제)와 poll/vote, poll GET 을 새 뷰로 |
 | `config/settings.py` · `.env.example` | R2 설정, `PHOTO_REPORT_THRESHOLD` |
 | `pyproject.toml` | `boto3`, `Pillow` |
 
 ## 7. 테스트
 
-- `storage` 는 메모리 가짜(fake)로 바꿔 끼운다 (`put` 한 key · 바이트 · content type 을 기록, 실패 주입 가능). 실제 R2 키 없이 돈다.
+- `storage` 는 메모리 가짜(fake)로 바꿔 끼운다 (`put` · `copy` · `delete` 를 기록, 실패 주입 가능). 실제 R2 키 없이 돈다.
 - 사진 처리(4-0): 테스트 안에서 Pillow 로 만든 JPEG · PNG · WebP 는 통과하고 결과가 WebP · 가로 1600 이하. GPS EXIF 를 넣은 JPEG 의 결과에 EXIF 가 없음. 이미지 아닌 파일 · 10MB 초과 · 4장 → 400 `INVALID_PHOTO`.
-- 노트 사진: JSON(사진 없음)은 지금처럼 동작. multipart 정상이면 Note.photos 순서대로, 노트 목록 · 내 팁 목록에도 보임. 사진이 틀리면 팁도 R2 도 안 생김. 쓰기 한도에 걸리면 R2 에 안 올림. DB 실패를 주입하면 올린 key 가 지워짐. R2 실패 주입 → 502 이고 팁 없음. 팁 삭제 시 사진 행도 삭제.
+- 노트 사진: JSON(사진 없음)은 지금처럼 동작. multipart 정상이면 Note.photos 순서대로, 노트 목록 · 내 팁 목록에도 보임. 사진이 틀리면 팁도 R2 도 안 생김. 쓰기 한도에 걸리면 R2 에 안 올림. DB 실패를 주입하면 올린 key 가 지워짐. R2 실패 주입 → 502 이고 팁 없음.
 - 이달의 사진: annual → month NULL, 201 응답 모양, `GET /api/me/photos` 에 보임, 노트 사진은 안 보임, 시간당 한도 429.
-- 신고: 2건까지 approved, 3건째 pending · 갤러리와 투표 photos 에서 빠짐, 같은 사람 중복 신고는 수에 안 셈, 없는/가려진 사진 404.
-- 명령: restore 후 approved · 신고 0, hide 후 hidden.
+- 신고: 2건까지 approved, 3건째 pending · 갤러리와 투표 photos 에서 빠짐 · 파일이 `uploads/quarantine/` 으로 옮겨지고 원래 key 삭제, 같은 사람 중복 신고는 수에 안 셈, 없는/가려진 사진 404. 격리 R2 실패여도 204 · pending.
+- 격리: 관광공사 사진은 옮기지 않음, 이미 격리된 사진은 다시 옮기지 않음, 복사 실패면 url 그대로.
+- 사용자 삭제: approved → 행 · 파일 삭제, R2 실패 → 502 · 행 남음, pending → hidden · deleted_by_user · 파일 격리 유지 · 내 사진에서 사라짐, 남의 사진 · 노트 사진 · hidden 404. 노트 삭제: approved 첨부 파일 삭제 · 행 삭제, pending 첨부는 떼어 hidden 으로 남음, R2 실패 → 502 · 노트 남음.
+- 명령: restore 후 approved · 공개 위치 url · 격리 파일 삭제 · 신고 0, hide 후 hidden · hidden_at · 격리, purge 는 30일 지난 hidden 만 지우고 관광공사 사진 행은 남김, list 의 "URL 열림" 표시.
 - 투표: 비로그인 GET 은 myVote null, 투표 → 집계 반영, 바꾸기 → yes/no 이동, null → 취소, 동은 preset 무시, region preset 누락 400, 질문 문구 3종 + 연간.
 - 갤러리 회귀: `regions/photos.py` 가 노트 사진을 고르지 않음.
 
 ## 8. 웹 쪽 후속 (이 스펙 범위 밖, 메모)
 
 - `usePhotoPicker` 가 고른 파일을 `FormData` 로 보낸다. `TipComposer` 는 사진이 있으면 노트 쓰기를 multipart 로, `PhotoUploadModal` 은 `POST .../photos` 를 부른다. accept 는 jpeg·png·webp. `usePhotoPicker` · `PhotoUploadModal` · `TipComposer` 의 presign TODO 주석을 이 흐름으로 고친다. `api()` 헬퍼가 FormData 일 때 `Content-Type` 을 직접 넣지 않게(브라우저가 boundary 를 붙이도록) 확인.
-- `Note.photos` 렌더, 사진 신고 버튼(노트 사진 · 이달의 사진).
+- `Note.photos` 렌더, 사진 신고 버튼(노트 사진 · 이달의 사진). 마이페이지 내 사진 삭제 버튼(`DELETE /api/me/photos/{id}`).
 - 문구: "운영자 검수 후 게시돼요" → 바로 게시 안내로. 마이페이지 `MyPhoto.status === 'pending'` 문구는 "신고로 검토 중".
 - W-06 리포트 라우트 · 코드 정리 (폐기 결정).
