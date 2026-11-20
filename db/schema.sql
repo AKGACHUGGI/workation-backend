@@ -28,7 +28,7 @@
 --                dong_month_summary, dong_year_summary          ← workation-data 가 적재
 --   [산출]      metric_def, metric, dong_hourly, region_link    ← db/03_metrics.sql 이 계산 (종합 value 는 Django)
 --   [사용자]    app_user, favorite
---   [콘텐츠]    photo, tip, tip_reaction, tip_reply, report, metric_vote
+--   [콘텐츠]    photo, tip, tip_reaction, tip_reply, report, poll_vote
 --   [추가 제안] share_card(F-16), nl_search_log(F-09)
 --
 -- 규칙
@@ -363,35 +363,6 @@ COMMENT ON COLUMN favorite.unit_id IS 'region_id 또는 dong_id (논리 참조)'
 
 -- ───────────────────────── 콘텐츠 · 커뮤니티 ─────────────────────────
 
-CREATE TABLE photo (
-  photo_id      SERIAL       PRIMARY KEY,
-  scope         VARCHAR(6)   NOT NULL,
-  unit_id       SMALLINT     NOT NULL,
-  month         SMALLINT,
-  url           TEXT         NOT NULL,
-  source        VARCHAR(8)   NOT NULL,
-  credit        VARCHAR(100),
-  user_id       UUID         REFERENCES app_user(user_id) ON DELETE SET NULL,
-  status        VARCHAR(8)   NOT NULL DEFAULT 'pending',
-  is_featured   BOOLEAN      NOT NULL DEFAULT false,
-  created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
-  CHECK (scope IN ('region', 'dong')),
-  CHECK (source IN ('user', 'tourapi', 'team')),
-  CHECK (status IN ('pending', 'approved', 'hidden'))
-);
-COMMENT ON TABLE  photo             IS '지역·동네 × 월 사진 (파일은 Cloudflare)';
-COMMENT ON COLUMN photo.scope       IS 'region, dong';
-COMMENT ON COLUMN photo.unit_id     IS 'region_id 또는 dong_id (논리 참조)';
-COMMENT ON COLUMN photo.month       IS '1~12 (촬영월, NULL = 월 무관)';
-COMMENT ON COLUMN photo.url         IS 'Cloudflare 공개 URL';
-COMMENT ON COLUMN photo.source      IS 'user, tourapi, team';
-COMMENT ON COLUMN photo.credit      IS '출처 크레딧';
-COMMENT ON COLUMN photo.user_id     IS 'source=user 일 때 업로더';
-COMMENT ON COLUMN photo.status      IS 'pending, approved, hidden';
-COMMENT ON COLUMN photo.is_featured IS '이달의 사진';
-
-CREATE INDEX photo_unit_idx ON photo (scope, unit_id, month) WHERE status = 'approved';
-
 CREATE TABLE tip (
   tip_id        SERIAL       PRIMARY KEY,
   user_id       UUID         NOT NULL REFERENCES app_user(user_id) ON DELETE CASCADE,
@@ -412,6 +383,44 @@ COMMENT ON COLUMN tip.body        IS '본문 300자';
 COMMENT ON COLUMN tip.status      IS 'public, hidden';
 
 CREATE INDEX tip_region_idx ON tip (region_id, created_at DESC) WHERE status = 'public';
+
+CREATE TABLE photo (
+  photo_id      SERIAL       PRIMARY KEY,
+  scope         VARCHAR(6)   NOT NULL,
+  unit_id       SMALLINT     NOT NULL,
+  month         SMALLINT,
+  url           TEXT         NOT NULL,
+  source        VARCHAR(8)   NOT NULL,
+  credit        VARCHAR(100),
+  user_id       UUID         REFERENCES app_user(user_id) ON DELETE SET NULL,
+  status        VARCHAR(8)   NOT NULL DEFAULT 'approved',
+  is_featured   BOOLEAN      NOT NULL DEFAULT false,
+  tip_id        INTEGER      REFERENCES tip(tip_id) ON DELETE CASCADE,
+  position      SMALLINT,
+  hidden_at     TIMESTAMPTZ,
+  deleted_by_user BOOLEAN    NOT NULL DEFAULT false,
+  created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  CHECK (scope IN ('region', 'dong')),
+  CHECK (source IN ('user', 'tourapi', 'team')),
+  CHECK (status IN ('pending', 'approved', 'hidden'))
+);
+COMMENT ON TABLE  photo             IS '지역·동네 × 월 사진 (파일은 Cloudflare)';
+COMMENT ON COLUMN photo.scope       IS 'region, dong';
+COMMENT ON COLUMN photo.unit_id     IS 'region_id 또는 dong_id (논리 참조)';
+COMMENT ON COLUMN photo.month       IS '1~12 (촬영월, NULL = 월 무관)';
+COMMENT ON COLUMN photo.url         IS 'Cloudflare 공개 URL';
+COMMENT ON COLUMN photo.source      IS 'user, tourapi, team';
+COMMENT ON COLUMN photo.credit      IS '출처 크레딧';
+COMMENT ON COLUMN photo.user_id     IS 'source=user 일 때 업로더';
+COMMENT ON COLUMN photo.status      IS 'approved(공개), pending(신고로 가려짐), hidden(숨김 확정)';
+COMMENT ON COLUMN photo.is_featured IS '이달의 사진';
+COMMENT ON COLUMN photo.tip_id      IS '노트 첨부 사진이면 tip_id (갤러리에 섞지 않음)';
+COMMENT ON COLUMN photo.position    IS '노트 안 순서 0~2';
+COMMENT ON COLUMN photo.hidden_at   IS 'hidden 이 된 시각 (30일 뒤 manage.py photos purge)';
+COMMENT ON COLUMN photo.deleted_by_user IS '가려진 사진을 올린 사람이 지움 (증거로 보관 중)';
+
+CREATE INDEX photo_unit_idx ON photo (scope, unit_id, month) WHERE status = 'approved';
+CREATE INDEX photo_tip_idx ON photo (tip_id) WHERE tip_id IS NOT NULL;
 
 CREATE TABLE tip_reaction (
   tip_id        INTEGER      NOT NULL REFERENCES tip(tip_id) ON DELETE CASCADE,
@@ -448,21 +457,24 @@ COMMENT ON COLUMN report.target_type IS 'tip, reply, photo';
 COMMENT ON COLUMN report.target_id   IS 'tip_id / reply_id / photo_id (논리 참조)';
 COMMENT ON COLUMN report.reason      IS '신고 사유';
 
-CREATE TABLE metric_vote (
-  user_id       UUID         NOT NULL REFERENCES app_user(user_id) ON DELETE CASCADE,
-  scope         VARCHAR(6)   NOT NULL,
-  unit_id       SMALLINT     NOT NULL,
-  month         SMALLINT     NOT NULL,
-  metric_key    VARCHAR(20)  NOT NULL REFERENCES metric_def(metric_key),
-  agree         BOOLEAN      NOT NULL,
-  created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
-  PRIMARY KEY (user_id, scope, unit_id, month, metric_key),
-  CHECK (scope IN ('region', 'dong'))
+CREATE TABLE poll_vote (
+  user_id     UUID        NOT NULL REFERENCES app_user(user_id) ON DELETE CASCADE,
+  scope       VARCHAR(6)  NOT NULL,
+  unit_id     SMALLINT    NOT NULL,
+  month       SMALLINT    NOT NULL,
+  preset      VARCHAR(8)  NOT NULL DEFAULT '',
+  choice      BOOLEAN     NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, scope, unit_id, month, preset),
+  CHECK (scope IN ('region', 'dong')),
+  CHECK (month BETWEEN 0 AND 12),
+  CHECK (preset IN ('', 'quiet', 'lively', 'custom'))
 );
-COMMENT ON TABLE  metric_vote         IS '지표 체감 투표 (그래요/아니요)';
-COMMENT ON COLUMN metric_vote.scope   IS 'region, dong';
-COMMENT ON COLUMN metric_vote.unit_id IS 'region_id 또는 dong_id (논리 참조)';
-COMMENT ON COLUMN metric_vote.agree   IS 'true = 그래요';
+CREATE INDEX poll_vote_target_idx ON poll_vote (scope, unit_id, month, preset);
+COMMENT ON TABLE  poll_vote        IS '체감 투표 (질문 하나에 한 표)';
+COMMENT ON COLUMN poll_vote.month  IS '0 = 연간(annual), 1~12';
+COMMENT ON COLUMN poll_vote.preset IS 'region: quiet, lively, custom / dong: 빈 문자열';
+COMMENT ON COLUMN poll_vote.choice IS 'true = yes';
 
 -- ───────────────────────── 추가 제안 (명세 미반영) ─────────────────────────
 
@@ -513,7 +525,7 @@ ALTER TABLE tip                    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tip_reaction           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tip_reply              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE report                 ENABLE ROW LEVEL SECURITY;
-ALTER TABLE metric_vote            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE poll_vote              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE share_card             ENABLE ROW LEVEL SECURITY;
 ALTER TABLE nl_search_log          ENABLE ROW LEVEL SECURITY;
 
