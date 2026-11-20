@@ -37,12 +37,12 @@ def test_multipart_note_with_photos(client, me, r2):  # noqa: F811
     keys = [p["url"].removeprefix("https://pub.r2.example/") for p in note["photos"]]
     assert all(k.startswith("uploads/tip/") for k in keys) and set(keys) == set(r2.objects)
     rows = run(
-        "SELECT photo_id::text, scope, unit_id, month, source, user_id::text, tip_id::text,"
-        " position, status FROM photo ORDER BY position"
+        "SELECT user_photo_id::text, scope, unit_id, month, user_id::text, tip_id::text,"
+        " position, status FROM user_photo ORDER BY position"
     )
     assert [r[0] for r in rows] == [p["id"] for p in note["photos"]]
     assert {r[1:] for r in rows} == {
-        ("dong", 101, 10, "user", me, note["id"], pos, "approved") for pos in range(3)
+        ("dong", 101, 10, me, note["id"], pos, "approved") for pos in range(3)
     }
     # 노트 목록 · 내 팁에도 같은 순서로 보인다
     listed = client.get(f"/api/dongs/{GEOJIN}/notes").json()["items"][0]
@@ -57,7 +57,10 @@ def test_multipart_note_without_photos(client, me, r2):  # noqa: F811
 
 def test_hidden_photo_not_in_note(client, me, r2):  # noqa: F811
     note = post_note(client, "regions", GOSEONG, photos=[make_image(), make_image()]).json()
-    run("UPDATE photo SET status = 'pending' WHERE photo_id = %s", [note["photos"][0]["id"]])
+    run(
+        "UPDATE user_photo SET status = 'pending' WHERE user_photo_id = %s",
+        [note["photos"][0]["id"]],
+    )
     listed = client.get(f"/api/regions/{GOSEONG}/notes").json()["items"][0]
     assert listed["photos"] == note["photos"][1:]
 

@@ -1,6 +1,6 @@
 """즐겨찾기 · 워케이션 노트(팁) · 내 활동을 DB 에서 읽고 쓰는 함수들.
 
-표: favorite · tip · tip_reaction · tip_reply · photo · poll_vote (db/schema.sql).
+표: favorite · tip · tip_reaction · tip_reply · user_photo · poll_vote (db/schema.sql).
 계약: workation-web src/features/me/types.ts · src/features/region/types.ts (Note).
 
 - scope + unit_id 는 논리 참조(FK 없음)라 시군구 · 행정동 이름은 여기서 합친다.
@@ -209,10 +209,10 @@ _TIP_PAGE = """
                    (SELECT count(*) FROM tip_reaction r WHERE r.tip_id = t.tip_id) AS helpful,
                    (SELECT count(*) FROM tip_reply p
                      WHERE p.tip_id = t.tip_id AND p.status = 'public') AS replies,
-                   (SELECT coalesce(json_agg(json_build_object('id', ph.photo_id::text,
+                   (SELECT coalesce(json_agg(json_build_object('id', ph.user_photo_id::text,
                                                                'url', ph.url)
                                              ORDER BY ph.position), '[]'::json)
-                      FROM photo ph
+                      FROM user_photo ph
                      WHERE ph.tip_id = t.tip_id AND ph.status = 'approved') AS photos
               FROM tip t
               JOIN app_user u ON u.user_id = t.user_id
@@ -339,12 +339,10 @@ def _insert_tip_photos(tip_id, scope, unit, month, user_id, urls) -> list[dict]:
     """노트 사진 행을 한 문장으로 넣는다 → [{id, url}] (올린 순서)."""
     with connection.cursor() as cur:
         cur.execute(
-            """INSERT INTO photo (scope, unit_id, month, url, source, user_id, tip_id, position,
-                                  status)
-               SELECT %(scope)s, %(unit)s, %(month)s, u.url, 'user', %(user)s, %(tip)s, u.n - 1,
-                      'approved'
+            """INSERT INTO user_photo (scope, unit_id, month, url, user_id, tip_id, position)
+               SELECT %(scope)s, %(unit)s, %(month)s, u.url, %(user)s, %(tip)s, u.n - 1
                  FROM unnest(%(urls)s::text[]) WITH ORDINALITY AS u(url, n)
-               RETURNING photo_id, url, position""",
+               RETURNING user_photo_id, url, position""",
             {
                 "scope": scope,
                 "unit": unit,
@@ -435,8 +433,8 @@ def delete_tip(user_id, tip_id: int) -> bool:
     """
     with connection.cursor() as cur:
         cur.execute(
-            """SELECT p.photo_id, p.url, p.status
-                 FROM tip t JOIN photo p ON p.tip_id = t.tip_id
+            """SELECT p.user_photo_id, p.url, p.status
+                 FROM tip t JOIN user_photo p ON p.tip_id = t.tip_id
                 WHERE t.tip_id = %s AND t.user_id = %s""",
             [tip_id, user_id],
         )
@@ -446,9 +444,9 @@ def delete_tip(user_id, tip_id: int) -> bool:
     with transaction.atomic(), connection.cursor() as cur:
         if kept:
             cur.execute(
-                """UPDATE photo SET tip_id = NULL, status = 'hidden',
+                """UPDATE user_photo SET tip_id = NULL, status = 'hidden',
                           hidden_at = coalesce(hidden_at, now()), deleted_by_user = true
-                    WHERE photo_id = ANY(%s)""",
+                    WHERE user_photo_id = ANY(%s)""",
                 [kept],
             )
         cur.execute("DELETE FROM tip WHERE tip_id = %s AND user_id = %s", [tip_id, user_id])
@@ -485,7 +483,7 @@ def summary(user_id) -> dict:
                SELECT
                  (SELECT array_agg(region_id ORDER BY n DESC, region_id) FROM s),
                  (SELECT array_agg(n ORDER BY n DESC, region_id) FROM s),
-                 (SELECT count(*) FROM photo
+                 (SELECT count(*) FROM user_photo
                    WHERE user_id = %(u)s AND status <> 'hidden' AND tip_id IS NULL),
                  (SELECT count(*) FROM favorite WHERE user_id = %(u)s),
                  (SELECT count(*) FROM poll_vote WHERE user_id = %(u)s)""",
@@ -513,12 +511,12 @@ def my_photos(user_id) -> list[dict]:
     """
     with connection.cursor() as cur:
         cur.execute(
-            """SELECT p.photo_id, p.url, p.month, p.status,
+            """SELECT p.user_photo_id, p.url, p.month, p.status,
                       CASE WHEN p.scope = 'region' THEN p.unit_id ELSE d.region_id END
-                 FROM photo p
+                 FROM user_photo p
                  LEFT JOIN dong d ON p.scope = 'dong' AND d.dong_id = p.unit_id
                 WHERE p.user_id = %s AND p.status <> 'hidden' AND p.tip_id IS NULL
-                ORDER BY p.created_at DESC, p.photo_id DESC""",
+                ORDER BY p.created_at DESC, p.user_photo_id DESC""",
             [user_id],
         )
         rows = cur.fetchall()

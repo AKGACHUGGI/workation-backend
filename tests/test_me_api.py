@@ -340,16 +340,16 @@ def test_summary_contract(client, me, photos):  # noqa: F811
     add_tip(OTHER_ID, 1)
     for status in ("approved", "pending", "hidden"):
         run(
-            "INSERT INTO photo (scope, unit_id, url, source, user_id, status)"
-            " VALUES ('region', 1, 'https://r2.example/mine.jpg', 'user', %s, %s)",
+            "INSERT INTO user_photo (scope, unit_id, url, user_id, status)"
+            " VALUES ('region', 1, 'https://r2.example/mine.jpg', %s, %s)",
             [me, status],
         )
     put_favorite(client, "regions", GOSEONG)
     put_favorite(client, "dongs", GEOJIN)
     tip_id = add_tip(me, 1, status="hidden")  # 숨긴 팁이라 stays · tipCount 는 그대로
     run(  # 노트 사진은 이달의 사진 수에 넣지 않는다
-        "INSERT INTO photo (scope, unit_id, url, source, user_id, status, tip_id)"
-        " VALUES ('region', 1, 'https://r2.example/note.jpg', 'user', %s, 'approved', %s)",
+        "INSERT INTO user_photo (scope, unit_id, url, user_id, status, tip_id)"
+        " VALUES ('region', 1, 'https://r2.example/note.jpg', %s, 'approved', %s)",
         [me, tip_id],
     )
     run(
@@ -417,8 +417,8 @@ def test_delete_my_tip(client, me):
 def test_my_photos_contract(client, me):
     def add_photo(scope, unit_id, month, status, user_id=me):
         return run(
-            "INSERT INTO photo (scope, unit_id, month, url, source, user_id, status)"
-            " VALUES (%s, %s, %s, %s, 'user', %s, %s) RETURNING photo_id",
+            "INSERT INTO user_photo (scope, unit_id, month, url, user_id, status)"
+            " VALUES (%s, %s, %s, %s, %s, %s) RETURNING user_photo_id",
             [scope, unit_id, month, f"https://r2.example/{scope}-{status}.jpg", user_id, status],
         )[0][0]
 
@@ -430,8 +430,8 @@ def test_my_photos_contract(client, me):
         "INSERT INTO tip (user_id, region_id, body) VALUES (%s, 1, '팁') RETURNING tip_id", [me]
     )[0][0]
     run(
-        "INSERT INTO photo (scope, unit_id, url, source, user_id, status, tip_id)"
-        " VALUES ('region', 1, 'https://r2.example/note.jpg', 'user', %s, 'approved', %s)",
+        "INSERT INTO user_photo (scope, unit_id, url, user_id, status, tip_id)"
+        " VALUES ('region', 1, 'https://r2.example/note.jpg', %s, 'approved', %s)",
         [me, note],
     )
     body = client.get("/api/me/photos", **auth()).json()
