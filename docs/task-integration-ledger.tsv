@@ -2,3 +2,4 @@ baseline-backend	684cc0f173e1117918cd04479c3b131c1e11d3ee	기준선 실패 없�
 baseline-web	2ce9e2e57b8e62d8393caa2c8ad0819841768f1c	기준선 실패 없음 (vitest 714 passed, tsc -b 0, lint 0 경고만)
 T3	ba8b36b231d68396117a3ee8cea9d5417f399dc4
 T1	09c9320b1915f84341e101cb6dd1e0fbe7f09f0a
+T2	a6fbdad0afacc5e50fbc035cf2b7d995540288ae
