@@ -14,6 +14,7 @@ class AppUser(models.Model):
     avatar_url = models.TextField(null=True)
     email_masked = models.CharField(max_length=100, null=True)
     agreed_at = models.DateTimeField(null=True)
+    age_group = models.CharField(max_length=3, null=True)
     created_at = models.DateTimeField(db_default=Now())
 
     class Meta:
