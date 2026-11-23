@@ -13,6 +13,7 @@ def test_tier_sigungu_contract(client, data):  # noqa: F811
     assert item["scores"] == {"quiet": 80, "crowd": 90, "peer": 40, "overnight": 82, "vibe": 30}
     assert item["province"] == "강원특별자치도"
     assert item["inherited"] == [] and item["terrain"] == ["coast"]
+    assert item["placeTags"] == ["beach"]  # 지형(coast)은 빼고 장소 태그만
 
 
 def test_tier_dong_inherits_region_metrics(client, data):  # noqa: F811
@@ -32,7 +33,11 @@ def test_month_param_rejected(client, data):  # noqa: F811
 def test_popular_contract(client, data):  # noqa: F811
     body = client.get("/api/regions/popular?month=annual").json()
     assert body["month"] == "annual" and len(body["items"]) == 2
-    assert {"favoriteCount", "viewCount", "tags", "terrain", "scores"} <= set(body["items"][0])
+    assert {"favoriteCount", "viewCount", "tags", "terrain", "placeTags", "scores"} <= set(
+        body["items"][0]
+    )
+    by_id = {i["id"]: i for i in body["items"]}
+    assert by_id["51820"]["terrain"] == ["coast"] and by_id["51820"]["placeTags"] == ["beach"]
 
 
 def test_region_detail_contract(client, photos):  # noqa: F811

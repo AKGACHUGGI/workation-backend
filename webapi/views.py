@@ -65,6 +65,7 @@ def tier(request):
                 "scores": data.web_scores(region_scores.get(rid, {})),
                 "inherited": [],
                 "terrain": data.terrain_of(r.tags),
+                "placeTags": data.place_tags_of(r.tags),
             }
             for rid, r in sorted(regions.items())
         ]
@@ -119,6 +120,7 @@ def popular(request):
             "photoUrl": photos.get(rid, {}).get("url", ""),
             "tags": data.tag_labels(r.tags, 3),
             "terrain": data.terrain_of(r.tags),
+            "placeTags": data.place_tags_of(r.tags),
             "scores": data.web_scores(scores.get(rid, {})),
             "favoriteCount": favorites.get(rid, 0),
             "viewCount": views.get(r.sigungu_code, 0),
