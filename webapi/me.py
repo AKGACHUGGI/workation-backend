@@ -10,6 +10,7 @@ from rest_framework.response import Response
 
 from accounts.views import LoginAPIView
 from core.errors import bad_request, error, not_found
+from metrics import scoring
 from webapi import community, data, photo_quarantine, photo_upload
 
 
@@ -36,7 +37,9 @@ class FavoritesView(MeAPIView):
             month, month_str = data.parse_month(request.query_params.get("month"))
         except data.BadMonth as ex:
             return bad_request(str(ex))
-        regions, dongs = community.favorites(request.user.user_id, month)
+        regions, dongs = community.favorites(
+            request.user.user_id, month, scoring.peer_basis(request.user.age_group)
+        )
         return Response({"month": month_str, "regions": regions, "dongs": dongs})
 
 
