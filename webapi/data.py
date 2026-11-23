@@ -72,8 +72,16 @@ def web_scores(scores: dict) -> dict:
     return {web: (scores.get(db, {}).get("score") or 0) for web, db in WEB_TO_DB.items()}
 
 
+TERRAINS = ("coast", "mountain", "city")
+
+
 def terrain_of(tags) -> list[str]:
-    return [t for t in ("coast", "mountain", "city") if t in (tags or [])]
+    return [t for t in TERRAINS if t in (tags or [])]
+
+
+def place_tags_of(tags) -> list[str]:
+    """지형을 뺀 장소 태그 (웹 카테고리 필터 PlaceTag). 순서는 TAG_ORDER"""
+    return [t for t in TAG_ORDER if t in (tags or []) and t not in TERRAINS]
 
 
 def tag_labels(tags, limit: int | None = None) -> list[str]:

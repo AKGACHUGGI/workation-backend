@@ -31,7 +31,7 @@ PRESETS = {
     "quiet": {"quiet": 3, "ease": 3, "peer": 1, "overnight": 1, "evening": 0},
     "lively": {"quiet": 0, "ease": 1, "peer": 3, "overnight": 2, "evening": 3},
 }
-PRESET_LABELS = {"default": "기본", "quiet": "조용한 곳", "lively": "활기 있는 한 달"}
+PRESET_LABELS = {"default": "기본", "quiet": "조용한 곳", "lively": "활기 있는 곳"}
 GRADE_LABELS = {"S": "상위 25%", "A": "25~50%", "B": "50~75%", "C": "하위 25%"}
 
 

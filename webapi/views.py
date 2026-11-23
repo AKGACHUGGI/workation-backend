@@ -65,6 +65,7 @@ def tier(request):
                 "scores": data.web_scores(region_scores.get(rid, {})),
                 "inherited": [],
                 "terrain": data.terrain_of(r.tags),
+                "placeTags": data.place_tags_of(r.tags),
             }
             for rid, r in sorted(regions.items())
         ]
@@ -119,6 +120,7 @@ def popular(request):
             "photoUrl": photos.get(rid, {}).get("url", ""),
             "tags": data.tag_labels(r.tags, 3),
             "terrain": data.terrain_of(r.tags),
+            "placeTags": data.place_tags_of(r.tags),
             "scores": data.web_scores(scores.get(rid, {})),
             "favoriteCount": favorites.get(rid, 0),
             "viewCount": views.get(r.sigungu_code, 0),
@@ -560,16 +562,13 @@ STAY_PATTERNS = [
     (r"2\s*주|이\s*주", "two_weeks", "2주"),
     (r"일주일|1\s*주|한\s*주", "week", "1주"),
 ]
-TERRAIN_FROM_TAG = {
-    "coast": "coast",
-    "beach": "coast",
-    "island": "coast",
-    "surf": "coast",
-    "mountain": "mountain",
-    "city": "city",
-}
-TERRAIN_LABEL = {"coast": "해안", "mountain": "산간", "city": "도시"}
-PRESET_LABEL = {"quiet": "조용한 곳", "lively": "활기 있는 한 달"}
+# 지형은 해안만 쓴다 (산간·도시 시군구가 없어 카테고리에서 뺐다).
+# 해수욕장은 바닷가와 같은 뜻으로 본다
+TERRAIN_FROM_TAG = {"coast": "coast", "beach": "coast"}
+TERRAIN_LABEL = {"coast": "해안"}
+# 장소 태그(웹 카테고리 place). long_stay 는 머무는 기간(stay)으로 따로 쓴다
+NOT_PLACE = {*TERRAIN_FROM_TAG, *data.TERRAINS, "long_stay"}
+PRESET_LABEL = {"quiet": "조용한 곳", "lively": "활기 있는 곳"}
 
 
 @api_view(["POST"])
@@ -600,6 +599,11 @@ def search_parse(request):
         intent["terrain"] = terrain
         for t in terrain:
             intent["tags"].append({"axis": "terrain", "label": TERRAIN_LABEL[t]})
+    place = [t for t in data.TAG_ORDER if t in cond.tags and t not in NOT_PLACE]
+    if place:
+        intent["place"] = place
+        for t in place:
+            intent["tags"].append({"axis": "place", "label": data.TAG_KO[t]})
     stay = next(((v, lab) for pat, v, lab in STAY_PATTERNS if re.search(pat, text)), None)
     if stay is None and "long_stay" in cond.tags:
         stay = ("month", "한 달")
