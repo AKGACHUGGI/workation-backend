@@ -1,0 +1,2 @@
+baseline-backend	684cc0f173e1117918cd04479c3b131c1e11d3ee	기준선 실패 없음 (pytest 677 passed 5 skipped, ruff check·format 통과)
+baseline-web	2ce9e2e57b8e62d8393caa2c8ad0819841768f1c	기준선 실패 없음 (vitest 714 passed, tsc -b 0, lint 0 경고만)
