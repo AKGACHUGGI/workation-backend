@@ -34,12 +34,52 @@ PRESETS = {
 PRESET_LABELS = {"default": "기본", "quiet": "조용한 곳", "lively": "활기 있는 곳"}
 GRADE_LABELS = {"S": "상위 25%", "A": "25~50%", "B": "50~75%", "C": "하위 25%"}
 
+# 또래 밀도 연령대 개인화 (설계 2026-11-23-peer-personalization-design.md 4-1, 5-1절)
+AGE_GROUPS = ("10s", "20s", "30s", "40s", "50s", "60s", "70s", "80s", "90s")
+PEER_BASIS = {
+    "10s": "under20",
+    "20s": "20s",
+    "30s": "30s",
+    "40s": "40s",
+    "50s": "50s",
+    "60s": "60plus",
+    "70s": "60plus",
+    "80s": "60plus",
+    "90s": "60plus",
+}
+PEER_BASES = ("under20", "20s", "30s", "40s", "50s", "60plus")
 
-def unit_scores(scope: str, month: int | None) -> dict[int, dict[str, dict]]:
-    """{unit_id: {metric_key: {"score", "grade", "raw"}}}. 그 달 값, overnight 는 연간 값.
-    월 배치로만 바뀌는 값이라 정적 데이터 캐시에 둔다 (core/cache.py static)."""
+
+def peer_basis(age_group: str | None) -> str | None:
+    """사용자 연령대 → 또래 밀도 데이터 구간. 없거나 모르는 값이면 None (기본 20~40대)."""
+    return PEER_BASIS.get(age_group) if age_group else None
+
+
+def unit_scores(
+    scope: str, month: int | None, basis: str | None = None
+) -> dict[int, dict[str, dict]]:
+    """{unit_id: {metric_key: {"score","grade","raw"}}}. 그 달 값, overnight 는 연간 값.
+    basis 가 있으면 "peer" 를 그 구간 값으로 바꾼다. 결과에 peer_<구간> 키는 나오지 않는다.
+    원값은 정적 데이터 캐시(scores:{scope}:{m})에 두고,
+    basis 적용은 요청마다 한다(캐시하지 않는다)."""
+    if basis is not None and basis not in PEER_BASES:
+        raise ValueError(f"unknown peer basis: {basis}")
     m = month or 0
-    return static(f"scores:{scope}:{m}", lambda: _load_unit_scores(scope, m))
+    raw = static(f"scores:{scope}:{m}", lambda: _load_unit_scores(scope, m))
+    return _personalize(raw, basis)
+
+
+def _personalize(raw: dict[int, dict[str, dict]], basis: str | None) -> dict[int, dict[str, dict]]:
+    key = f"peer_{basis}" if basis else None
+    out = {}
+    for unit_id, s in raw.items():
+        row = {k: v for k, v in s.items() if not k.startswith("peer_")}
+        if key is not None:
+            row.pop("peer", None)
+            if key in s:
+                row["peer"] = s[key]
+        out[unit_id] = row
+    return out
 
 
 def _load_unit_scores(scope: str, m: int) -> dict[int, dict[str, dict]]:

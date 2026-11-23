@@ -337,17 +337,21 @@ CREATE TABLE app_user (
   avatar_url    TEXT,
   email_masked  VARCHAR(100),
   agreed_at     TIMESTAMPTZ,
+  age_group     VARCHAR(3),
   created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
   UNIQUE (provider, provider_uid),
-  CHECK (provider IN ('kakao', 'google', 'apple'))
+  CONSTRAINT app_user_provider_check CHECK (provider IN ('kakao', 'google', 'apple', 'dummy')),
+  CONSTRAINT app_user_age_group_check
+    CHECK (age_group IN ('10s','20s','30s','40s','50s','60s','70s','80s','90s'))
 );
 COMMENT ON TABLE  app_user              IS '사용자 (소셜 로그인). user_id = Supabase auth.users.id';
-COMMENT ON COLUMN app_user.provider     IS 'kakao, google, apple';
+COMMENT ON COLUMN app_user.provider     IS 'kakao, google, apple, dummy(검증용 더미 계정, 지워도 됨)';
 COMMENT ON COLUMN app_user.provider_uid IS '소셜 제공자 측 사용자 ID';
 COMMENT ON COLUMN app_user.nickname     IS '닉네임 (공개)';
 COMMENT ON COLUMN app_user.avatar_url   IS '아바타 URL (공개)';
 COMMENT ON COLUMN app_user.email_masked IS '마스킹한 이메일 (du***@kakao.com). 원본은 Supabase auth.users 에만';
 COMMENT ON COLUMN app_user.agreed_at    IS '약관 동의 시각. NULL 이면 온보딩 필요';
+COMMENT ON COLUMN app_user.age_group    IS '연령대 10s~90s. 또래 밀도 개인화 기준. NULL 이면 기본(20~40대)';
 
 CREATE TABLE favorite (
   user_id       UUID         NOT NULL REFERENCES app_user(user_id) ON DELETE CASCADE,

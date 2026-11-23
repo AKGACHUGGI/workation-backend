@@ -81,7 +81,9 @@ def test_patch_invalid_nickname_400(client, supabase, nickname):  # noqa: F811
 def test_patch_nickname_and_agree(client, supabase):  # noqa: F811
     get_me(client, **auth())
     r = patch_me(
-        client, {"nickname": "  워케이션  ", "agreedAt": "2026-11-17T12:00:00+09:00"}, **auth()
+        client,
+        {"nickname": "  워케이션  ", "agreedAt": "2026-11-17T12:00:00+09:00", "ageGroup": "30s"},
+        **auth(),
     )
     assert r.status_code == 200
     body = r.json()
