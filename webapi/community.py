@@ -109,14 +109,17 @@ def favorite_ids(user_id) -> dict[str, list[str]]:
     return out
 
 
-def favorites(user_id, month: int | None) -> tuple[list[dict], list[dict]]:
+def favorites(
+    user_id, month: int | None, basis: str | None = None
+) -> tuple[list[dict], list[dict]]:
     """(FavoriteRegion[], FavoriteDong[]). 최근에 저장한 것부터.
 
     scores 는 /api/tier 와 같은 그 달 백분위. 동의 crowd · overnight 는 소속 시군구 값이다.
+    basis 는 보는 사람의 또래 밀도 구간(scoring.peer_basis). 있으면 scores.peer 가 그 구간 값이다.
     """
     rows = _favorite_rows(user_id)[::-1]
     regions = data.regions_by_id()
-    region_scores = scoring.unit_scores("region", month)
+    region_scores = scoring.unit_scores("region", month, basis)
 
     saved_regions = [
         (regions[u], at) for scope, u, at, *_ in rows if scope == "region" and u in regions
@@ -140,7 +143,7 @@ def favorites(user_id, month: int | None) -> tuple[list[dict], list[dict]]:
         for scope, u, at, adm_code, name, rid in rows
         if scope == "dong" and adm_code and rid in regions
     ]
-    dong_scores = scoring.unit_scores("dong", month)
+    dong_scores = scoring.unit_scores("dong", month, basis)
     annual = scoring.unit_scores("dong", None) if month else dong_scores
     merged = scoring.with_region_metrics(
         {u: dong_scores.get(u, {}) for u, *_ in saved_dongs},
