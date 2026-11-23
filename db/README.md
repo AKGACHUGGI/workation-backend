@@ -33,7 +33,7 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
 - `anon` / `authenticated` 롤의 테이블 권한은 전부 REVOKE 했고 기본 권한도 회수했다. 백엔드는 DB 커넥션(또는 service role) 으로만 접근한다.
 - 접속 문자열은 커밋하지 않는다. 설정 방법은 이슈 #2 참고.
 - PostGIS 3.3.7 (`extensions` 스키마). `dong.geom`·`adm_code`·`area_km2` 203/204 적재. 고성군 수동면은 경계 자료가 없어 비어 있다(이미 집계 제외). `region.sigungu_code` 12/12.
-- `03_metrics.sql` 로 `metric_def` 8 · `metric` 약 8,900 · `dong_hourly` 127,296 행 적재. pandas 로 따로 계산한 값과 원값·점수·곡선 모두 일치 확인.
+- `03_metrics.sql` 로 `metric_def` 14 · `metric` 28,130 (또래 구간 `peer_*` 16,770 포함) · `dong_hourly` 127,296 행 적재 (2026-11-23 재실행). pandas 로 따로 계산한 값과 원값·점수·곡선 모두 일치 확인(2026-11-07). 재실행 전후 기존 지표 11,360행과 `dong_hourly` 는 그대로다.
 
 ### 적용 이력
 
@@ -56,6 +56,8 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
 | `migrations/20261117_drop-dong-answer.sql` | 동네에 물어보기 답 `dong_answer` 삭제 (답은 Redis 7일만) | 2026-11-17 |
 | `migrations/20261117_app-user-auth.sql` | 로그인: `app_user.email_masked` · `agreed_at` 추가 | 2026-11-17 |
 | `migrations/20261120_photo-upload-poll.sql` | 사용자 사진: `user_photo` 새 표(노트 첨부 · 이달의 사진) + RLS, `report.target_type` 에 `upload`. `photo` 는 그대로. 체감 투표: `metric_vote` 삭제 → `poll_vote`(질문 하나에 한 표) + RLS | 2026-11-20 적용 |
+| `migrations/20261123_peer-personalization.sql` | 또래 밀도 개인화: `app_user.age_group`(10s~90s CHECK), provider CHECK 에 `dummy` | 2026-11-23 적용 |
+| `03_metrics.sql` 재실행 (또래 구간 6개) | `metric_def` 14행, `peer_under20`~`peer_60plus` 행 추가. 점검 (가)(나)(다) 0, 기존 지표·`dong_hourly` 전후 불변 | 2026-11-23 적용 |
 
 ## 지표 (명세 v0.3 변경안 3장)
 
