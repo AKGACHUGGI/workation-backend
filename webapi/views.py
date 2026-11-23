@@ -568,7 +568,7 @@ TERRAIN_FROM_TAG = {"coast": "coast", "beach": "coast"}
 TERRAIN_LABEL = {"coast": "해안"}
 # 장소 태그(웹 카테고리 place). long_stay 는 머무는 기간(stay)으로 따로 쓴다
 NOT_PLACE = {*TERRAIN_FROM_TAG, *data.TERRAINS, "long_stay"}
-PRESET_LABEL = {"quiet": "조용한 곳", "lively": "활기 있는 한 달"}
+PRESET_LABEL = {"quiet": "조용한 곳", "lively": "활기 있는 곳"}
 
 
 @api_view(["POST"])
