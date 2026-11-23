@@ -118,3 +118,32 @@ def test_search_parse_maps_conditions(client, monkeypatch):
     assert body["month"] == "2025-10" and body["preset"] == "quiet"
     assert body["terrain"] == ["coast"] and body["stay"] == "month"
     assert [t["axis"] for t in body["tags"]] == ["month", "preset", "terrain", "stay"]
+
+
+def test_search_parse_place_tags(client, monkeypatch):
+    """장소 태그는 place 축으로. 섬·서핑은 해안 전체가 아니라 장소로 좁힌다"""
+    cond = engine.Conditions(month=11, tags=["cafe", "library", "surf", "island"], metrics=[])
+    monkeypatch.setattr(engine, "understand", lambda q: cond)
+    body = client.post(
+        "/api/search/parse", {"text": "11월에 카페가 많은 곳"}, content_type="application/json"
+    ).json()
+    assert body["month"] == "2025-11"
+    assert body["place"] == ["island", "surf", "cafe", "library"]  # TAG_ORDER 순
+    assert "terrain" not in body
+    assert [t["label"] for t in body["tags"] if t["axis"] == "place"] == [
+        "섬",
+        "서핑",
+        "카페 많음",
+        "도서관",
+    ]
+
+
+def test_search_parse_drops_mountain_city(client, monkeypatch):
+    """산간·도시 카테고리는 없앴다 (해당 시군구 0곳)"""
+    cond = engine.Conditions(month=None, tags=["mountain", "city", "coast"], metrics=[])
+    monkeypatch.setattr(engine, "understand", lambda q: cond)
+    body = client.post(
+        "/api/search/parse", {"text": "산과 도시"}, content_type="application/json"
+    ).json()
+    assert body["terrain"] == ["coast"] and "place" not in body
+    assert [t["label"] for t in body["tags"]] == ["해안"]
