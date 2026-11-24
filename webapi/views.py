@@ -27,7 +27,7 @@ from rest_framework.views import APIView
 from accounts.authentication import SupabaseJWTAuthentication
 from core.errors import bad_request, error, not_found
 from metrics import scoring
-from regions.models import DayGroup, Dong, DongHourly, Region
+from regions.models import DayGroup, Dong, Region
 from regions.photos import dong_photos, region_photos
 from search import engine
 from webapi import community, data
@@ -348,7 +348,7 @@ def region_detail(request, sgg_id: str):
                 "weekendRatio": round(raw("weekend_gap") or 1, 2),
             },
             "months": months,
-            "bestMonths": sorted(by_crowd[:2]),
+            "bestMonths": data.best_months(crowd),
             "avoidMonths": sorted(by_crowd[-2:]),
             "peerOffpeakMonths": sorted(offpeak),
             "dongs": dong_items,
@@ -375,19 +375,8 @@ def dong_detail(request, dong_id: str):
     mine = all_scores.get(dong.dong_id, {})
     raw = lambda k: mine.get(k, {}).get("raw")  # noqa: E731
 
-    curves = {DayGroup.WEEKDAY: [0] * 24, DayGroup.WEEKEND: [0] * 24}
-    for g, h, v in DongHourly.objects.filter(dong_id=dong.dong_id, month=month or 0).values_list(
-        "day_group", "hour", "index_100"
-    ):
-        curves[g][h] = v or 0
-    peaks = {}
-    for g, c in curves.items():
-        low = min(range(9, 19), key=lambda h: (c[h], h))
-        peaks[g] = {
-            "peakHour": max(range(24), key=lambda h: (c[h], -h)),
-            "lowHour": low,
-            "lowValue": c[low],
-        }
+    curves = data.dong_curves(dong.dong_id, month)
+    peaks = data.peaks_of(curves)
 
     evening_all = [s.get("evening", {}).get("raw") for s in all_scores.values()]
     evening_all = [v for v in evening_all if v]
