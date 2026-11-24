@@ -200,20 +200,23 @@ def _want(axis: str, name: str) -> str:
     return f"{josa(AXIS_KO[axis], '을/를')} 원한다면 {josa(name, '이/가')} 맞아요."
 
 
-def _none(p: Plan, spots: list[Spot], sgg: str) -> list[dict]:
+def _none(p: Plan, spots: list[Spot], sgg: str) -> tuple[list[dict], list[str]]:
+    """(문장들, 문장에 쓴 동 코드)."""
     if p.conditions == TYPE_AXES:
-        return [_rule(f"{sgg}에는 유형이 뚜렷한 동네가 없어요.")]
+        return [_rule(f"{sgg}에는 유형이 뚜렷한 동네가 없어요.")], []
     if len(p.conditions) == 1:
         axis = p.conditions[0]
         what = "바다 가까운 동네" if axis == "coast" else f"{AXIS_KO[axis]} 조건에 맞는 동네"
-        return [_rule(f"{sgg}에는 {josa(what, '이/가')} 없어요.")]
+        return [_rule(f"{sgg}에는 {josa(what, '이/가')} 없어요.")], []
     a, b = p.conditions
     out = [_rule(f"{josa(AXIS_KO[a], '과/와')} {josa(AXIS_KO[b], '을/를')} 다 갖춘 곳은 없어요.")]
+    codes: list[str] = []
     for axis in p.conditions:
         top = ranked(spots, axis)[:1]
         if top:
             out.append(_rule(_want(axis, top[0].dong.name), evidence(axis, top, sgg)))
-    return out
+            codes.append(top[0].dong.code)
+    return out, list(dict.fromkeys(codes))
 
 
 def _one(p: Plan, sgg: str) -> dict:
@@ -267,7 +270,8 @@ def answer(
         return profile(raw, spots), "rule", []
     p = plan(spots, condition_axes(question, intent))
     if not p.spots:
-        return _none(p, spots, sgg), "rule", []
+        out, codes = _none(p, spots, sgg)
+        return out, "rule", codes
     codes = [s.dong.code for s in p.spots]
     if len(p.spots) == 1:
         return [_one(p, sgg)], "rule", codes

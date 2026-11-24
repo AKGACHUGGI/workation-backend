@@ -154,7 +154,7 @@ def test_answer_single_candidate_and_none():
     )
     assert out[0]["evidence"] == "바다 가까움: 교1동 해안선 3.2km"
     out, _, codes = r.answer(None, REGION_RAW, "find_quiet", "조용하면서 바다 가까운 데")
-    assert codes == []
+    assert codes == [HYOJA, GYO]  # 문장에 쓴 조건별 1위 동 (자세히 → · 예시 칩)
     assert texts(out) == [
         "조용함과 바다 가까움을 다 갖춘 곳은 없어요.",
         "조용함을 원한다면 효자2동이 맞아요.",
