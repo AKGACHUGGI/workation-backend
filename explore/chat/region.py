@@ -7,11 +7,15 @@
 from __future__ import annotations
 
 import math
+from collections import Counter
 from dataclasses import dataclass
 
+from django.core.cache import cache
+
 from explore import derive
-from explore.chat import arrange
-from explore.chat.arrange import GRADE_AXES, INLAND
+from explore.brief import josa
+from explore.chat import arrange, compare
+from explore.chat.arrange import AXIS_KO, GRADE_AXES, INLAND, Order
 
 MAX_SPOTS = 3
 TYPE_AXES = [f"type:{t}" for t in derive.TYPES]
@@ -147,3 +151,129 @@ def plan(spots: list[Spot], conditions: list[str]) -> Plan:
     keep = {s.dong.code for s in _pool(spots, second)}
     cands = [s for s in _pool(spots, first) if s.dong.code in keep][:MAX_SPOTS]
     return Plan(conditions, list(conditions), cands)
+
+
+def _rule(text: str, evidence: str | None = None) -> dict:
+    return {"text": text, "evidence": evidence, "source": "rule"}
+
+
+def evidence(axis: str, spots: list[Spot], sgg: str) -> str:
+    """근거 줄: 축 값 높은 순. 등급 축은 시군구 순위를 붙인다."""
+
+    def show(s: Spot) -> str:
+        d = s.dong
+        if axis in GRADE_AXES:
+            rank, of = s.ranks[axis]
+            return f"{d.name} {d.grades[axis]}({sgg} {rank}위/{of})"
+        if axis == "coast":
+            v = d.values["coast"]
+            return f"{d.name} {'내륙' if v <= INLAND else f'해안선 {-v:.1f}km'}"
+        if axis in ("life", "tourist"):
+            return f"{d.name} {s.life or '-'}"
+        return f"{d.name} {d.values.get(axis, 0):g}점"
+
+    order = sorted(spots, key=lambda s: -s.dong.values.get(axis, INLAND))
+    return f"{AXIS_KO[axis]}: " + " · ".join(show(s) for s in order)
+
+
+def build_prompt(sgg: str, p: Plan, orders: list[Order]) -> str:
+    """사용자 문장 없이 조건 + 후보끼리의 축별 순서만. 숫자는 넣지 않는다."""
+    by_name = {s.dong.name: s.dong for s in p.spots}
+    cond = "·".join(AXIS_KO[a] for a in p.conditions)
+    return "\n".join(
+        [
+            f"질문: {cond} 좋은 동네 어디야? ({sgg} 안에서 동네 찾기)",
+            f"찾은 동네: {', '.join(by_name)} ({sgg}에서 {cond} 기준으로 고른 곳)",
+            f"이번에 볼 기준: {', '.join(AXIS_KO[o.axis] for o in orders)}",
+            "",
+            "[축별 순서 · 코드 계산]",
+            *(f"{o.axis}: {arrange.order_line(o, by_name)}" for o in orders),
+        ]
+    )
+
+
+def _want(axis: str, name: str) -> str:
+    return f"{josa(AXIS_KO[axis], '을/를')} 원한다면 {josa(name, '이/가')} 맞아요."
+
+
+def _none(p: Plan, spots: list[Spot], sgg: str) -> list[dict]:
+    if len(p.conditions) == 1:
+        axis = p.conditions[0]
+        what = "바다 가까운 동네" if axis == "coast" else f"{AXIS_KO[axis]} 조건에 맞는 동네"
+        return [_rule(f"{sgg}에는 {josa(what, '이/가')} 없어요.")]
+    a, b = p.conditions
+    out = [_rule(f"{josa(AXIS_KO[a], '과/와')} {josa(AXIS_KO[b], '을/를')} 다 갖춘 곳은 없어요.")]
+    for axis in p.conditions:
+        top = ranked(spots, axis)[:1]
+        if top:
+            out.append(_rule(_want(axis, top[0].dong.name), evidence(axis, top, sgg)))
+    return out
+
+
+def _one(p: Plan, sgg: str) -> dict:
+    s = p.spots[0]
+    ev = evidence(p.conditions[0], p.spots, sgg)
+    if len(p.conditions) == 1 or p.conditions == TYPE_AXES:
+        return _rule(_want(p.conditions[0], s.dong.name), ev)
+    a, b = p.conditions
+    text = (
+        f"{josa(AXIS_KO[a], '과/와')} {josa(AXIS_KO[b], '을/를')} 다 갖춘 곳은 "
+        f"{josa(s.dong.name, '이에요/예요')}."
+    )
+    return _rule(text, ev)
+
+
+def profile(raw: dict, spots: list[Spot]) -> list[dict]:
+    """시군구 성격 (규칙 문장 2개). 수는 근거 줄에."""
+    sgg = raw["region"]["name"]
+    tops: Counter[str] = Counter()
+    for d in raw["dongs"]:
+        first = [(name, score) for rank, name, score in d["types"] if rank == 1]
+        if first and first[0][1] >= derive.TYPE_MIN:
+            tops[first[0][0]] += 1
+    local = sum(s.life == "생활권" for s in spots)
+    tourist = sum(s.life == "관광지" for s in spots)
+    coastal = sum(s.dong.values["coast"] > INLAND for s in spots)
+    out = []
+    if tops:
+        out.append(f"{josa(sgg)} {tops.most_common(1)[0][0]} 동네가 가장 많아요.")
+    if local == tourist:
+        mood = "생활권과 관광지 동네가 비슷하게 있고"
+    else:
+        mood = f"{'생활권' if local > tourist else '관광지'} 성격의 동네가 더 많고"
+    sea = f"바다 가까운 동네는 {coastal}곳이에요." if coastal else "바다와 닿은 동네는 없어요."
+    out.append(f"{mood}, {sea}")
+    counts = [f"{name} {n}곳" for name, n in tops.most_common()]
+    ev = " · ".join([*counts, f"생활권 {local}곳", f"관광지 {tourist}곳"])
+    return [_rule(out[0], ev), *(_rule(t) for t in out[1:])]
+
+
+def answer(
+    generate: compare.Generate | None, raw: dict, intent: str, question: str
+) -> tuple[list[dict], str, list[str]]:
+    """(문장들, source, 후보 동 코드). 생성 답은 compare 와 같은 키 방식으로 1일 캐시한다."""
+    spots = spots_of(raw)
+    sgg = raw["region"]["name"]
+    if intent == "region_profile":
+        return profile(raw, spots), "rule", []
+    p = plan(spots, condition_axes(question, intent))
+    if not p.spots:
+        return _none(p, spots, sgg), "rule", []
+    codes = [s.dong.code for s in p.spots]
+    if len(p.spots) == 1:
+        return [_one(p, sgg)], "rule", codes
+    dongs = [s.dong for s in p.spots]
+    orders = arrange.orders(dongs, p.axes)
+    user = build_prompt(sgg, p, orders)
+    key = compare.cache_key(codes, intent, p.axes, user)
+    hit = cache.get(key)
+    if hit is None:
+        hit = compare.compose(generate, user, dongs, orders)
+        if hit[1] != "rule":  # HCX 가 잠깐 안 될 때의 규칙 답은 1일 남기지 않는다
+            cache.set(key, hit, compare.CACHE_TTL)
+    sentences, source = hit
+    sentences = [
+        {**s, "evidence": evidence(o.axis, p.spots, sgg)}
+        for s, o in zip(sentences, orders, strict=True)
+    ]
+    return sentences or [_one(p, sgg)], source, codes
