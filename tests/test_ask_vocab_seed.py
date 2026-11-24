@@ -3,6 +3,7 @@ db/tools 는 패키지가 아니라 파일 경로로 불러온다 (표준 라이
 
 import importlib.util
 import json
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -63,11 +64,18 @@ def test_seed_follows_spec(tool):
     assert phrases["둘 중 어디가 나아?"] == "compare_summary"
     assert phrases["둘이 비슷해?"] == "similar"
     # 시군구 의도: 성격 질문 · 맛집 질문과 덜 겹치는 표현
-    assert phrases["어떤 워케이션 유형이 많아?"] == "find_type"
+    # '유형이 많은지' 는 시군구 성격 질문, find_type 엔 동을 찾는 표현만
+    assert phrases["어떤 워케이션 유형이 많아?"] == "region_profile"
+    assert phrases["몰입형으로 일할 동네 어디야?"] == "find_type"
     assert phrases["밤에도 사람 많은 동네는?"] == "find_evening"
     assert phrases["저녁에 북적이는 데 어디야?"] == "find_evening"
     for gone in ("어떤 유형 동네가 있어?", "밤에 놀 만한 데는?", "퇴근 후 놀기 좋은 동네 어디야?"):
         assert gone not in phrases
+
+
+def test_each_intent_has_5_to_12_phrases(tool):
+    counts = Counter(i for i, _, _ in tool.read_ask(SEED))
+    assert all(5 <= n <= 12 for n in counts.values()), counts
 
 
 def test_read_ask_rejects_bad_csv(tool, tmp_path):

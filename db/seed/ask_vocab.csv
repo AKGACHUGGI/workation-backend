@@ -108,8 +108,9 @@ find_evening,저녁에 북적이는 데 어디야?,false
 find_type,집중해서 일하기 좋은 동네는?,true
 find_type,네트워킹하기 좋은 동네 어디야?,false
 find_type,로컬살이하기 좋은 동네는?,false
-find_type,어떤 워케이션 유형이 많아?,false
 find_type,혼자 일하기 좋은 동네는?,false
+find_type,몰입형으로 일할 동네 어디야?,false
+find_type,사람들과 교류하며 일할 동네는?,false
 find_coast,바다 가까운 동네 있어?,true
 find_coast,바닷가 동네 어디야?,false
 find_coast,해변 근처 동네 알려 줘,false
@@ -130,3 +131,4 @@ region_profile,이 지역 분위기 어때?,false
 region_profile,어떤 동네들이 있어?,false
 region_profile,이 지역 어떤 느낌이야?,false
 region_profile,여기 소개해 줘,false
+region_profile,어떤 워케이션 유형이 많아?,false
