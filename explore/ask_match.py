@@ -37,35 +37,45 @@ def match_text(norm: str, vocab: list[tuple[str, str, bool]]) -> list[tuple[str,
     return [] if best is None else [(best, 1.0)]
 
 
-def _by_text(norm: str) -> tuple[list[str], float]:
+def _allowed(scope: str) -> tuple[str, ...]:
+    return ask.REGION_VOCAB if scope == "region" else ask.DONG_VOCAB
+
+
+def _by_text(norm: str, allowed: tuple[str, ...]) -> tuple[list[str], float]:
     try:
-        ranked = match_text(norm, sources.load_vocab())
+        vocab = [v for v in sources.load_vocab() if v[0] in allowed]
+        ranked = match_text(norm, vocab)
     except DatabaseError as ex:
         logger.warning("ask_vocab 조회 실패 → 모르는 질문: %s", ex)
         return ["unknown_other"], 0.0
     return ask.pick_intents(ranked), ranked[0][1] if ranked else 0.0
 
 
-def find_intents(question: str) -> tuple[list[str], float]:
-    """(고른 의도 1~2개, 1위 유사도). 문자열 매칭이면 유사도 1.0(맞음) 또는 0.0(없음)."""
+def find_intents(question: str, scope: str = "dong") -> tuple[list[str], float]:
+    """(고른 의도 1~2개, 1위 유사도). 문자열 매칭이면 유사도 1.0(맞음) 또는 0.0(없음).
+    scope: dong(v7 사전) · region(시군구 의도 + 시간대 + 모르는 질문)."""
     norm = ask.normalize(question)
+    allowed = _allowed(scope)
     try:
         version = sources.vocab_version()
     except DatabaseError as ex:
         logger.warning("ask_vocab 버전 조회 실패: %s", ex)
-        return _by_text(norm)
-    key = f"explore:ask:q:{hashlib.sha1(norm.encode()).hexdigest()}:{version}"
+        return _by_text(norm, allowed)
+    key = f"explore:ask:q:{scope}:{hashlib.sha1(norm.encode()).hexdigest()}:{version}"
     hit = cache.get(key)
     if hit is not None:
         return hit[0], hit[1]
     try:
-        ranked = [(i, sim) for i, _, sim in sources.nearest_vocab(clova.embed(question), TOP_K)]
+        ranked = [
+            (i, sim)
+            for i, _, sim in sources.nearest_vocab(clova.embed(question), TOP_K, intents=allowed)
+        ]
     except clova.ClovaError as ex:
         logger.warning("질문 임베딩 실패 → 문자열 매칭: %s", ex)
-        return _by_text(norm)
+        return _by_text(norm, allowed)
     except DatabaseError as ex:
         logger.warning("ask_vocab 최근접 조회 실패 → 문자열 매칭: %s", ex)
-        return _by_text(norm)
+        return _by_text(norm, allowed)
     intents, top = ask.pick_intents(ranked), ranked[0][1] if ranked else 0.0
     cache.set(key, [intents, top], TTL)
     return intents, top

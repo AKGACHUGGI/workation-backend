@@ -5,7 +5,7 @@ from django.core.cache import cache
 from django.db import DatabaseError
 
 from core import clova
-from explore import ask_match, sources
+from explore import ask, ask_match, sources
 
 VOCAB = [
     ("quiet", "이 동네 조용해?", True),
@@ -33,7 +33,7 @@ def no_embed(text):
     raise clova.ClovaError("CLOVA_API_KEY 가 설정되지 않았습니다.")
 
 
-def db_down(*args):
+def db_down(*args, **kwargs):
     raise DatabaseError("relation ask_vocab does not exist")
 
 
@@ -56,7 +56,7 @@ def test_embedding_path_and_cache(monkeypatch, vocab):
     monkeypatch.setattr(
         sources,
         "nearest_vocab",
-        lambda vec, k=5: [
+        lambda vec, k=5, intents=None: [
             ("quiet", "이 동네 조용해?", 0.84),
             ("weekday_hours", "오전에 한산해?", 0.80),
         ],
@@ -68,7 +68,9 @@ def test_embedding_path_and_cache(monkeypatch, vocab):
 
 def test_below_threshold_is_unknown_other(monkeypatch, vocab):
     monkeypatch.setattr(clova, "embed", lambda text: [0.1] * 1024)
-    monkeypatch.setattr(sources, "nearest_vocab", lambda vec, k=5: [("quiet", "조용해?", 0.61)])
+    monkeypatch.setattr(
+        sources, "nearest_vocab", lambda vec, k=5, intents=None: [("quiet", "조용해?", 0.61)]
+    )
     assert ask_match.find_intents("주식 오를까?") == (["unknown_other"], 0.61)
 
 
@@ -89,3 +91,34 @@ def test_vocab_tables_down_is_unknown_other(monkeypatch):
     monkeypatch.setattr(sources, "vocab_version", db_down)
     monkeypatch.setattr(sources, "load_vocab", db_down)
     assert ask_match.find_intents("여기 조용해?") == (["unknown_other"], 0.0)
+
+
+REGION_VOCAB_ROWS = [
+    ("find_quiet", "조용한 동네 어디야?", True),
+    ("quiet", "이 동네 조용해?", True),
+    ("unknown_place", "맛집 있어?", True),
+]
+
+
+def test_scope_filters_text_vocab(monkeypatch):
+    monkeypatch.setattr(sources, "vocab_version", lambda: "1")
+    monkeypatch.setattr(sources, "load_vocab", lambda: REGION_VOCAB_ROWS)
+    monkeypatch.setattr(clova, "embed", no_embed)
+    assert ask_match.find_intents("조용한 동네 어디야?", "region") == (["find_quiet"], 1.0)
+    # 동 채팅 범위에는 시군구 의도가 없다
+    assert ask_match.find_intents("조용한 동네 어디야?", "dong") == (["quiet"], 1.0)
+
+
+def test_scope_passes_intents_to_nearest(monkeypatch, vocab):
+    seen = []
+    monkeypatch.setattr(clova, "embed", lambda text: [0.1] * 1024)
+
+    def nearest(vec, k=5, intents=None):
+        seen.append(intents)
+        return [("find_quiet", "조용한 동네 어디야?", 0.9)]
+
+    monkeypatch.setattr(sources, "nearest_vocab", nearest)
+    assert ask_match.find_intents("한적한 데 어디?", "region") == (["find_quiet"], 0.9)
+    assert seen == [ask.REGION_VOCAB]
+    ask_match.find_intents("한적한 데 어디?", "dong")
+    assert seen[-1] == ask.DONG_VOCAB

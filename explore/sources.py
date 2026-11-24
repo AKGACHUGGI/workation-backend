@@ -283,16 +283,22 @@ def _vector(v: list[float]) -> str:
     return "[" + ",".join(f"{x:.6f}" for x in v) + "]"
 
 
-def nearest_vocab(vec: list[float], k: int = 5) -> list[tuple[str, str, float]]:
-    """질문 임베딩에 가까운 사전 표현 k개 (intent, phrase, 코사인 유사도), 가까운 순. pgvector."""
+def nearest_vocab(
+    vec: list[float], k: int = 5, intents: tuple[str, ...] | None = None
+) -> list[tuple[str, str, float]]:
+    """질문 임베딩에 가까운 사전 표현 k개 (intent, phrase, 코사인 유사도), 가까운 순. pgvector.
+    intents 가 있으면 그 의도 표현만 본다(동 채팅 · 시군구 채팅 사전 범위)."""
     q = _vector(vec)
+    allowed = list(intents) if intents else None
     return [
         (intent, phrase, float(sim))
         for intent, phrase, sim in _rows(
             """SELECT intent, phrase, 1 - (embedding <=> %s::vector) AS sim
-                 FROM ask_vocab WHERE embedding IS NOT NULL
+                 FROM ask_vocab
+                WHERE embedding IS NOT NULL
+                  AND (%s::text[] IS NULL OR intent = ANY(%s::text[]))
                 ORDER BY embedding <=> %s::vector LIMIT %s""",
-            [q, q, k],
+            [q, allowed, allowed, q, k],
         )
     ]
 
