@@ -15,6 +15,8 @@ def test_peaks_of_picks_earlier_hour_on_ties():
 
 def test_best_months_lowest_two_sorted():
     assert webdata.best_months({1: 50.0, 2: 10.0, 3: 30.0, 8: 10.0}) == [2, 8]
+    # 동점이 두 번째 자리에 걸리면 행 순서와 상관없이 이른 달
+    assert webdata.best_months({9: 20.0, 3: 20.0, 1: 10.0}) == [1, 3]
 
 
 def test_walk_peaks_matches_dong_detail(client, photos):  # noqa: F811

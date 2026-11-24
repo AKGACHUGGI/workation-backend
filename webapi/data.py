@@ -273,8 +273,8 @@ def walk_peaks(adm_code: str, month: int | None) -> dict[str, dict] | None:
 
 
 def best_months(crowd: dict[int, float]) -> list[int]:
-    """혼잡이 가장 낮은 2개월, 오름차순 (지역 상세 bestMonths)."""
-    return sorted(sorted(crowd, key=crowd.get)[:2])
+    """혼잡이 가장 낮은 2개월, 오름차순 (지역 상세 bestMonths). 동점이면 이른 달."""
+    return sorted(sorted(crowd, key=lambda m: (crowd[m], m))[:2])
 
 
 def region_best_months(sigungu_code: str) -> list[int]:
