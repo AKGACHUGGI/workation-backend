@@ -38,6 +38,7 @@ def test_spots_of():
         ("관광지 말고 생활권 동네는?", "find_life", ["life"]),
         ("관광지 동네는 어디야?", "find_life", ["tourist"]),
         ("집중해서 일하기 좋은 동네는?", "find_type", ["type:immersion"]),
+        ("혼자 일하기 좋은 동네는?", "find_type", ["type:immersion"]),
         (
             "어떤 유형 동네가 있어?",
             "find_type",

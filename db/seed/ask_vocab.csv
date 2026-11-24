@@ -102,13 +102,13 @@ find_peer,또래 워케이셔너 많은 곳은?,false
 find_peer,젊은 분위기 동네 있어?,false
 find_evening,저녁에 활기 있는 데는?,true
 find_evening,밤에 북적이는 동네는?,false
-find_evening,퇴근 후 놀기 좋은 동네 어디야?,false
+find_evening,밤에도 사람 많은 동네는?,false
 find_evening,저녁에 사람 많은 동네 어디야?,false
-find_evening,밤에 놀 만한 데는?,false
+find_evening,저녁에 북적이는 데 어디야?,false
 find_type,집중해서 일하기 좋은 동네는?,true
 find_type,네트워킹하기 좋은 동네 어디야?,false
 find_type,로컬살이하기 좋은 동네는?,false
-find_type,어떤 유형 동네가 있어?,false
+find_type,어떤 워케이션 유형이 많아?,false
 find_type,혼자 일하기 좋은 동네는?,false
 find_coast,바다 가까운 동네 있어?,true
 find_coast,바닷가 동네 어디야?,false

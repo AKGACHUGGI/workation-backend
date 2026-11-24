@@ -32,7 +32,7 @@ KEYWORDS = (
     ("coast", ("바다", "바닷가", "해변", "해안")),
     ("life", ("생활권", "주민")),
     ("tourist", ("관광",)),
-    ("type:immersion", ("몰입", "집중")),
+    ("type:immersion", ("몰입", "집중", "혼자")),
     ("type:networking", ("네트워킹", "교류")),
     ("type:local", ("로컬",)),
 )

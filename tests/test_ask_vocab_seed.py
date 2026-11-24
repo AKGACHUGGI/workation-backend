@@ -62,6 +62,12 @@ def test_seed_follows_spec(tool):
     assert phrases["치안 괜찮아?"] == "unknown_other"
     assert phrases["둘 중 어디가 나아?"] == "compare_summary"
     assert phrases["둘이 비슷해?"] == "similar"
+    # 시군구 의도: 성격 질문 · 맛집 질문과 덜 겹치는 표현
+    assert phrases["어떤 워케이션 유형이 많아?"] == "find_type"
+    assert phrases["밤에도 사람 많은 동네는?"] == "find_evening"
+    assert phrases["저녁에 북적이는 데 어디야?"] == "find_evening"
+    for gone in ("어떤 유형 동네가 있어?", "밤에 놀 만한 데는?", "퇴근 후 놀기 좋은 동네 어디야?"):
+        assert gone not in phrases
 
 
 def test_read_ask_rejects_bad_csv(tool, tmp_path):
