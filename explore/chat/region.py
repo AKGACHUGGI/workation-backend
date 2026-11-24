@@ -19,11 +19,24 @@ from explore.chat.arrange import AXIS_KO, GRADE_AXES, INLAND, Order
 
 MAX_SPOTS = 3
 # 시군구 답 전용 검사 · 프롬프트를 고치면 올린다 (캐시 키에 compare.PROMPT_VERSION 과 함께 들어간다)
-PROMPT_VERSION = "r1"
+PROMPT_VERSION = "r2"
 SUPERLATIVE = ("가장", "제일", "1위", "최고")
 TYPE_AXES = [f"type:{t}" for t in derive.TYPES]
 TYPE_BY_KO = {ko: key for key, ko in derive.TYPE_KO.items()}
+# 유형 이름(몰입형 등)은 문장에 그대로 쓰지 않고 풀어 쓴다
+PLAIN = {
+    "type:immersion": "혼자 집중해서 일하기",
+    "type:networking": "사람들과 어울리며 일하기",
+    "type:local": "현지 주민처럼 지내기",
+}
 STRENGTHS = ("quiet", "evening", "peer", "coast")  # 조건 외 강점 축 (문장 2·3번째)
+OPPOSITE = {"quiet": "evening", "evening": "quiet"}  # 조건과 반대 방향이라 부가 문장으로 안 쓰는 축
+# 답 · 자료를 설명하는 말(메타카피)과 면책 · 완곡(컴플라이언스 문체)
+META = ("알려드", "알려 드", "에 따르면", "분석", "추천", "아래는", "다음은")
+HEDGE = (
+    "참고", "다를 수", "일 수 있", "을 수 있", "수도 있", "개인차", "확인해", "보세요",
+)  # fmt: skip
+ENDING = ("이에요", "예요", "입니다")
 # 질문 속 조건 낱말 → 축. 위에서부터가 아니라 질문에 나온 순서로 고른다
 KEYWORDS = (
     ("quiet", ("조용", "한적", "한산")),
@@ -128,16 +141,34 @@ def _pool(spots: list[Spot], axis: str) -> list[Spot]:
     return order[: math.ceil(len(order) / 2)] if axis in GRADE_AXES else order
 
 
-def _strengths(cands: list[Spot], conditions: list[str]) -> list[str]:
-    """후보끼리 단독 1위가 조건 1위가 아닌 다른 동인 강점 축, 동마다 하나씩 최대 2개."""
+def sgg_rank(spot: Spot, axis: str, spots: list[Spot]) -> tuple[int, int]:
+    """(시군구 순위, 동 수). 등급 축은 원재료 순위, 나머지는 축 값으로 센다(같으면 같은 순위)."""
+    if axis in spot.ranks:
+        return spot.ranks[axis]
+    v = spot.dong.values[axis]
+    have = [s.dong.values[axis] for s in spots if axis in s.dong.values]
+    return 1 + sum(x > v for x in have), len(have)
+
+
+def _strengths(cands: list[Spot], conditions: list[str], spots: list[Spot]) -> list[str]:
+    """후보끼리 단독 1위가 조건 1위가 아닌 다른 동인 강점 축, 동마다 하나씩 최대 2개.
+    조건과 반대 방향인 축, 그 1위가 시군구 상위 절반이 아닌 축은 뺀다
+    (하위권 동을 '조용한 곳을 찾는다면 ○○' 처럼 단정하지 않게)."""
     used = {cands[0].dong.name}
+    by_name = {s.dong.name: s for s in cands}
+    opposite = {OPPOSITE.get(c) for c in conditions}
     out: list[str] = []
     dongs = [s.dong for s in cands]
     for axis in STRENGTHS:
-        if axis in conditions or len(out) == arrange.MAX_AXES - len(conditions):
+        if axis in conditions or axis in opposite:
             continue
+        if len(out) == arrange.MAX_AXES - len(conditions):
+            break
         order = next(iter(arrange.orders(dongs, [axis])), None)
-        if order and order.top and order.top not in used:
+        if not order or not order.top or order.top in used:
+            continue
+        rank, of = sgg_rank(by_name[order.top], axis, spots)
+        if rank * 2 <= of:
             used.add(order.top)
             out.append(axis)
     return out
@@ -153,7 +184,7 @@ def plan(spots: list[Spot], conditions: list[str]) -> Plan:
         cands = ranked(spots, conditions[0])[:MAX_SPOTS]
         if not cands:
             return Plan(conditions, list(conditions), [])
-        return Plan(conditions, [*conditions, *_strengths(cands, conditions)], cands)
+        return Plan(conditions, [*conditions, *_strengths(cands, conditions, spots)], cands)
     first, second = conditions
     keep = {s.dong.code for s in _pool(spots, second)}
     cands = [s for s in _pool(spots, first) if s.dong.code in keep][:MAX_SPOTS]
@@ -183,24 +214,70 @@ def evidence(axis: str, spots: list[Spot], sgg: str) -> str:
     return f"{AXIS_KO[axis]}: " + " · ".join(show(s) for s in order)
 
 
+SYSTEM = "\n".join(
+    [
+        "너는 워케이션 지도 서비스의 동네 찾기 안내자다. 사용자가 준 축별 순서만 근거로 쓴다.",
+        "- 문장마다 상황 하나와 그 상황에 맞는 동네 하나를 고른다. 한 문장에 동네 이름은 하나만.",
+        "- 문장마다 문형을 다르게 쓴다. 예: '조용히 일하고 싶다면 ○○이 맞아요', "
+        "'저녁에 활기를 찾는다면 ○○ 쪽이 나아요', '또래와 어울리기엔 ○○이 좋아요'. "
+        "예시를 그대로 베끼지 말고 상황에 맞게 바꿔 쓴다.",
+        "- 문장 끝은 '좋아요', '맞아요', '나아요' 같은 서술어로 맺는다. "
+        "'○○동이에요'처럼 동네 이름으로 끝내지 않는다.",
+        "- 시군구 이름은 쓰지 않는다. '○○군의 ○○읍'처럼 붙이지 않는다.",
+        "- '반면', '대신', '하지만'으로 문장을 시작하지 않는다.",
+        "- '가장', '제일', '최고', '1위' 같은 최상급을 쓰지 않는다. "
+        "생활권 · 관광지 분위기는 그런 성격이 있다는 것만 말한다.",
+        "- '몰입형', '네트워킹형', '로컬살이형' 같은 유형 이름을 쓰지 않고 "
+        "'혼자 집중해서 일하기'처럼 풀어 쓴다.",
+        "- 답이나 자료를 설명하는 말을 쓰지 않는다. "
+        "예: '알려드릴게요', '데이터에 따르면', '분석 결과', '추천드려요', '아래는'.",
+        "- 면책 · 완곡 표현을 쓰지 않는다. 예: '참고용이에요', '다를 수 있어요', "
+        "'~일 수 있어요', '개인차가 있어요', '확인해 보세요'.",
+        "- 존댓말 해요체, 문장마다 60자 이내.",
+        "- 문장마다 다른 axis 를 쓰고, 그 축 순서의 맨 앞 동네 이름 하나만 쓴다. "
+        "맨 앞이 '='로 같으면 그중 하나를 쓴다.",
+        "- 동네 이름에서 받는 인상(읍·면은 시골이라 조용하다 등)이나 상식으로 판단하지 않는다.",
+        "- 숫자와 등급 글자(S·A·B·C)를 쓰지 않는다.",
+        "- '지표', '벡터', '거리', '백분위', '노드', '그래프', '데이터' 같은 말을 쓰지 않는다.",
+    ]
+)
+
+
+def _ko(axis: str) -> str:
+    return PLAIN.get(axis) or AXIS_KO[axis]
+
+
 def build_prompt(sgg: str, p: Plan, orders: list[Order]) -> str:
-    """사용자 문장 없이 조건 + 후보끼리의 축별 순서만. 숫자는 넣지 않는다."""
+    """사용자 문장 없이 조건 + 후보끼리의 축별 순서만. 숫자는 넣지 않는다.
+    유형 축은 유형 이름 대신 풀어 쓴 말로 넣는다."""
     by_name = {s.dong.name: s.dong for s in p.spots}
-    cond = "·".join(AXIS_KO[a] for a in p.conditions)
+    cond = "·".join(_ko(a) for a in p.conditions)
+
+    def line(o: Order) -> str:
+        text = arrange.order_line(o, by_name)
+        return text.replace(AXIS_KO[o.axis], PLAIN[o.axis]) if o.axis in PLAIN else text
+
     return "\n".join(
         [
             f"질문: {cond} 좋은 동네 어디야? ({sgg} 안에서 동네 찾기)",
             f"찾은 동네: {', '.join(by_name)} ({sgg}에서 {cond} 기준으로 고른 곳)",
-            f"이번에 볼 기준: {', '.join(AXIS_KO[o.axis] for o in orders)}",
+            f"이번에 볼 기준: {', '.join(_ko(o.axis) for o in orders)}",
             "",
             "[축별 순서 · 코드 계산]",
-            *(f"{o.axis}: {arrange.order_line(o, by_name)}" for o in orders),
+            *(f"{o.axis}: {line(o)}" for o in orders),
         ]
     )
 
 
 def _want(axis: str, name: str) -> str:
+    if axis in PLAIN:
+        return f"{PLAIN[axis]}엔 {josa(name, '이/가')} 맞아요."
     return f"{josa(AXIS_KO[axis], '을/를')} 원한다면 {josa(name, '이/가')} 맞아요."
+
+
+def rule_sentence(o: Order) -> str:
+    """규칙 문장. 1등이 동점이면 동점인 동을 모두 쓴다."""
+    return _want(o.axis, "·".join(compare.tied_top(o)))
 
 
 def _none(p: Plan, spots: list[Spot], sgg: str) -> tuple[list[dict], list[str]]:
@@ -212,7 +289,7 @@ def _none(p: Plan, spots: list[Spot], sgg: str) -> tuple[list[dict], list[str]]:
         what = "바다 가까운 동네" if axis == "coast" else f"{AXIS_KO[axis]} 조건에 맞는 동네"
         return [_rule(f"{sgg}에는 {josa(what, '이/가')} 없어요.")], []
     a, b = p.conditions
-    out = [_rule(f"{josa(AXIS_KO[a], '과/와')} {josa(AXIS_KO[b], '을/를')} 다 갖춘 곳은 없어요.")]
+    out = [_rule(f"{josa(_ko(a), '과/와')} {josa(_ko(b), '을/를')} 다 갖춘 곳은 없어요.")]
     codes: list[str] = []
     for axis in p.conditions:
         top = ranked(spots, axis)[:1]
@@ -232,8 +309,8 @@ def _one(p: Plan, sgg: str) -> dict:
         return _rule(_want(p.conditions[0], s.dong.name), ev)
     a, b = p.conditions
     text = (
-        f"{josa(AXIS_KO[a], '과/와')} {josa(AXIS_KO[b], '을/를')} 다 갖춘 곳은 "
-        f"{josa(s.dong.name, '이에요/예요')}."
+        f"{josa(_ko(a), '과/와')} {josa(_ko(b), '을/를')} 다 원한다면 "
+        f"{josa(s.dong.name, '이/가')} 맞아요."
     )
     return _rule(text, ev)
 
@@ -251,7 +328,8 @@ def profile(raw: dict, spots: list[Spot]) -> list[dict]:
     coastal = sum(s.dong.values["coast"] > INLAND for s in spots)
     out = []
     if tops:
-        out.append(f"{josa(sgg)} {tops.most_common(1)[0][0]} 동네가 가장 많아요.")
+        most = PLAIN[f"type:{TYPE_BY_KO[tops.most_common(1)[0][0]]}"]
+        out.append(f"{josa(sgg)} {most} 좋은 동네가 가장 많아요.")
     if local == tourist:
         mood = "생활권과 관광지 동네가 비슷하게 있고"
     else:
@@ -265,14 +343,32 @@ def profile(raw: dict, spots: list[Spot]) -> list[dict]:
 
 def problems(text: str, sgg: str, cands: list[str], every: list[str]) -> list[str]:
     """시군구 답 생성 문장 추가 검사 (compare.problems 다음). 후보끼리만 견준 순서라
-    시군구 전체 1등 같은 범위 주장과 후보 아닌 동 이름은 근거가 없다."""
+    최상급 같은 범위 주장과 후보 아닌 동 이름은 근거가 없다. 말투(시군구 이름 반복 ·
+    유형 이름 · 동 이름으로 끝맺기 · 메타카피 · 면책 · 완곡)도 본다."""
     out = []
-    stem = sgg[:-1] if len(sgg) >= 3 else sgg
-    if stem in text and any(w in text for w in SUPERLATIVE):
-        out.append("범위: 시군구 최상급")
     others = [n for n in dict.fromkeys(compare.names_in(text, every)) if n not in cands]
     if others:
         out.append(f"이름: 후보 아닌 동 {others}")
+    plain = text
+    for name in sorted(every, key=len, reverse=True):
+        plain = plain.replace(name, "\0")  # '고성읍' 속 '고성' 을 시군구 이름으로 잡지 않게
+    stem = sgg[:-1] if len(sgg) >= 3 else sgg
+    if stem in plain:
+        out.append(f"시군구 이름: {stem}")
+    if any(w in text for w in SUPERLATIVE):
+        out.append("최상급")
+    types = [ko for ko in derive.TYPE_KO.values() if ko in text]
+    if types:
+        out.append(f"유형 이름: {types}")
+    body = compare.END.sub("", plain.rstrip())
+    if any(body.endswith(f"\0{e}") for e in ENDING):
+        out.append("끝: 동 이름으로 끝남")
+    meta = [w for w in META if w in text]
+    if meta:
+        out.append(f"메타카피: {meta}")
+    hedge = [w for w in HEDGE if w in text]
+    if hedge:
+        out.append(f"완곡: {hedge}")
     return out
 
 
@@ -293,19 +389,27 @@ def answer(
         return [_one(p, sgg)], "rule", codes
     dongs = [s.dong for s in p.spots]
     orders = arrange.orders(dongs, p.axes)
-    user = build_prompt(sgg, p, orders)
+    # 후보 전원이 동점인 축(해안선 0.0km 셋 등)은 고를 동이 없어 LLM 에 넘기지 않고 규칙 문장
+    asked = [o for o in orders if len(compare.tied_top(o)) < len(o.ranked)]
+    user = build_prompt(sgg, p, asked)
     key = f"{compare.cache_key(codes, intent, p.axes, user)}:{PROMPT_VERSION}"
     hit = cache.get(key)
     if hit is None:
         cands = [d.name for d in dongs]
         every = [d["name"] for d in raw["dongs"]]
         check = lambda text: problems(text, sgg, cands, every)  # noqa: E731
-        hit = compare.compose(generate, user, dongs, orders, check)
+        hit = compare.compose(
+            generate, user, dongs, asked, check, system=SYSTEM, rule=rule_sentence, ties_ok=True
+        )
         if hit[1] != "rule":  # HCX 가 잠깐 안 될 때의 규칙 답은 1일 남기지 않는다
             cache.set(key, hit, compare.CACHE_TTL)
-    sentences, source = hit
-    sentences = [
-        {**s, "evidence": evidence(o.axis, p.spots, sgg)}
-        for s, o in zip(sentences, orders, strict=True)
-    ]
+    made = dict(zip((o.axis for o in asked), hit[0], strict=True))
+    sentences = []
+    for o in orders:
+        s = made.get(o.axis) or _rule(rule_sentence(o))
+        head = next((c for c in compare.CONTRAST if s["text"].startswith(c)), None)
+        text = s["text"][len(head) :] if head else s["text"]  # 시군구 답 문장끼리는 대비가 아니다
+        sentences.append({**s, "text": text, "evidence": evidence(o.axis, p.spots, sgg)})
+    passed = sum(s["source"] == "llm" for s in sentences)
+    source = "llm" if passed == len(sentences) else "rule" if passed == 0 else "mixed"
     return sentences or [_one(p, sgg)], source, codes

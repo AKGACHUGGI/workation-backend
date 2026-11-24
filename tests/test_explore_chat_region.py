@@ -55,7 +55,38 @@ def test_condition_axes(question, intent, axes):
 def test_plan_single_axis_adds_strengths():
     p = r.plan(r.spots_of(REGION_RAW), ["quiet"])
     assert names(p.spots) == ["효자2동", "여의동", "교1동"]
-    assert p.axes == ["quiet", "evening", "peer"]
+    # 저녁 활기는 조용함 질문과 반대 방향이라 부가 문장으로 쓰지 않는다
+    assert p.axes == ["quiet", "peer"]
+
+
+def test_plan_skips_opposite_strength():
+    p = r.plan(r.spots_of(REGION_RAW), ["evening"])
+    assert names(p.spots) == ["여의동", "교1동", "송천1동"]
+    assert p.axes == ["evening", "peer"]  # 조용함 1위 교1동이어도 반대 방향이라 뺀다
+
+
+def with_rank(code, metric, rank):
+    """그 동의 지표 시군구 순위만 바꾼다 (점수는 그대로)."""
+    dongs = [
+        {
+            **d,
+            "grades": [
+                [m, g, s, rank if (d["code"], m) == (code, metric) else k, of]
+                for m, g, s, k, of in d["grades"]
+            ],
+        }
+        for d in REGION_RAW["dongs"]
+    ]
+    return {**REGION_RAW, "dongs": dongs}
+
+
+def test_plan_strength_needs_upper_half_of_sigungu():
+    # 생활권 후보(효자2동 · 교1동 · 송천1동) 중 저녁 활기 1위 교1동이 시군구 3위/4면 쓰지 않고
+    # 교1동은 시군구 1위인 또래 밀도로 쓴다
+    p = r.plan(r.spots_of(with_rank(GYO, "evening", 3)), ["life"])
+    assert p.axes == ["life", "peer"]
+    p = r.plan(r.spots_of(with_rank(GYO, "evening", 2)), ["life"])
+    assert p.axes == ["life", "evening"]
 
 
 def test_plan_filters():
@@ -105,14 +136,13 @@ def test_answer_rule_when_no_llm():
     assert codes == [HYOJA, YEOUI, GYO]
     assert texts(out) == [
         "조용함을 원한다면 효자2동이 맞아요.",
-        "저녁 활기를 원한다면 여의동이 맞아요.",
         "또래 밀도를 원한다면 교1동이 맞아요.",
     ]
     assert out[0]["evidence"] == (
         "조용함: 효자2동 S(전주시 1위/4) · 여의동 A(전주시 2위/4) · 교1동 A(전주시 3위/4)"
     )
     assert out[1]["evidence"] == (
-        "저녁 활기: 여의동 S(전주시 1위/4) · 교1동 A(전주시 2위/4) · 효자2동 C(전주시 4위/4)"
+        "또래 밀도: 교1동 S(전주시 1위/4) · 여의동 A(전주시 2위/4) · 효자2동 B(전주시 3위/4)"
     )
 
 
@@ -120,15 +150,11 @@ def test_answer_uses_llm_and_checks_direction():
     calls = []
 
     def generate(system, user, schema):
-        calls.append(user)
+        calls.append((system, user))
         return schema(
             sentences=[
                 {"text": "조용히 일하고 싶다면 효자2동이 맞아요.", "axis": "quiet"},
-                {
-                    "text": "저녁에 활기를 찾는다면 효자2동이 나아요.",
-                    "axis": "evening",
-                },  # 방향 틀림
-                {"text": "또래가 많은 곳은 교1동이에요.", "axis": "peer"},
+                {"text": "또래와 어울리기엔 효자2동이 좋아요.", "axis": "peer"},  # 방향 틀림
             ]
         )
 
@@ -136,12 +162,12 @@ def test_answer_uses_llm_and_checks_direction():
     assert source == "mixed"
     assert texts(out) == [
         "조용히 일하고 싶다면 효자2동이 맞아요.",
-        "저녁 활기를 원한다면 여의동이 맞아요.",
-        "또래가 많은 곳은 교1동이에요.",
+        "또래 밀도를 원한다면 교1동이 맞아요.",
     ]
-    assert "전주시 안에서 동네 찾기" in calls[0]
-    assert "90" not in calls[0]  # 숫자는 프롬프트에 없다
-    # 같은 질문은 캐시에서
+    system, user = calls[0]
+    assert system == r.SYSTEM
+    assert "전주시 안에서 동네 찾기" in user
+    assert "90" not in user  # 숫자는 프롬프트에 없다
     r.answer(generate, REGION_RAW, "find_quiet", "조용한 동네 어디야?")
     assert len(calls) == 1
 
@@ -162,7 +188,7 @@ def test_answer_single_candidate_and_none():
         "바다 가까움을 원한다면 교1동이 맞아요.",
     ]
     out, _, codes = r.answer(None, REGION_RAW, "find_quiet", "조용한 생활권 동네")
-    assert texts(out) == ["조용함과 생활권 분위기를 다 갖춘 곳은 효자2동이에요."]
+    assert texts(out) == ["조용함과 생활권 분위기를 다 원한다면 효자2동이 맞아요."]
     assert codes == [HYOJA]
     inland = {**REGION_RAW, "dongs": [{**d, "near": []} for d in REGION_RAW["dongs"]]}
     out, _, codes = r.answer(None, inland, "find_coast", "바다 가까운 동네 있어?")
@@ -173,7 +199,7 @@ def test_answer_profile():
     out, source, codes = r.answer(None, REGION_RAW, "region_profile", "여긴 어떤 곳이야?")
     assert (source, codes) == ("rule", [])
     assert texts(out) == [
-        "전주시는 로컬살이형 동네가 가장 많아요.",
+        "전주시는 현지 주민처럼 지내기 좋은 동네가 가장 많아요.",
         "생활권 성격의 동네가 더 많고, 바다 가까운 동네는 1곳이에요.",
     ]
     assert out[0]["evidence"] == (
@@ -195,7 +221,7 @@ def test_type_question_uses_only_types_with_a_top():
     p = r.plan(r.spots_of(raw), r.TYPE_AXES)
     assert (names(p.spots), p.axes) == (["여의동"], ["type:networking"])
     out, _, codes = r.answer(None, raw, "find_type", "어떤 워케이션 유형이 많아?")
-    assert texts(out) == ["네트워킹형을 원한다면 여의동이 맞아요."]
+    assert texts(out) == ["사람들과 어울리며 일하기엔 여의동이 맞아요."]
     assert out[0]["evidence"] == "네트워킹형: 여의동 65점"
     assert codes == [YEOUI]
 
@@ -216,16 +242,109 @@ def test_grade_ties_follow_sigungu_rank():
     assert names(r.ranked(spots, "quiet")) == ["효자2동", "여의동", "송천1동", "교1동"]
 
 
-def test_region_problems():
-    every = ["효자2동", "여의동", "교1동", "송천1동"]
-    cands = every[:3]
-    assert r.problems("전주에서 제일 조용한 곳은 효자2동이에요.", "전주시", cands, every) == [
-        "범위: 시군구 최상급"
+EVERY = ["효자2동", "여의동", "교1동", "송천1동"]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("조용히 일하려면 효자2동이 나아요.", []),
+        ("또래와 어울리기엔 교1동이 제격이에요.", []),
+        ("효자2동은 송천1동보다 조용해서 좋아요.", ["이름"]),
+        ("조용히 일하려면 효자2동이 가장 나아요.", ["최상급"]),
+        ("전주에서 제일 조용한 곳은 효자2동이 좋아요.", ["시군구 이름", "최상급"]),
+        ("저녁 활기는 전주시의 여의동이 나아요.", ["시군구 이름"]),
+        ("몰입형으로 일하려면 효자2동이 맞아요.", ["유형 이름"]),
+        ("또래가 많은 곳은 교1동이에요.", ["끝"]),
+        ("저녁 활기를 원한다면 여의동이 알맞을 수 있어요.", ["완곡"]),
+        ("조용한 곳은 효자2동이 좋아요, 참고용이에요.", ["완곡"]),
+        ("저녁 활기가 필요하다면 여의동을 생각해 보세요.", ["완곡"]),
+        ("데이터에 따르면 효자2동이 조용해서 좋아요.", ["메타카피"]),
+        ("조용한 곳을 알려드릴게요, 효자2동이 좋아요.", ["메타카피"]),
+        ("분석 결과 효자2동이 조용해서 좋아요.", ["메타카피"]),
+    ],
+)
+def test_region_problems(text, expected):
+    got = r.problems(text, "전주시", EVERY[:3], EVERY)
+    assert [p.split(":")[0] for p in got] == expected
+
+
+def test_rule_sentences_have_no_meta_or_hedge():
+    """규칙 대체 문장도 같은 검사를 통과한다."""
+    spots = r.spots_of(REGION_RAW)
+    dongs = [s.dong for s in spots]
+    for o in r.arrange.orders(dongs, ["quiet", "peer", "evening", "coast", *r.TYPE_AXES]):
+        found = r.problems(r.rule_sentence(o), "전주시", EVERY, EVERY)
+        assert [p for p in found if not p.startswith("이름")] == []
+
+
+def coastal(km):
+    """동 네 곳 해안선 거리를 바꾼다 (None 은 내륙)."""
+    dongs = [
+        {**d, "near": [] if k is None else [k]}
+        for d, k in zip(REGION_RAW["dongs"], km, strict=True)
     ]
-    assert r.problems("효자2동은 송천1동보다 조용해요.", "전주시", cands, every) == [
-        "이름: 후보 아닌 동 ['송천1동']"
+    return {**REGION_RAW, "dongs": dongs}
+
+
+def test_all_tied_condition_is_rule_and_not_asked():
+    raw = coastal([0.0, 0.0, 0.0, None])  # 효자2동 · 여의동 · 교1동 모두 해안선 0.0km
+    calls = []
+
+    def generate(system, user, schema):
+        calls.append(user)
+        return schema(
+            sentences=[
+                {"text": "조용히 일하고 싶다면 효자2동이 맞아요.", "axis": "quiet"},
+                {"text": "저녁에 활기를 찾는다면 여의동이 나아요.", "axis": "evening"},
+            ]
+        )
+
+    out, source, _ = r.answer(generate, raw, "find_coast", "바다 가까운 동네 있어?")
+    assert texts(out) == [
+        "바다 가까움을 원한다면 교1동·여의동·효자2동이 맞아요.",
+        "조용히 일하고 싶다면 효자2동이 맞아요.",
+        "저녁에 활기를 찾는다면 여의동이 나아요.",
     ]
-    assert r.problems("조용히 일하려면 효자2동이 가장 나아요.", "전주시", cands, every) == []
+    assert [s["source"] for s in out] == ["rule", "llm", "llm"]
+    assert source == "mixed"
+    assert "coast:" not in calls[0]
+
+
+def test_partial_tie_lets_llm_name_any_tied_top():
+    raw = coastal([5.0, 0.0, 0.0, None])  # 여의동 = 교1동 > 효자2동
+
+    def generate(system, user, schema):
+        text = "바다 곁에 머물고 싶다면 교1동이 좋아요."
+        return schema(sentences=[{"text": text, "axis": "coast"}])
+
+    out, _, _ = r.answer(generate, raw, "find_coast", "바다 가까운 동네 있어?")
+    assert out[0] == {
+        "text": "바다 곁에 머물고 싶다면 교1동이 좋아요.",
+        "evidence": "바다 가까움: 교1동 해안선 0.0km · 여의동 해안선 0.0km · 효자2동 해안선 5.0km",
+        "source": "llm",
+    }
+
+
+def test_llm_contrast_word_is_dropped():
+    def generate(system, user, schema):
+        return schema(
+            sentences=[
+                {"text": "조용히 일하고 싶다면 효자2동이 맞아요.", "axis": "quiet"},
+                {"text": "반면 또래와 어울리기엔 교1동이 좋아요.", "axis": "peer"},
+            ]
+        )
+
+    out, _, _ = r.answer(generate, REGION_RAW, "find_quiet", "조용한 동네 어디야?")
+    assert texts(out)[1] == "또래와 어울리기엔 교1동이 좋아요."
+
+
+def test_prompt_uses_plain_type_words():
+    p = r.plan(r.spots_of(REGION_RAW), ["type:immersion"])
+    orders = r.arrange.orders([s.dong for s in p.spots], p.axes)
+    user = r.build_prompt("전주시", p, orders)
+    assert "몰입형" not in user
+    assert "혼자 집중해서 일하기" in user
 
 
 def test_answer_rejects_sigungu_superlative():
@@ -233,12 +352,11 @@ def test_answer_rejects_sigungu_superlative():
         return schema(
             sentences=[
                 {"text": "전주시에서 가장 조용한 곳은 효자2동이에요.", "axis": "quiet"},
-                {"text": "저녁 활기는 여의동이 앞서요.", "axis": "evening"},
-                {"text": "또래가 많은 곳은 교1동이에요.", "axis": "peer"},
+                {"text": "또래와 어울리기엔 교1동이 좋아요.", "axis": "peer"},
             ]
         )
 
     out, source, _ = r.answer(generate, REGION_RAW, "find_quiet", "조용한 동네 어디야?")
-    assert [s["source"] for s in out] == ["rule", "llm", "llm"]
+    assert [s["source"] for s in out] == ["rule", "llm"]
     assert out[0]["text"] == "조용함을 원한다면 효자2동이 맞아요."
     assert source == "mixed"
