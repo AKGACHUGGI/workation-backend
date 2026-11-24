@@ -215,15 +215,15 @@ def compose(
     user: str,
     dongs: list[Dong],
     orders: list[Order],
-    extra: Callable[[str], list[str]] | None = None,
+    extra: Callable[[dict], list[str]] | None = None,
     *,
     system: str = SYSTEM,
     rule: Callable[[Order], str] = rule_sentence,
     ties_ok: bool = False,
 ) -> tuple[list[dict], str]:
     """생성 → 검사 → 실패한 문장 · 빠진 축은 규칙 문장. 축 순서대로. (문장들, source)
-    extra · system · rule · ties_ok 는 부르는 쪽 전용 검사 · 프롬프트 · 규칙 문장 · 동점 허용.
-    시군구 답이 쓴다."""
+    extra(문장 {text, axis}) · system · rule · ties_ok 는 부르는 쪽 전용 검사 · 프롬프트 ·
+    규칙 문장 · 동점 허용. 시군구 답이 쓴다."""
     if not orders:
         return [], "rule"
     by_axis = {o.axis: o for o in orders}
@@ -240,7 +240,7 @@ def compose(
     seen: set[str] = set()
     for s in items:
         found = problems(s, by_axis, names, seen, ties_ok=ties_ok)
-        found += extra(s["text"]) if extra else []
+        found += extra(s) if extra else []
         seen.add(s["axis"])
         if s["axis"] in done:
             continue

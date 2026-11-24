@@ -255,13 +255,13 @@ EVERY = ["효자2동", "여의동", "교1동", "송천1동"]
         ("전주에서 제일 조용한 곳은 효자2동이 좋아요.", ["시군구 이름", "최상급"]),
         ("저녁 활기는 전주시의 여의동이 나아요.", ["시군구 이름"]),
         ("몰입형으로 일하려면 효자2동이 맞아요.", ["유형 이름"]),
-        ("또래가 많은 곳은 교1동이에요.", ["끝"]),
-        ("저녁 활기를 원한다면 여의동이 알맞을 수 있어요.", ["완곡"]),
-        ("조용한 곳은 효자2동이 좋아요, 참고용이에요.", ["완곡"]),
-        ("저녁 활기가 필요하다면 여의동을 생각해 보세요.", ["완곡"]),
-        ("데이터에 따르면 효자2동이 조용해서 좋아요.", ["메타카피"]),
-        ("조용한 곳을 알려드릴게요, 효자2동이 좋아요.", ["메타카피"]),
-        ("분석 결과 효자2동이 조용해서 좋아요.", ["메타카피"]),
+        ("관광지가 많은 곳을 원한다면 효자2동이 맞아요.", ["넓힘"]),
+        ("관광 명소를 즐기고 싶다면 효자2동이 맞아요.", ["넓힘"]),
+        ("생활권이 잘 갖춰져 있다면 효자2동이 맞아요.", ["넓힘"]),
+        ("편의시설이 필요하다면 효자2동이 맞아요.", ["넓힘"]),
+        ("생활권 분위기의 중심지를 찾는다면 효자2동이 맞아요.", ["넓힘"]),
+        ("여행하듯 지내고 싶다면 효자2동이 맞아요.", []),
+        ("현지 생활처럼 지내고 싶다면 효자2동이 맞아요.", []),
     ],
 )
 def test_region_problems(text, expected):
@@ -269,13 +269,55 @@ def test_region_problems(text, expected):
     assert [p.split(":")[0] for p in got] == expected
 
 
+@pytest.mark.parametrize(
+    ("text", "axis", "expected"),
+    [
+        ("조용히 일하고 싶다면 효자2동이 맞아요.", "quiet", []),
+        ("조용하면서 바다가 가까운 곳을 찾는다면 효자2동이 나아요.", "coast", ["조용"]),
+        ("조용하게 혼자 있고 싶으면 효자2동이 맞아요.", "quiet", ["혼자"]),
+        ("저녁에 활기를 찾는다면 여의동 쪽이 나아요.", "evening", []),
+        ("또래가 많고 밤에도 활기찬 곳은 교1동이 좋아요.", "peer", ["밤", "활기"]),
+        ("혼자 집중해서 일하고 싶다면 효자2동이 맞아요.", "type:immersion", []),
+        ("현지 주민처럼 지내고 싶다면 효자2동이 맞아요.", "type:local", []),
+        ("현지 주민처럼 지내고 싶다면 효자2동이 맞아요.", "life", []),
+        ("여행하듯 지내고 싶다면 효자2동이 맞아요.", "tourist", []),
+        ("바다 가까이 머물고 싶다면 여의동이 좋아요.", "coast", []),
+    ],
+)
+def test_mixed_axes(text, axis, expected):
+    got = r.mixed(text, axis)
+    assert got == ([f"섞임: {expected}"] if expected else [])
+
+
+def test_system_has_axis_phrases_and_tone_rules():
+    for phrase in ("현지 생활처럼 지내고 싶다면", "여행하듯 지내고 싶다면", "비슷한 나이대"):
+        assert phrase in r.SYSTEM
+    assert all(rule in r.SYSTEM for rule in r.compare.TONE_RULES)
+
+
 def test_rule_sentences_have_no_meta_or_hedge():
     """규칙 대체 문장도 같은 검사를 통과한다."""
     spots = r.spots_of(REGION_RAW)
     dongs = [s.dong for s in spots]
-    for o in r.arrange.orders(dongs, ["quiet", "peer", "evening", "coast", *r.TYPE_AXES]):
-        found = r.problems(r.rule_sentence(o), "전주시", EVERY, EVERY)
-        assert [p for p in found if not p.startswith("이름")] == []
+    axes = ["quiet", "peer", "evening", "coast", "life", "tourist", *r.TYPE_AXES]
+    for o in r.arrange.orders(dongs, axes):
+        text = r.rule_sentence(o)
+        found = r.problems(text, "전주시", EVERY, EVERY) + r.compare.tone(text, EVERY)
+        assert [p for p in found if not p.startswith("이름")] == [], text
+        assert r.mixed(text, o.axis) == [], text
+
+
+def test_answer_replaces_mixed_axis_sentence():
+    def generate(system, user, schema):
+        return schema(
+            sentences=[
+                {"text": "조용하면서 또래가 많은 곳을 찾는다면 효자2동이 맞아요.", "axis": "quiet"},
+                {"text": "또래가 많은 곳을 찾는다면 교1동이 좋아요.", "axis": "peer"},
+            ]
+        )
+
+    out, _, _ = r.answer(generate, REGION_RAW, "find_quiet", "조용한 동네 어디야?")
+    assert [s["source"] for s in out] == ["rule", "llm"]
 
 
 def coastal(km):

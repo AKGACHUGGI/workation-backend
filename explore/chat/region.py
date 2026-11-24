@@ -19,7 +19,7 @@ from explore.chat.arrange import AXIS_KO, GRADE_AXES, INLAND, Order
 
 MAX_SPOTS = 3
 # 시군구 답 전용 검사 · 프롬프트를 고치면 올린다 (캐시 키에 compare.PROMPT_VERSION 과 함께 들어간다)
-PROMPT_VERSION = "r2"
+PROMPT_VERSION = "r3"
 SUPERLATIVE = ("가장", "제일", "1위", "최고")
 TYPE_AXES = [f"type:{t}" for t in derive.TYPES]
 TYPE_BY_KO = {ko: key for key, ko in derive.TYPE_KO.items()}
@@ -31,12 +31,21 @@ PLAIN = {
 }
 STRENGTHS = ("quiet", "evening", "peer", "coast")  # 조건 외 강점 축 (문장 2·3번째)
 OPPOSITE = {"quiet": "evening", "evening": "quiet"}  # 조건과 반대 방향이라 부가 문장으로 안 쓰는 축
-# 답 · 자료를 설명하는 말(메타카피)과 면책 · 완곡(컴플라이언스 문체)
-META = ("알려드", "알려 드", "에 따르면", "분석", "추천", "아래는", "다음은")
-HEDGE = (
-    "참고", "다를 수", "일 수 있", "을 수 있", "수도 있", "개인차", "확인해", "보세요",
-)  # fmt: skip
-ENDING = ("이에요", "예요", "입니다")
+# 생활권 · 관광지는 동의 성격이다. 시설 · 개수로 넓힌 말은 근거가 없다
+WIDE = ("관광지가 많", "관광지 많", "명소", "갖춰", "잘 갖춘", "시설", "중심")
+# 축마다 그 축을 말하는 낱말. 한 문장에 다른 축 낱말이 나오면 섞인 것이다.
+# 생활권과 로컬살이는 같은 '현지' 이야기라 한 묶음으로 본다
+AXIS_WORDS = {
+    "quiet": ("조용", "한적", "한산"),
+    "evening": ("저녁", "밤", "활기", "북적"),
+    "peer": ("또래", "젊은", "나이대"),
+    "coast": ("바다", "바닷가", "해변", "해안"),
+    "local": ("생활권", "현지", "주민", "로컬"),
+    "tourist": ("관광", "여행"),
+    "type:immersion": ("혼자", "집중"),
+    "type:networking": ("교류", "사람들과"),
+}
+WORD_GROUP = {"life": "local", "type:local": "local"}
 # 질문 속 조건 낱말 → 축. 위에서부터가 아니라 질문에 나온 순서로 고른다
 KEYWORDS = (
     ("quiet", ("조용", "한적", "한산")),
@@ -218,21 +227,26 @@ SYSTEM = "\n".join(
     [
         "너는 워케이션 지도 서비스의 동네 찾기 안내자다. 사용자가 준 축별 순서만 근거로 쓴다.",
         "- 문장마다 상황 하나와 그 상황에 맞는 동네 하나를 고른다. 한 문장에 동네 이름은 하나만.",
-        "- 문장마다 문형을 다르게 쓴다. 예: '조용히 일하고 싶다면 ○○이 맞아요', "
-        "'저녁에 활기를 찾는다면 ○○ 쪽이 나아요', '또래와 어울리기엔 ○○이 좋아요'. "
-        "예시를 그대로 베끼지 말고 상황에 맞게 바꿔 쓴다.",
-        "- 문장 끝은 '좋아요', '맞아요', '나아요' 같은 서술어로 맺는다. "
-        "'○○동이에요'처럼 동네 이름으로 끝내지 않는다.",
+        "- 축마다 이런 문형으로 쓰고, 문장끼리 끝맺음은 서로 다르게 한다. "
+        "그대로 베끼지 말고 상황에 맞게 바꿔 쓴다.",
+        "  quiet: '조용히 일하고 싶다면 ○○이 맞아요'",
+        "  evening: '저녁에 활기를 찾는다면 ○○ 쪽이 나아요'",
+        "  peer: '또래가 많은 곳을 찾는다면 ○○이 좋아요', "
+        "'비슷한 나이대가 많은 곳을 원한다면 ○○이 맞아요'",
+        "  coast: '바다 가까이 머물고 싶다면 ○○이 좋아요'",
+        "  life: '현지 생활처럼 지내고 싶다면 ○○이 맞아요'",
+        "  tourist: '여행하듯 지내고 싶다면 ○○이 맞아요'",
+        "  유형: '혼자 집중해서 일하고 싶다면', '사람들과 어울리며 일하고 싶다면', "
+        "'현지 주민처럼 지내고 싶다면'",
+        "- 생활권 · 관광지는 그 동네의 성격이다. "
+        "'관광지가 많은', '생활권이 잘 갖춰진'처럼 시설 · 개수로 넓히지 않는다.",
+        "- 한 문장엔 그 축 이야기만 쓴다. 바다 축 문장에 '조용하면서'처럼 다른 축을 섞지 않는다.",
+        *compare.TONE_RULES,
         "- 시군구 이름은 쓰지 않는다. '○○군의 ○○읍'처럼 붙이지 않는다.",
         "- '반면', '대신', '하지만'으로 문장을 시작하지 않는다.",
-        "- '가장', '제일', '최고', '1위' 같은 최상급을 쓰지 않는다. "
-        "생활권 · 관광지 분위기는 그런 성격이 있다는 것만 말한다.",
+        "- '가장', '제일', '최고', '1위' 같은 최상급을 쓰지 않는다.",
         "- '몰입형', '네트워킹형', '로컬살이형' 같은 유형 이름을 쓰지 않고 "
         "'혼자 집중해서 일하기'처럼 풀어 쓴다.",
-        "- 답이나 자료를 설명하는 말을 쓰지 않는다. "
-        "예: '알려드릴게요', '데이터에 따르면', '분석 결과', '추천드려요', '아래는'.",
-        "- 면책 · 완곡 표현을 쓰지 않는다. 예: '참고용이에요', '다를 수 있어요', "
-        "'~일 수 있어요', '개인차가 있어요', '확인해 보세요'.",
         "- 존댓말 해요체, 문장마다 60자 이내.",
         "- 문장마다 다른 axis 를 쓰고, 그 축 순서의 맨 앞 동네 이름 하나만 쓴다. "
         "맨 앞이 '='로 같으면 그중 하나를 쓴다.",
@@ -342,9 +356,9 @@ def profile(raw: dict, spots: list[Spot]) -> list[dict]:
 
 
 def problems(text: str, sgg: str, cands: list[str], every: list[str]) -> list[str]:
-    """시군구 답 생성 문장 추가 검사 (compare.problems 다음). 후보끼리만 견준 순서라
-    최상급 같은 범위 주장과 후보 아닌 동 이름은 근거가 없다. 말투(시군구 이름 반복 ·
-    유형 이름 · 동 이름으로 끝맺기 · 메타카피 · 면책 · 완곡)도 본다."""
+    """시군구 답 생성 문장 추가 검사 (compare.problems 다음, 말투는 거기서 본다).
+    후보끼리만 견준 순서라 최상급 같은 범위 주장과 후보 아닌 동 이름은 근거가 없다.
+    시군구 이름 반복 · 유형 이름 · 생활권 · 관광지를 시설 · 개수로 넓힌 말도 본다."""
     out = []
     others = [n for n in dict.fromkeys(compare.names_in(text, every)) if n not in cands]
     if others:
@@ -360,16 +374,19 @@ def problems(text: str, sgg: str, cands: list[str], every: list[str]) -> list[st
     types = [ko for ko in derive.TYPE_KO.values() if ko in text]
     if types:
         out.append(f"유형 이름: {types}")
-    body = compare.END.sub("", plain.rstrip())
-    if any(body.endswith(f"\0{e}") for e in ENDING):
-        out.append("끝: 동 이름으로 끝남")
-    meta = [w for w in META if w in text]
-    if meta:
-        out.append(f"메타카피: {meta}")
-    hedge = [w for w in HEDGE if w in text]
-    if hedge:
-        out.append(f"완곡: {hedge}")
+    wide = [w for w in WIDE if w in plain]
+    if wide:
+        out.append(f"넓힘: {wide}")
     return out
+
+
+def mixed(text: str, axis: str, names: tuple[str, ...] | list[str] = ()) -> list[str]:
+    """한 축 문장에 다른 축 낱말이 섞였는지. 동 이름 속 낱말('해안면')은 보지 않는다."""
+    for name in sorted(names, key=len, reverse=True):
+        text = text.replace(name, "\0")
+    own = WORD_GROUP.get(axis, axis)
+    hit = [w for g, words in AXIS_WORDS.items() if g != own for w in words if w in text]
+    return [f"섞임: {hit}"] if hit else []
 
 
 def answer(
@@ -397,7 +414,10 @@ def answer(
     if hit is None:
         cands = [d.name for d in dongs]
         every = [d["name"] for d in raw["dongs"]]
-        check = lambda text: problems(text, sgg, cands, every)  # noqa: E731
+
+        def check(s: dict) -> list[str]:
+            return [*problems(s["text"], sgg, cands, every), *mixed(s["text"], s["axis"], every)]
+
         hit = compare.compose(
             generate, user, dongs, asked, check, system=SYSTEM, rule=rule_sentence, ties_ok=True
         )
