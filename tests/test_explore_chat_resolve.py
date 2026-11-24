@@ -1,5 +1,7 @@
 """질문 속 동 이름 → 비교 동네 (스펙 §4)."""
 
+import pytest
+
 from explore.chat import resolve as r
 from explore.chat.resolve import resolve_region
 from tests.explore_chat_samples import GYO, HYOJA, NAMES, YEOUI
@@ -106,3 +108,22 @@ def test_region_other_sigungu_guides():
     assert r.guide is not None and "전주시에서는" in r.guide
     r = resolve_region("강릉에서 조용한 데는?", JJ, [], NAMES, False)
     assert r.guide is not None
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "조용한 곳?",
+        "바다 가까운 곳이 있어?",
+        "조용한 데?",
+        "저녁에 활기 있는 데는?",
+        "한적한 곳 알려 줘",
+    ],
+)
+def test_region_find_words_end_dong_follow(question):
+    assert resolve_region(question, JJ, [HYOJA], NAMES, True).dongs == []
+
+
+@pytest.mark.parametrize("question", ["저녁엔?", "곳곳이 붐벼?", "조용한데 저녁엔?"])
+def test_region_not_find_words_keep_dongs(question):
+    assert resolve_region(question, JJ, [HYOJA], NAMES, True).dongs == [HYOJA]

@@ -17,8 +17,9 @@ SUFFIX = ("동", "읍", "면")
 ASK_DONG = "시군구 말고 동네 이름으로 물어봐 주세요."
 TOO_MANY = "한 번에 세 동네까지 비교할 수 있어서 앞의 세 곳만 볼게요."
 SAME_SGG_ONLY = "지금은 같은 시군구 안의 동네끼리만 비교할 수 있어요."
-# 시군구 채팅에서 동 대화 중이어도 '찾기'로 보는 말 (시군구 채팅 스펙 §4)
-FIND_WORDS = ("동네", "어디", "어느", "데는", "곳은", "곳 ")
+# 시군구 채팅에서 동 대화 중이어도 '찾기'로 보는 말 (시군구 채팅 스펙 §4).
+# '곳'·'데'는 조사 앞이나 질문 끝에서만 ('곳곳' 제외). '데'는 띄어 쓴 것만 ('조용한데' 이음말 제외)
+FIND_WORDS = re.compile(r"동네|어디|어느|((?<!곳)곳|\s데)(은|는|이|가|도|\s|\?|$)")
 
 
 @dataclass(frozen=True)
@@ -122,7 +123,7 @@ def resolve_region(
             return Resolved(prev, guide=_same_sgg_guide(anchor, names))
         if prev and any(w in question for w in TOGETHER):
             return Resolved(prev[:MAX_DONGS], named=True)
-        if follow and prev and not any(w in question for w in FIND_WORDS):
+        if follow and prev and not FIND_WORDS.search(question):
             return Resolved(prev)
         return Resolved([])
     base = prev if any(w in question for w in TOGETHER) else []
