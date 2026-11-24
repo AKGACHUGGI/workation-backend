@@ -222,3 +222,52 @@ def test_fix_contrast_keeps_connector_only_after_other_dong():
         "또래가 많은 곳은 효자2동이에요.",
         "대신 저녁 활기는 여의동이 나아요.",
     ]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("조용히 일하고 싶다면 효자2동이 맞아요.", []),
+        ("또래가 많은 곳을 찾는다면 효자2동이 좋아요.", []),
+        ("데이터에 따르면 효자2동이 조용해서 좋아요.", ["메타카피"]),
+        ("조용한 곳을 알려드릴게요, 효자2동이 좋아요.", ["메타카피"]),
+        ("분석 결과 효자2동이 조용해서 좋아요.", ["메타카피"]),
+        ("저녁 활기를 원한다면 여의동이 알맞을 수 있어요.", ["완곡"]),
+        ("조용한 곳은 효자2동이 좋아요, 참고용이에요.", ["완곡"]),
+        ("저녁 활기가 필요하다면 여의동을 생각해 보세요.", ["완곡"]),
+        ("또래 친구들이 많은 곳을 원한다면 효자2동이 좋아요.", ["어색"]),
+        ("생활권 분위기가 좋으려면 효자2동이 맞아요.", ["어색"]),
+        ("생활권 분위기가 익숙하게 느껴진다면 효자2동이 맞아요.", ["어색"]),
+        ("또래가 많은 곳을 원한다면 효자2동이 괜찮아요.", ["어색"]),
+        ("또래가 많은 곳은 효자2동이에요.", ["끝"]),
+        ("또래가 많은 곳을 원한다면 효자2동이 있어요.", ["끝"]),
+    ],
+)
+def test_tone(text, expected):
+    got = c.tone(text, NAMES)
+    assert [p.split(":")[0] for p in got] == expected
+
+
+def test_problems_include_tone():
+    s = {**GOOD, "text": "데이터에 따르면 효자2동이 조용해서 맞아요."}
+    assert any(p.startswith("메타카피") for p in c.problems(s, BY_AXIS, NAMES, set()))
+
+
+def test_system_bans_meta_and_hedge():
+    assert "알려드릴게요" in c.SYSTEM and "다를 수 있어요" in c.SYSTEM
+    examples = c.SYSTEM.split("예:")[1].split("\n")[0]
+    assert "이에요'" not in examples  # 문형 예시가 동 이름으로 끝나지 않는다
+
+
+def test_rule_sentences_have_no_banned_tone():
+    """규칙 문장(축 · 달 · 닮음 · 공통점 · 연결)에도 메타카피 · 완곡 · 어색한 말이 없다."""
+    raws = [RAWS[HYOJA], RAWS[YEOUI]]
+    vecs = {HYOJA: ((0.1, 0.1, 0.1, 0.5), False), YEOUI: ((0.2, 0.1, 0.1, 0.5), False)}
+    texts = [c.rule_sentence(o) for o in a.orders([H, Y, G], list(a.AXIS_KO))]
+    texts += [s["text"] for s in c.months_sentences(raws)]
+    sim = c.similarity_sentences(raws, a.common_items(raws), vecs, a.pair_distances(vecs))
+    texts += [s["text"] for s in sim]
+    texts.append(c.link_sentence(a.Link("효자2동", "여의동", 2))["text"])
+    for text in texts:
+        found = [p for p in c.tone(text, NAMES) if not p.startswith("끝")]
+        assert found == [], text
