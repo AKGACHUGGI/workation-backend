@@ -55,3 +55,23 @@ def test_months_both():
     quiet_none = {**REGION_RAW, "months": [[m, 80.0, False] for m in range(1, 13)]}
     assert both.months_both(quiet_none, [2, 3])[0]["text"] == "전주시는 2·3월이 가기 좋은 달이에요."
     assert both.months_both(quiet_none, [])[0]["text"] == ask.NO_DATA
+
+
+FLAT = {
+    "weekday": {"peakHour": 11, "lowHour": 18, "lowValue": 90, "flat": True},
+    "weekend": {"peakHour": 12, "lowHour": 9, "lowValue": 88, "flat": True},
+}
+
+
+def test_hours_both_flat_does_not_name_quiet_hour():
+    out = both.hours_both([(RAWS[HYOJA], FLAT)], "weekday", "12월")
+    assert out[0]["text"] == (
+        "효자2동은 평일 차량이 12시에 가장 많고, "
+        "걸어 다니는 사람은 12월 기준 11시에 가장 붐비고, 낮(9~18시)엔 내내 비슷하게 붐벼요."
+    )
+    rec = {**RAWS[HYOJA]["rec"], "hours": []}
+    out = both.hours_both([({**RAWS[HYOJA], "rec": rec}, FLAT)], "weekend", "12월")
+    assert out[0]["text"] == (
+        "효자2동은 주말에 걸어 다니는 사람이 12월 기준 12시에 가장 붐비고, "
+        "낮(9~18시)엔 내내 비슷하게 붐벼요."
+    )

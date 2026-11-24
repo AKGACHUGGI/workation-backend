@@ -21,6 +21,13 @@ def _walk_evidence(label: str) -> str:
     return f"보행: {label} · 24시간 붐빔 곡선과 같은 값"
 
 
+def _walk(w: dict) -> str:
+    """보행 붐빔 · 한산 마디. 낮(9~18시) 차이가 작으면(flat) 한산 시각을 말하지 않는다."""
+    if w.get("flat"):
+        return f"{w['peakHour']}시에 가장 붐비고, 낮(9~18시)엔 내내 비슷하게 붐벼요."
+    return f"{w['peakHour']}시에 가장 붐비고 {w['lowHour']}시에 가장 한산해요."
+
+
 def hours_both(items: list[tuple[dict, dict | None]], day: str, label: str | None) -> list[dict]:
     """동마다 한 문장. label 이 없으면(요청에 달이 없음) 차량 기준만."""
     ko = DAY_KO[day]
@@ -32,17 +39,14 @@ def hours_both(items: list[tuple[dict, dict | None]], day: str, label: str | Non
         w = walk.get(day) if walk is not None and label else None
         if car is not None and w is not None:
             text = (
-                f"{name} {ko} 차량이 {car}시에 가장 많고, 걸어 다니는 사람은 {label} 기준 "
-                f"{w['peakHour']}시에 가장 붐비고 {w['lowHour']}시에 가장 한산해요."
+                f"{name} {ko} 차량이 {car}시에 가장 많고, "
+                f"걸어 다니는 사람은 {label} 기준 {_walk(w)}"
             )
             out.append(_rule(text, f"{CAR} / {_walk_evidence(label)}"))
         elif car is not None:
             out.append(_rule(f"{name} {ko} 차량이 {car}시에 가장 많아요.", CAR))
         elif w is not None:
-            text = (
-                f"{name} {ko}에 걸어 다니는 사람이 {label} 기준 "
-                f"{w['peakHour']}시에 가장 붐비고 {w['lowHour']}시에 가장 한산해요."
-            )
+            text = f"{name} {ko}에 걸어 다니는 사람이 {label} 기준 {_walk(w)}"
             out.append(_rule(text, _walk_evidence(label)))
     return out or [_rule(ask.NO_DATA)]
 
