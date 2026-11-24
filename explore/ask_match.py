@@ -1,6 +1,6 @@
-"""질문 → 의도 (스펙 §4-1). 질문 임베딩 → ask_vocab 최근접, 못 쓰면 2글자 조각 문자열 매칭.
+"""질문 → 의도 (스펙 §4-1). 질문 임베딩 → 사전 파일(explore.vocab) 최근접, 못 쓰면 2글자 조각 매칭.
 
-임베딩으로 찾은 결과만 30일 캐시한다. 키에 사전 버전이 들어 있어 표현을 고치면 새로 찾는다.
+임베딩으로 찾은 결과만 30일 캐시한다. 키에 사전 파일 해시가 들어 있어 표현을 고치면 새로 찾는다.
 문자열 매칭 결과는 캐시하지 않는다(CLOVA 가 잠깐 안 될 때 덜 정확한 답이 30일 남지 않게).
 """
 
@@ -10,10 +10,9 @@ import hashlib
 import logging
 
 from django.core.cache import cache
-from django.db import DatabaseError
 
 from core import clova
-from explore import ask, sources
+from explore import ask, vocab
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +41,7 @@ def _allowed(scope: str) -> tuple[str, ...]:
 
 
 def _by_text(norm: str, allowed: tuple[str, ...]) -> tuple[list[str], float]:
-    try:
-        vocab = [v for v in sources.load_vocab() if v[0] in allowed]
-        ranked = match_text(norm, vocab)
-    except DatabaseError as ex:
-        logger.warning("ask_vocab 조회 실패 → 모르는 질문: %s", ex)
-        return ["unknown_other"], 0.0
+    ranked = match_text(norm, [v for v in vocab.entries() if v[0] in allowed])
     return ask.pick_intents(ranked), ranked[0][1] if ranked else 0.0
 
 
@@ -56,25 +50,16 @@ def find_intents(question: str, scope: str = "dong") -> tuple[list[str], float]:
     scope: dong(v7 사전) · region(시군구 의도 + 시간대 + 모르는 질문)."""
     norm = ask.normalize(question)
     allowed = _allowed(scope)
-    try:
-        version = sources.vocab_version()
-    except DatabaseError as ex:
-        logger.warning("ask_vocab 버전 조회 실패: %s", ex)
-        return _by_text(norm, allowed)
-    key = f"explore:ask:q:{scope}:{hashlib.sha1(norm.encode()).hexdigest()}:{version}"
+    key = f"explore:ask:q:{scope}:{hashlib.sha1(norm.encode()).hexdigest()}:{vocab.version()}"
     hit = cache.get(key)
     if hit is not None:
         return hit[0], hit[1]
     try:
         ranked = [
-            (i, sim)
-            for i, _, sim in sources.nearest_vocab(clova.embed(question), TOP_K, intents=allowed)
+            (i, sim) for i, _, sim in vocab.nearest(clova.embed(question), TOP_K, intents=allowed)
         ]
     except clova.ClovaError as ex:
         logger.warning("질문 임베딩 실패 → 문자열 매칭: %s", ex)
-        return _by_text(norm, allowed)
-    except DatabaseError as ex:
-        logger.warning("ask_vocab 최근접 조회 실패 → 문자열 매칭: %s", ex)
         return _by_text(norm, allowed)
     intents, top = ask.pick_intents(ranked), ranked[0][1] if ranked else 0.0
     cache.set(key, [intents, top], TTL)
