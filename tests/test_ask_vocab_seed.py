@@ -1,8 +1,8 @@
 """db/seed/ask_vocab.csv 와 db/tools/build_embeddings.py ask 모드. CLOVA 대신 함수를 바꿔 끼운다.
 db/tools 는 패키지가 아니라 파일 경로로 불러온다 (표준 라이브러리만 쓰는 스크립트)."""
 
-import csv
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -85,21 +85,42 @@ def test_read_ask_rejects_bad_csv(tool, tmp_path):
         tool.read_ask(duplicate)
 
 
-def test_ask_embeds_only_new_phrases(tool, tmp_path, monkeypatch):
+def test_ask_writes_json_and_reuses_embeddings(tool, tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(tool, "load_key", lambda: "test-key")
     monkeypatch.setattr(tool, "embed", lambda key, text: calls.append(text) or [0.5] * 1024)
     items = tool.read_ask(SEED)
-    have = tmp_path / "have.csv"
-    with have.open("w", encoding="utf-8", newline="") as f:
-        csv.writer(f).writerows([["phrase"], *([p] for _, p, _ in items[1:])])
+    out = tmp_path / "ask_vocab.json"
+    old = [
+        {"intent": i, "phrase": p, "canonical": c, "embedding": [0.25] * 1024}
+        for i, p, c in items[1:]
+    ]
+    old.append(
+        {"intent": "quiet", "phrase": "빠진 표현", "canonical": False, "embedding": [0.1] * 1024}
+    )
+    out.write_text(json.dumps({"model": tool.MODEL, "items": old}), encoding="utf-8")
 
-    tool.ask(SEED, str(tmp_path / "out"), have)
+    tool.ask(SEED, out)
 
     assert calls == [items[0][1]]  # 첫 표현만 임베딩이 없다
-    sql = "".join(f.read_text() for f in sorted(tmp_path.glob("out_*.sql")))
-    assert sql.index("UPDATE ask_vocab SET canonical = false") < sql.index("INSERT INTO ask_vocab")
-    assert "DELETE FROM ask_vocab WHERE phrase NOT IN (" in sql
-    assert sql.count("INSERT INTO ask_vocab") == len(items)
-    assert sql.count("embedding = EXCLUDED.embedding") == 1
-    assert "'생활권이야, 관광지야?', true" in sql
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["model"] == "clova-embedding-v2"
+    assert [(r["intent"], r["phrase"], r["canonical"]) for r in data["items"]] == items
+    assert data["items"][0]["embedding"] == [0.5] * 1024
+    assert data["items"][1]["embedding"] == [0.25] * 1024
+
+
+def test_ask_embeds_all_when_model_differs(tool, tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(tool, "load_key", lambda: "test-key")
+    monkeypatch.setattr(tool, "embed", lambda key, text: calls.append(text) or [0.5] * 1024)
+    items = tool.read_ask(SEED)
+    out = tmp_path / "ask_vocab.json"
+    old = [
+        {"intent": i, "phrase": p, "canonical": c, "embedding": [0.25] * 1024} for i, p, c in items
+    ]
+    out.write_text(json.dumps({"model": "other-model", "items": old}), encoding="utf-8")
+
+    tool.ask(SEED, out)
+
+    assert len(calls) == len(items)
