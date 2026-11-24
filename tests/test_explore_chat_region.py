@@ -213,3 +213,31 @@ def test_grade_ties_follow_sigungu_rank():
     ]
     spots = r.spots_of({**REGION_RAW, "dongs": dongs})
     assert names(r.ranked(spots, "quiet")) == ["효자2동", "여의동", "송천1동", "교1동"]
+
+
+def test_region_problems():
+    every = ["효자2동", "여의동", "교1동", "송천1동"]
+    cands = every[:3]
+    assert r.problems("전주에서 제일 조용한 곳은 효자2동이에요.", "전주시", cands, every) == [
+        "범위: 시군구 최상급"
+    ]
+    assert r.problems("효자2동은 송천1동보다 조용해요.", "전주시", cands, every) == [
+        "이름: 후보 아닌 동 ['송천1동']"
+    ]
+    assert r.problems("조용히 일하려면 효자2동이 가장 나아요.", "전주시", cands, every) == []
+
+
+def test_answer_rejects_sigungu_superlative():
+    def generate(system, user, schema):
+        return schema(
+            sentences=[
+                {"text": "전주시에서 가장 조용한 곳은 효자2동이에요.", "axis": "quiet"},
+                {"text": "저녁 활기는 여의동이 앞서요.", "axis": "evening"},
+                {"text": "또래가 많은 곳은 교1동이에요.", "axis": "peer"},
+            ]
+        )
+
+    out, source, _ = r.answer(generate, REGION_RAW, "find_quiet", "조용한 동네 어디야?")
+    assert [s["source"] for s in out] == ["rule", "llm", "llm"]
+    assert out[0]["text"] == "조용함을 원한다면 효자2동이 맞아요."
+    assert source == "mixed"

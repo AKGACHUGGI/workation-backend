@@ -18,6 +18,9 @@ from explore.chat import arrange, compare
 from explore.chat.arrange import AXIS_KO, GRADE_AXES, INLAND, Order
 
 MAX_SPOTS = 3
+# 시군구 답 전용 검사 · 프롬프트를 고치면 올린다 (캐시 키에 compare.PROMPT_VERSION 과 함께 들어간다)
+PROMPT_VERSION = "r1"
+SUPERLATIVE = ("가장", "제일", "1위", "최고")
 TYPE_AXES = [f"type:{t}" for t in derive.TYPES]
 TYPE_BY_KO = {ko: key for key, ko in derive.TYPE_KO.items()}
 STRENGTHS = ("quiet", "evening", "peer", "coast")  # 조건 외 강점 축 (문장 2·3번째)
@@ -260,6 +263,19 @@ def profile(raw: dict, spots: list[Spot]) -> list[dict]:
     return [_rule(out[0], ev), *(_rule(t) for t in out[1:])]
 
 
+def problems(text: str, sgg: str, cands: list[str], every: list[str]) -> list[str]:
+    """시군구 답 생성 문장 추가 검사 (compare.problems 다음). 후보끼리만 견준 순서라
+    시군구 전체 1등 같은 범위 주장과 후보 아닌 동 이름은 근거가 없다."""
+    out = []
+    stem = sgg[:-1] if len(sgg) >= 3 else sgg
+    if stem in text and any(w in text for w in SUPERLATIVE):
+        out.append("범위: 시군구 최상급")
+    others = [n for n in dict.fromkeys(compare.names_in(text, every)) if n not in cands]
+    if others:
+        out.append(f"이름: 후보 아닌 동 {others}")
+    return out
+
+
 def answer(
     generate: compare.Generate | None, raw: dict, intent: str, question: str
 ) -> tuple[list[dict], str, list[str]]:
@@ -278,10 +294,13 @@ def answer(
     dongs = [s.dong for s in p.spots]
     orders = arrange.orders(dongs, p.axes)
     user = build_prompt(sgg, p, orders)
-    key = compare.cache_key(codes, intent, p.axes, user)
+    key = f"{compare.cache_key(codes, intent, p.axes, user)}:{PROMPT_VERSION}"
     hit = cache.get(key)
     if hit is None:
-        hit = compare.compose(generate, user, dongs, orders)
+        cands = [d.name for d in dongs]
+        every = [d["name"] for d in raw["dongs"]]
+        check = lambda text: problems(text, sgg, cands, every)  # noqa: E731
+        hit = compare.compose(generate, user, dongs, orders, check)
         if hit[1] != "rule":  # HCX 가 잠깐 안 될 때의 규칙 답은 1일 남기지 않는다
             cache.set(key, hit, compare.CACHE_TTL)
     sentences, source = hit

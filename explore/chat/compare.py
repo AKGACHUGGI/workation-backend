@@ -167,9 +167,14 @@ def _item(text: str, o: Order, by_name: dict[str, Dong], source: str) -> dict:
 
 
 def compose(
-    generate: Generate | None, user: str, dongs: list[Dong], orders: list[Order]
+    generate: Generate | None,
+    user: str,
+    dongs: list[Dong],
+    orders: list[Order],
+    extra: Callable[[str], list[str]] | None = None,
 ) -> tuple[list[dict], str]:
-    """생성 → 검사 → 실패한 문장 · 빠진 축은 규칙 문장. 축 순서대로. (문장들, source)"""
+    """생성 → 검사 → 실패한 문장 · 빠진 축은 규칙 문장. 축 순서대로. (문장들, source)
+    extra 는 부르는 쪽 전용 검사 (문장 → 문제 목록). 시군구 답이 쓴다."""
     if not orders:
         return [], "rule"
     by_axis = {o.axis: o for o in orders}
@@ -185,7 +190,7 @@ def compose(
     done: dict[str, dict] = {}
     seen: set[str] = set()
     for s in items:
-        found = problems(s, by_axis, names, seen)
+        found = problems(s, by_axis, names, seen) + (extra(s["text"]) if extra else [])
         seen.add(s["axis"])
         if s["axis"] in done:
             continue
