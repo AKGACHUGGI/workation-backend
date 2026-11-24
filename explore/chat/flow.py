@@ -98,10 +98,13 @@ def build(deps: Deps) -> StateGraph:
         else:
             panel = next(n for n in names if n.code == s["panel"])  # 뷰가 미리 확인한다
             r = resolve(s["question"], panel, s.get("dongs") or [], names)
+        scope = "dong" if r.dongs else "region"
+        if r.guide:  # 안내 턴은 직전 답의 성격(시군구 · 동)을 바꾸지 않는다
+            scope = s.get("scope") or scope
         return {
             "dongs": r.dongs,
             "named": r.named,
-            "scope": "dong" if r.dongs else "region",
+            "scope": scope,
             "guide": r.guide,
             "note": r.note,
             "sentences": [],

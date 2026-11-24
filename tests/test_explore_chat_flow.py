@@ -296,3 +296,13 @@ def test_other_sigungu_starts_new_region_conversation():
     cid, _ = ask_region(graph, "조용한 동네 어디야?")
     cid2, _ = ask_region(graph, "조용한 동네 어디야?", cid, sgg="51150")
     assert cid2 != cid
+
+
+def test_region_guide_turn_keeps_scope():
+    graph = flow.build(deps())
+    cid, _ = ask_region(graph, "조용한 동네 어디야?")
+    _, guided = ask_region(graph, "강릉시 경포동은 어때?", cid)
+    assert guided["guide"] is not None
+    assert (guided["scope"], guided["dongs"]) == ("region", [HYOJA, YEOUI, GYO])
+    _, state = ask_region(graph, "저녁엔?", cid)  # 후보 3곳 비교로 가지 않는다
+    assert state["scope"] == "region"
