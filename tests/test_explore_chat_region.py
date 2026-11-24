@@ -202,3 +202,14 @@ def test_type_question_uses_only_types_with_a_top():
 def test_type_question_without_any_type():
     out, _, codes = r.answer(None, with_types(), "find_type", "어떤 워케이션 유형이 많아?")
     assert (texts(out), codes) == (["전주시에는 유형이 뚜렷한 동네가 없어요."], [])
+
+
+def test_grade_ties_follow_sigungu_rank():
+    # 교1동(코드가 앞)과 송천1동이 조용함 60점 동점, 시군구 순위는 송천1동 3위 · 교1동 4위
+    quiet = {GYO: ["quiet", "A", 60, 4, 4], SONG: ["quiet", "A", 60, 3, 4]}
+    dongs = [
+        {**d, "grades": [quiet.get(d["code"], g) if g[0] == "quiet" else g for g in d["grades"]]}
+        for d in REGION_RAW["dongs"]
+    ]
+    spots = r.spots_of({**REGION_RAW, "dongs": dongs})
+    assert names(r.ranked(spots, "quiet")) == ["효자2동", "여의동", "송천1동", "교1동"]

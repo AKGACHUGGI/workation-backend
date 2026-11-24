@@ -110,9 +110,12 @@ def _eligible(spot: Spot, axis: str) -> bool:
 
 
 def ranked(spots: list[Spot], axis: str) -> list[Spot]:
-    """그 축 조건에 드는 동, 강한 순(같으면 동 코드 순)."""
+    """그 축 조건에 드는 동, 강한 순. 같으면 등급 축은 시군구 순위, 그다음 동 코드 순."""
     have = [s for s in spots if _eligible(s, axis)]
-    return sorted(have, key=lambda s: (-s.dong.values[axis], s.dong.code))
+    return sorted(
+        have,
+        key=lambda s: (-s.dong.values[axis], s.ranks.get(axis, (0, 0))[0], s.dong.code),
+    )
 
 
 def _pool(spots: list[Spot], axis: str) -> list[Spot]:
