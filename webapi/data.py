@@ -241,16 +241,25 @@ def excluded_dongs(region_dongs: list[Dong]) -> list[dict]:
 # ───────────── 보행 피크 · 가기 좋은 달 (동 상세 · 지역 상세 · 채팅 공용) ─────────────
 
 
+# 9~18시 최대 − 최소가 이보다 작으면 낮 내내 비슷하다(flat). 동 204곳 12월 평일은 한산 시각이
+# 78% 가 9 · 18시 끝에 몰리고, 차이 15점 미만인 동(평일 49 · 주말 61곳)은 '○시에 가장 한산'이
+# 곡선에서 눈에 띄지 않는 차이라 문장 · 화면에서 한산 시각을 말하지 않는다
+FLAT_GAP = 15
+
+
 def peaks_of(curves: dict[str, list[int]]) -> dict[str, dict]:
-    """day_group → 24칸 곡선 → {peakHour, lowHour, lowValue}.
-    피크는 24시간 최대(같으면 이른 시각), 한산은 9~18시 최소(같으면 이른 시각)."""
+    """day_group → 24칸 곡선 → {peakHour, lowHour, lowValue, flat}.
+    피크는 24시간 최대(같으면 이른 시각), 한산은 9~18시 최소(같으면 이른 시각),
+    flat 은 9~18시 최대 − 최소 < FLAT_GAP."""
     out = {}
     for g, c in curves.items():
-        low = min(range(9, 19), key=lambda h: (c[h], h))
+        day = range(9, 19)
+        low = min(day, key=lambda h: (c[h], h))
         out[g] = {
             "peakHour": max(range(24), key=lambda h: (c[h], -h)),
             "lowHour": low,
             "lowValue": c[low],
+            "flat": max(c[h] for h in day) - c[low] < FLAT_GAP,
         }
     return out
 

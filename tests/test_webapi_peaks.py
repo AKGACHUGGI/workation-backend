@@ -9,8 +9,30 @@ def test_peaks_of_picks_earlier_hour_on_ties():
     c[11] = c[15] = 100
     c[9] = c[18] = 20
     assert webdata.peaks_of({"weekday": c}) == {
-        "weekday": {"peakHour": 11, "lowHour": 9, "lowValue": 20}
+        "weekday": {"peakHour": 11, "lowHour": 9, "lowValue": 20, "flat": False}
     }
+
+
+def test_peaks_of_flat_when_daytime_gap_under_15():
+    """9~18시 최대 − 최소가 15 미만이면 낮 내내 비슷하다(flat). 한산 시각은 그대로 준다."""
+    c = [10] * 24
+    c[9:19] = [100] * 10
+    c[18] = 86  # 차이 14
+    assert webdata.peaks_of({"weekday": c})["weekday"] == {
+        "peakHour": 9, "lowHour": 18, "lowValue": 86, "flat": True
+    }  # fmt: skip
+    c[18] = 85  # 차이 15
+    assert webdata.peaks_of({"weekday": c})["weekday"]["flat"] is False
+
+
+def test_peaks_of_flat_ignores_hours_outside_daytime():
+    """금암동 12월 평일형: 낮은 90~100 사이, 새벽은 낮다.
+    24시간 최대 피크가 낮 밖이어도 차이는 9~18시 안에서 잰다."""
+    c = [5] * 24
+    c[9:19] = [92, 96, 100, 98, 97, 95, 94, 93, 91, 90]
+    c[21] = 120
+    got = webdata.peaks_of({"weekday": c})["weekday"]
+    assert got == {"peakHour": 21, "lowHour": 18, "lowValue": 90, "flat": True}
 
 
 def test_best_months_lowest_two_sorted():
@@ -24,6 +46,7 @@ def test_walk_peaks_matches_dong_detail(client, photos):  # noqa: F811
     peaks = webdata.walk_peaks("5182025300", 10)
     assert peaks["weekday"] == body["peaks"]["weekday"]
     assert peaks["weekend"] == body["peaks"]["weekend"]
+    assert isinstance(body["peaks"]["weekday"]["flat"], bool)
     assert webdata.walk_peaks("0000000000", 10) is None
 
 
