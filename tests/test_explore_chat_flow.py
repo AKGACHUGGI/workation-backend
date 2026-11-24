@@ -29,6 +29,7 @@ REGION_FOUND = {
     "맛집 있어?": ["unknown_place"],
 }
 INTENTS["저녁엔?"] = ["evening"]
+INTENTS["효자2동이랑 여의동 비교해 줘"] = ["compare_summary"]
 WALK = {
     "weekday": {"peakHour": 11, "lowHour": 18, "lowValue": 90},
     "weekend": {"peakHour": 12, "lowHour": 9, "lowValue": 88},
@@ -255,7 +256,7 @@ def test_region_find_then_compare_then_follow():
 
     _, s2 = ask_region(graph, "효자2동이랑 여의동 비교해 줘", cid)
     assert (s2["scope"], s2["dongs"]) == ("dong", [HYOJA, YEOUI])
-    assert s2["intents"] == ["compare_summary"]  # 직전 find_quiet 를 잇지 않는다
+    assert s2["intents"] == ["compare_summary"]  # 비교 말투는 직전 의도보다 앞선다
 
     _, s3 = ask_region(graph, "저녁엔?", cid)  # 동 대화 이어받기
     assert (s3["scope"], s3["dongs"], s3["intents"]) == ("dong", [HYOJA, YEOUI], ["evening"])
@@ -306,3 +307,12 @@ def test_region_guide_turn_keeps_scope():
     assert (guided["scope"], guided["dongs"]) == ("region", [HYOJA, YEOUI, GYO])
     _, state = ask_region(graph, "저녁엔?", cid)  # 후보 3곳 비교로 가지 않는다
     assert state["scope"] == "region"
+
+
+def test_region_answer_then_dong_name_carries_intent():
+    singles = []
+    graph = flow.build(deps(singles=singles))
+    cid, _ = ask_region(graph, "조용한 동네 어디야?")
+    _, state = ask_region(graph, "효자2동은?", cid)  # find_quiet → quiet 로 이어받기
+    assert (state["scope"], state["dongs"], state["intents"]) == ("dong", [HYOJA], ["quiet"])
+    assert singles == [(HYOJA, ["quiet"])]

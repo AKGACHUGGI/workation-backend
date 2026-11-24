@@ -38,6 +38,15 @@ TTL_MINUTES = 30  # 대화 기억 (스펙 §7-1). 읽을 때마다 다시 30분
 COMPARE_EXAMPLES = ("둘이 비슷해?", "주말엔 몇 시가 붐벼?", "언제 가면 한산해?")
 RULE_ONLY = ("months", "similar")
 KEYS = ("surface", "panel", "sigungu")  # 이 값이 바뀌면 새 대화
+# 시군구 답 다음 동 이름만 물으면("효자2동은?") 이어받을 동 의도. 달 · 성격 의도는 잇지 않는다
+REGION_TO_DONG = {
+    "find_quiet": "quiet",
+    "find_peer": "peer",
+    "find_evening": "evening",
+    "find_coast": "coast",
+    "find_life": "life",
+    "find_type": "type",
+}
 
 
 class ChatState(TypedDict, total=False):
@@ -118,8 +127,12 @@ def build(deps: Deps) -> StateGraph:
 
     def find_intent(s: ChatState) -> dict:
         found, _ = deps.find_intents(s["question"], "dong")
-        # 직전 턴이 시군구 답이면 그 의도(find_*)는 동 흐름에서 이어받지 않는다
-        prev = [i for i in s.get("intents") or [] if i not in ask.REGION_INTENTS]
+        # 직전 턴이 시군구 답이면 찾기 의도(find_*)는 같은 축의 동 의도로 바꿔 잇는다
+        prev = [
+            REGION_TO_DONG.get(i, i)
+            for i in s.get("intents") or []
+            if i in REGION_TO_DONG or i not in ask.REGION_INTENTS
+        ]
         return {"intents": settle_intents(found, prev, s["named"], len(s["dongs"]))}
 
     def route(s: ChatState) -> str:
