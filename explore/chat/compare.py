@@ -98,9 +98,16 @@ def names_in(text: str, names: list[str]) -> list[str]:
     return [name for _, name in sorted(hits)]
 
 
-def problems(s: dict, by_axis: dict[str, Order], names: list[str], seen: set[str]) -> list[str]:
+def tied_top(o: Order) -> list[str]:
+    """그 축 1등 값과 같은 동 이름들, 순서대로."""
+    return [n for n, v in o.ranked if v == o.ranked[0][1]]
+
+
+def problems(
+    s: dict, by_axis: dict[str, Order], names: list[str], seen: set[str], *, ties_ok: bool = False
+) -> list[str]:
     """문제 목록. 비어 있으면 통과 (스펙 §6-2). 문장 속 비교 동 이름이 정확히 하나여야 하고,
-    그 동이 그 축의 단독 1등이어야 한다."""
+    그 동이 그 축의 단독 1등이어야 한다. ties_ok 면 1등 동점 중 아무 동이나 된다(시군구 답)."""
     text, axis = s["text"], s["axis"]
     out = []
     named = list(dict.fromkeys(names_in(text, names)))
@@ -110,7 +117,7 @@ def problems(s: dict, by_axis: dict[str, Order], names: list[str], seen: set[str
         out.append("이름: 문장에 비교 동 이름 없음")
     elif len(named) > 1:
         out.append(f"이름: 동 이름 여러 개 {named}")
-    elif top != named[0]:
+    elif top != named[0] and not (ties_ok and order and named[0] in tied_top(order)):
         out.append(f"방향: {axis} 1등 {top}, 문장 속 동 {named[0]}")
     if axis in seen:
         out.append("같은 축 중복")
@@ -156,7 +163,7 @@ def tidy(text: str) -> str:
 def rule_sentence(o: Order) -> str:
     ko = AXIS_KO[o.axis]
     if o.top is None:
-        tied = "·".join(n for n, v in o.ranked if v == o.ranked[0][1])
+        tied = "·".join(tied_top(o))
         same = "같은 등급이에요" if o.axis in GRADE_AXES else "비슷해요"
         return f"{josa(ko)} {josa(tied, '이/가')} {same}."
     return f"{josa(ko, '을/를')} 원한다면 {josa(o.top, '이/가')} 맞아요."
@@ -172,9 +179,14 @@ def compose(
     dongs: list[Dong],
     orders: list[Order],
     extra: Callable[[str], list[str]] | None = None,
+    *,
+    system: str = SYSTEM,
+    rule: Callable[[Order], str] = rule_sentence,
+    ties_ok: bool = False,
 ) -> tuple[list[dict], str]:
     """생성 → 검사 → 실패한 문장 · 빠진 축은 규칙 문장. 축 순서대로. (문장들, source)
-    extra 는 부르는 쪽 전용 검사 (문장 → 문제 목록). 시군구 답이 쓴다."""
+    extra · system · rule · ties_ok 는 부르는 쪽 전용 검사 · 프롬프트 · 규칙 문장 · 동점 허용.
+    시군구 답이 쓴다."""
     if not orders:
         return [], "rule"
     by_axis = {o.axis: o for o in orders}
@@ -183,24 +195,25 @@ def compose(
     items: list[dict] = []
     if generate is not None:
         try:
-            reply = generate(SYSTEM, user, answer_model(list(by_axis)))
+            reply = generate(system, user, answer_model(list(by_axis)))
             items = [s.model_dump() for s in reply.sentences]
         except Exception as ex:  # HCX 오류 · 시간 초과 · 스키마 불일치 모두 규칙 문장으로
             logger.warning("비교 답 생성 실패: %s", ex)
     done: dict[str, dict] = {}
     seen: set[str] = set()
     for s in items:
-        found = problems(s, by_axis, names, seen) + (extra(s["text"]) if extra else [])
+        found = problems(s, by_axis, names, seen, ties_ok=ties_ok)
+        found += extra(s["text"]) if extra else []
         seen.add(s["axis"])
         if s["axis"] in done:
             continue
         o = by_axis[s["axis"]]
         if found:
             logger.info("비교 답 문장 교체 %r: %s", s["text"], found)
-            done[o.axis] = _item(rule_sentence(o), o, by_name, "rule")
+            done[o.axis] = _item(rule(o), o, by_name, "rule")
         else:
             done[o.axis] = _item(s["text"], o, by_name, "llm")
-    out = [done.get(o.axis) or _item(rule_sentence(o), o, by_name, "rule") for o in orders]
+    out = [done.get(o.axis) or _item(rule(o), o, by_name, "rule") for o in orders]
     out = _fix_contrast(out, names)
     passed = sum(s["source"] == "llm" for s in out)
     source = "llm" if passed == len(out) else "rule" if passed == 0 else "mixed"

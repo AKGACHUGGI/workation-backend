@@ -80,6 +80,17 @@ def test_problems_tie_and_duplicate():
     assert "같은 축 중복" in c.problems(GOOD, BY_AXIS, NAMES, {"quiet"})
 
 
+def test_problems_ties_ok_passes_any_tied_top():
+    (evening,) = a.orders([Y, G, H], ["evening"])  # 여의동 = 교1동 > 효자2동
+    by_axis = {"evening": evening}
+    names = ["여의동", "교1동", "효자2동"]
+    for name in ("여의동", "교1동"):
+        s = {"text": f"저녁 활기를 원하면 {name}이 맞아요.", "axis": "evening"}
+        assert c.problems(s, by_axis, names, set(), ties_ok=True) == []
+    low = {"text": "저녁 활기를 원하면 효자2동이 맞아요.", "axis": "evening"}
+    assert c.problems(low, by_axis, names, set(), ties_ok=True)[0].startswith("방향")
+
+
 def test_rule_sentences():
     quiet, coast = ORDERS
     assert c.rule_sentence(quiet) == "조용함을 원한다면 효자2동이 맞아요."
