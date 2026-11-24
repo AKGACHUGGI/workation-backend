@@ -1,9 +1,9 @@
-"""문장 임베딩 → tag_vocab · dong_doc · ask_vocab 의 embedding 채우는 SQL 생성
+"""문장 임베딩 → tag_vocab · dong_doc 의 embedding 채우는 SQL, 질문 의도 사전 JSON 생성
 
 모델: CLOVA Studio 임베딩 v2 (1024차원). 검색할 때 질문도 같은 모델로 바꿔야 한다.
-키: CLOVA_API_KEY 환경변수, 없으면 현재 폴더 .env 의 CLOVA_API_KEY. 키는 출력 SQL 에 들어가지 않는다.
+키: CLOVA_API_KEY 환경변수, 없으면 현재 폴더 .env 의 CLOVA_API_KEY. 키는 출력에 들어가지 않는다.
 출력 SQL 은 API 요청 한도(약 2 MB)를 넘지 않게 <접두어>_1.sql, _2.sql … 로 나눈다. 순서대로 실행한다.
-출력 SQL 은 커밋하지 않는다.
+출력 SQL 은 커밋하지 않는다. ask 모드의 JSON 은 서버가 읽는 파일이라 커밋한다.
 
 사용 (표준 라이브러리만)
   python3 db/tools/build_embeddings.py vocab db/seed/tag_vocab.csv <출력 접두어>
@@ -12,11 +12,11 @@
       소개문 CSV(dong_id, body)를 임베딩. 05_dong_doc.sql 실행 뒤 아래 결과를 CSV 로 받아 넣는다.
         SELECT dong_id, body FROM dong_doc WHERE embedding IS NULL ORDER BY dong_id;
       UPDATE 는 body 가 그대로일 때만 적용되므로, 그 사이 문장이 바뀐 행은 비어 있게 남는다.
-  python3 db/tools/build_embeddings.py ask db/seed/ask_vocab.csv <출력 접두어> [임베딩된 표현.csv]
-      동네에 물어보기 의도 사전. CSV 를 검사(의도 14개, 의도마다 5~12개, 대표 질문)하고 전체를 넣는다.
-      CSV 에서 빠진 표현은 DB 에서도 지운다. 네 번째 인자를 주면 거기 있는 표현은 임베딩을 다시
-      만들지 않는다 (새 표현만 CLOVA 호출). 그 CSV 는 아래 결과를 받는다.
-        SELECT phrase FROM ask_vocab WHERE embedding IS NOT NULL AND model = 'clova-embedding-v2';
+  python3 db/tools/build_embeddings.py ask db/seed/ask_vocab.csv explore/data/ask_vocab.json
+      질문 의도 사전. CSV 를 검사(의도마다 5~12개, 대표 질문)하고 CSV 순서대로 JSON 을 새로 쓴다.
+      {"model": ..., "items": [{"intent", "phrase", "canonical", "embedding": [1024개]}]}
+      출력 파일이 이미 있고 모델이 같으면 같은 표현의 임베딩은 다시 쓰고 새 표현만 CLOVA 호출.
+      CSV 를 고치면 반드시 다시 실행해 JSON 도 커밋한다 (tests/test_ask_vocab_seed.py 가 확인).
 """
 
 from __future__ import annotations
@@ -137,7 +137,9 @@ def doc(src: Path, prefix: str) -> None:
 
 # 동네에 물어보기 의도. 앞 11개는 대표 질문이 1개 있는 의도(compare_summary 는 v7 채팅), 뒤 4개는 고정 안내
 ASK_ANSWERABLE = ("weekday_hours", "weekend_hours", "months", "quiet", "peer", "evening",
-                  "type", "coast", "life", "similar", "compare_summary")
+                  "type", "coast", "life", "similar", "compare_summary",
+                  "find_quiet", "find_peer", "find_evening", "find_type", "find_coast",
+                  "find_life", "region_months", "region_profile")
 ASK_UNKNOWN = ("unknown_place", "unknown_stay", "unknown_transport", "unknown_other")
 
 
@@ -167,44 +169,35 @@ def read_ask(src: Path) -> list[tuple[str, str, bool]]:
     return out
 
 
-def ask(src: Path, prefix: str, have: Path | None = None) -> None:
+def ask(src: Path, out: Path) -> None:
     items = read_ask(src)
-    done = {r["phrase"] for r in csv.DictReader(have.open(encoding="utf-8"))} if have else set()
-    todo = [it for it in items if it[1] not in done]
+    done = {}
+    if out.exists():
+        old = json.loads(out.read_text(encoding="utf-8"))
+        if old.get("model") == MODEL:
+            done = {r["phrase"]: r["embedding"] for r in old["items"]}
+    todo = [p for _, p, _ in items if p not in done]
     key = load_key() if todo else ""
     rows = []
     for intent, phrase, canon in items:
-        flag = "true" if canon else "false"
-        if phrase in done:
-            rows.append(
-                f"INSERT INTO ask_vocab (intent, phrase, canonical) VALUES ({q(intent)}, {q(phrase)}, {flag}) "
-                "ON CONFLICT (phrase) DO UPDATE SET intent = EXCLUDED.intent, "
-                "canonical = EXCLUDED.canonical, updated_at = now();")
-            continue
-        v = embed(key, phrase)
-        rows.append(
-            "INSERT INTO ask_vocab (intent, phrase, canonical, embedding, model) VALUES "
-            f"({q(intent)}, {q(phrase)}, {flag}, {vec_sql(v)}, {q(MODEL)}) "
-            "ON CONFLICT (phrase) DO UPDATE SET intent = EXCLUDED.intent, canonical = EXCLUDED.canonical, "
-            "embedding = EXCLUDED.embedding, model = EXCLUDED.model, updated_at = now();")
-    keep = ",\n  ".join(q(p) for _, p, _ in items)
-    first = ["-- 대표 질문이 다른 표현으로 옮겨 가도 의도당 1개 제약(ask_vocab_canonical)에 걸리지 않게",
-             "UPDATE ask_vocab SET canonical = false WHERE canonical;",
-             "-- CSV 에서 빠진 표현 지우기",
-             "DELETE FROM ask_vocab WHERE phrase NOT IN (\n  " + keep + ");"]
-    head = ["-- 동네에 물어보기 의도 사전 (db/tools/build_embeddings.py ask 로 생성, 직접 고치지 말 것)",
-            f"-- 원본 {src.name} {len(items)}개 표현 · 새로 임베딩 {len(todo)}개 · 모델 {MODEL}"]
-    write_chunks(prefix, head, rows, first)
+        v = done[phrase] if phrase in done else [round(x, 6) for x in embed(key, phrase)]
+        rows.append({"intent": intent, "phrase": phrase, "canonical": canon, "embedding": v})
+    out.parent.mkdir(parents=True, exist_ok=True)
+    # 한 표현 한 줄: 표현을 고치면 diff 에 그 줄만 보인다
+    lines = [json.dumps(r, ensure_ascii=False, separators=(",", ":")) for r in rows]
+    out.write_text('{"model":' + json.dumps(MODEL) + ',"items":[\n' + ",\n".join(lines) + "\n]}\n",
+                   encoding="utf-8")
+    print(f"  → {out} ({len(rows)}개, 새로 임베딩 {len(todo)}개, {out.stat().st_size / 1e6:.2f} MB)")
 
 
 def main() -> None:
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
-    if mode == "ask" and len(sys.argv) in (4, 5):
-        print(f"ask 임베딩 ({MODEL})")
-        ask(Path(sys.argv[2]), sys.argv[3], Path(sys.argv[4]) if len(sys.argv) == 5 else None)
-        return
-    if len(sys.argv) != 4 or mode not in ("vocab", "doc"):
+    if len(sys.argv) != 4 or mode not in ("vocab", "doc", "ask"):
         sys.exit(__doc__)
+    if mode == "ask":
+        print(f"ask 임베딩 ({MODEL})")
+        ask(Path(sys.argv[2]), Path(sys.argv[3]))
+        return
     src, prefix = Path(sys.argv[2]), sys.argv[3]
     print(f"{mode} 임베딩 ({MODEL})")
     (vocab if mode == "vocab" else doc)(src, prefix)

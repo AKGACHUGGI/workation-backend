@@ -86,3 +86,21 @@ def test_dong_raw_cache_skips_missing(monkeypatch):
     assert data.dong_raw("x") is None
     assert data.dong_raw("x") is None
     assert calls == ["x", "x"]  # 없는 동은 캐시하지 않는다
+
+
+def test_region_raw_caches_found_only(monkeypatch):
+    from django.core.cache import cache
+
+    cache.clear()
+    calls = []
+
+    def fetch(code):
+        calls.append(code)
+        return {"region": {"code": code}} if code == "45111" else None
+
+    monkeypatch.setattr(queries, "fetch_region", fetch)
+    assert data.region_raw("45111") == {"region": {"code": "45111"}}
+    assert data.region_raw("45111") == {"region": {"code": "45111"}}
+    assert data.region_raw("99999") is None
+    assert data.region_raw("99999") is None
+    assert calls == ["45111", "99999", "99999"]

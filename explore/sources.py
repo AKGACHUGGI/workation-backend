@@ -272,37 +272,3 @@ def fetch_briefing(adm_code: str) -> list[str]:
         return []
     # Django 의 psycopg 백엔드는 jsonb 를 문자열로 돌려준다 → ::text 로 읽어 직접 푼다
     return json.loads(row[0]) if row else []
-
-
-# ───────────────────────── 동네에 물어보기 (v6.1) ─────────────────────────
-# ask_vocab 은 vector 컬럼이라 테스트 DB 에 없다. pgvector SQL 은 nearest_vocab 하나에만 둔다.
-# 답 저장·질문 기록이 실패해도 답은 내려간다 → savepoint 안에서 실행하고 경고만 남긴다.
-
-
-def _vector(v: list[float]) -> str:
-    return "[" + ",".join(f"{x:.6f}" for x in v) + "]"
-
-
-def nearest_vocab(vec: list[float], k: int = 5) -> list[tuple[str, str, float]]:
-    """질문 임베딩에 가까운 사전 표현 k개 (intent, phrase, 코사인 유사도), 가까운 순. pgvector."""
-    q = _vector(vec)
-    return [
-        (intent, phrase, float(sim))
-        for intent, phrase, sim in _rows(
-            """SELECT intent, phrase, 1 - (embedding <=> %s::vector) AS sim
-                 FROM ask_vocab WHERE embedding IS NOT NULL
-                ORDER BY embedding <=> %s::vector LIMIT %s""",
-            [q, q, k],
-        )
-    ]
-
-
-def load_vocab() -> list[tuple[str, str, bool]]:
-    """문자열 매칭용 사전 전체 (intent, phrase, canonical). 임베딩이 없어도 읽는다."""
-    return _rows("SELECT intent, phrase, canonical FROM ask_vocab ORDER BY intent, phrase")
-
-
-def vocab_version() -> str:
-    """사전 버전 = max(updated_at) 의 epoch 초 문자열. 비어 있으면 "0". 캐시 키에 쓴다."""
-    sql = "SELECT coalesce(extract(epoch FROM max(updated_at))::bigint, 0) FROM ask_vocab"
-    return str(_rows(sql)[0][0])

@@ -17,6 +17,9 @@ SUFFIX = ("동", "읍", "면")
 ASK_DONG = "시군구 말고 동네 이름으로 물어봐 주세요."
 TOO_MANY = "한 번에 세 동네까지 비교할 수 있어서 앞의 세 곳만 볼게요."
 SAME_SGG_ONLY = "지금은 같은 시군구 안의 동네끼리만 비교할 수 있어요."
+# 시군구 채팅에서 동 대화 중이어도 '찾기'로 보는 말 (시군구 채팅 스펙 §4).
+# '곳'·'데'는 조사 앞이나 질문 끝에서만 ('곳곳' 제외). '데'는 띄어 쓴 것만 ('조용한데' 이음말 제외)
+FIND_WORDS = re.compile(r"동네|어디|어느|((?<!곳)곳|\s데)(은|는|이|가|도|\s|\?|$)")
 
 
 @dataclass(frozen=True)
@@ -98,6 +101,33 @@ def resolve(question: str, panel: DongName, prev: list[str], names: list[DongNam
         return Resolved(keep)
     base = keep[1:] if any(w in question for w in TOGETHER) else []
     picked = [panel.code, *dict.fromkeys([*base, *mine])]
+    if len(picked) > MAX_DONGS:
+        return Resolved(picked[:MAX_DONGS], note=TOO_MANY, named=True)
+    return Resolved(picked, named=True)
+
+
+def resolve_region(
+    question: str, sgg_code: str, prev: list[str], names: list[DongName], follow: bool
+) -> Resolved:
+    """시군구 채팅 (시군구 채팅 스펙 §4). 기준 동 없이 그 시군구 동 이름을 찾는다.
+    dongs 가 비면 시군구 답이다. 이름이 없을 때:
+    - '셋 다'·'둘 다' 류면 직전 동들로 비교
+    - 직전 턴이 동 답(follow)이고 찾기 말이 없으면("저녁엔?") 그 동을 잇는다
+    - 아니면 시군구 답."""
+    sgg = next((n for n in names if n.sgg_code == sgg_code), None)
+    anchor = DongName("", "", sgg_code, sgg.sgg_name if sgg else "")
+    found = find(question, names, sgg_code)
+    mine = [n.code for n in found if n.sgg_code == sgg_code]
+    if not mine:
+        if found or _other_sigungu(question, anchor, names):
+            return Resolved(prev, guide=_same_sgg_guide(anchor, names))
+        if prev and any(w in question for w in TOGETHER):
+            return Resolved(prev[:MAX_DONGS], named=True)
+        if follow and prev and not FIND_WORDS.search(question):
+            return Resolved(prev)
+        return Resolved([])
+    base = prev if any(w in question for w in TOGETHER) else []
+    picked = list(dict.fromkeys([*mine, *base]))
     if len(picked) > MAX_DONGS:
         return Resolved(picked[:MAX_DONGS], note=TOO_MANY, named=True)
     return Resolved(picked, named=True)

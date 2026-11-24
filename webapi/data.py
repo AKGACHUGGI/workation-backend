@@ -17,7 +17,7 @@ from django.db import DatabaseError, connection, transaction
 
 from core.cache import static
 from regions.lookups import active_dongs, regions_by_id  # noqa: F401 (views 가 data. 로 부른다)
-from regions.models import Dong
+from regions.models import DayGroup, Dong, DongHourly, Region
 from regions.photos import one_per_unit as one_photo_per_unit  # noqa: F401 (views 가 data. 로 부른다)
 
 logger = logging.getLogger(__name__)
@@ -236,3 +236,57 @@ def excluded_dongs(region_dongs: list[Dong]) -> list[dict]:
     return [
         {"name": d.dong_name, "reason": "special_facility"} for d in region_dongs if d.is_excluded
     ]
+
+
+# ───────────── 보행 피크 · 가기 좋은 달 (동 상세 · 지역 상세 · 채팅 공용) ─────────────
+
+
+# 9~18시 최대 − 최소가 이보다 작으면 낮 내내 비슷하다(flat). 동 204곳 12월 평일은 한산 시각이
+# 78% 가 9 · 18시 끝에 몰리고, 차이 15점 미만인 동(평일 49 · 주말 61곳)은 '○시에 가장 한산'이
+# 곡선에서 눈에 띄지 않는 차이라 문장 · 화면에서 한산 시각을 말하지 않는다
+FLAT_GAP = 15
+
+
+def peaks_of(curves: dict[str, list[int]]) -> dict[str, dict]:
+    """day_group → 24칸 곡선 → {peakHour, lowHour, lowValue, flat}.
+    피크는 24시간 최대(같으면 이른 시각), 한산은 9~18시 최소(같으면 이른 시각),
+    flat 은 9~18시 최대 − 최소 < FLAT_GAP."""
+    out = {}
+    for g, c in curves.items():
+        day = range(9, 19)
+        low = min(day, key=lambda h: (c[h], h))
+        out[g] = {
+            "peakHour": max(range(24), key=lambda h: (c[h], -h)),
+            "lowHour": low,
+            "lowValue": c[low],
+            "flat": max(c[h] for h in day) - c[low] < FLAT_GAP,
+        }
+    return out
+
+
+def dong_curves(dong_id: int, month: int | None) -> dict[str, list[int]]:
+    """보행 24시간 곡선(index_100). month 가 None 이면 연간(0)."""
+    curves = {DayGroup.WEEKDAY: [0] * 24, DayGroup.WEEKEND: [0] * 24}
+    rows = DongHourly.objects.filter(dong_id=dong_id, month=month or 0).values_list(
+        "day_group", "hour", "index_100"
+    )
+    for g, h, v in rows:
+        curves[g][h] = v or 0
+    return curves
+
+
+def walk_peaks(adm_code: str, month: int | None) -> dict[str, dict] | None:
+    """채팅 시간대 답의 보행 기준. 동 상세 peaks 와 같은 값. 없는 동이면 None."""
+    dong = Dong.objects.filter(adm_code=adm_code).only("dong_id").first()
+    return None if dong is None else peaks_of(dong_curves(dong.dong_id, month))
+
+
+def best_months(crowd: dict[int, float]) -> list[int]:
+    """혼잡이 가장 낮은 2개월, 오름차순 (지역 상세 bestMonths). 동점이면 이른 달."""
+    return sorted(sorted(crowd, key=lambda m: (crowd[m], m))[:2])
+
+
+def region_best_months(sigungu_code: str) -> list[int]:
+    """채팅 달 답의 방문 기준. 지역 상세 bestMonths 와 같은 값. 없는 시군구면 []."""
+    region = Region.objects.filter(sigungu_code=sigungu_code).only("region_id").first()
+    return [] if region is None else best_months(monthly_crowd(region.region_id))

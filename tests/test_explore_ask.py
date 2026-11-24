@@ -450,3 +450,24 @@ def test_prompt_hash_changes_with_answer_version(monkeypatch):
 def test_answer_version_is_4():
     # 시각 사실 문구와 검사 규칙(시각 · 동 이름 · '1년')을 바꿨다 (2026-11-17)
     assert ask.ANSWER_VERSION == 4
+
+
+def test_region_vocab_scopes():
+    assert ask.REGION_CANONICAL == {
+        "find_quiet": "조용한 동네 어디야?",
+        "find_peer": "또래가 많은 동네는?",
+        "find_evening": "저녁에 활기 있는 데는?",
+        "find_type": "집중해서 일하기 좋은 동네는?",
+        "find_coast": "바다 가까운 동네 있어?",
+        "find_life": "관광지 말고 생활권 동네는?",
+        "region_months": "몇 월에 가면 한산해?",
+        "region_profile": "여긴 어떤 곳이야?",
+    }
+    assert set(ask.REGION_VOCAB) == {*ask.REGION_INTENTS, *ask.HOURS, *ask.UNKNOWN}
+    assert not set(ask.DONG_VOCAB) & set(ask.REGION_INTENTS)
+    assert "compare_summary" in ask.DONG_VOCAB
+    assert ask.REGION_FIRST == [
+        "조용한 동네 어디야?",
+        "바다 가까운 동네 있어?",
+        "몇 월에 가면 한산해?",
+    ]

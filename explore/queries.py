@@ -61,6 +61,21 @@ RETURN d.code AS code,
   r {.id, .name, .degree} AS region
 """
 
+# 시군구 채팅 (시군구 채팅 스펙 §6-1): 시군구 + 그 안의 모든 동, 한 번에
+REGION = """
+MATCH (r:Region {id: 'region:' + $code})-[:IN]->(s:Sido)
+OPTIONAL MATCH (d:Dong)-[:IN]->(r)
+RETURN r {.code, .name} AS region, s.name AS sido,
+  [(r)-[e:EASE]->(m:Month) | [m.m, e.raw, e.quiet]] AS months,
+  collect(d {
+    .code, .name,
+    grades: [(d)-[g:HAS_GRADE]->(x:Grade) | [x.metric, x.grade, g.score, g.rank_sgg, g.of_sgg]],
+    types: [(d)-[f:FITS]->(t:Type) | [f.rank, t.name, f.score]],
+    near: [(d)-[n:NEAR]->(:Place) | n.km],
+    life: [(d)-[l:LIFE]->(t:Tag) | [t.name, l.value]]
+  }) AS dongs
+"""
+
 DAY_KO = {"weekday": "평일", "weekend": "주말"}
 
 
@@ -88,6 +103,12 @@ def _dong_work(tx, code):
     return {"rec": rec, "facts": facts, **meta}
 
 
+def _region_work(tx, code):
+    _meta(tx)
+    rec = tx.run(REGION, code=code).single()
+    return None if rec is None else rec.data()
+
+
 def fetch_pins(code: str) -> dict | None:
     """시군구 핀 응답. 없는 시군구면 None. Neo4j 문제는 GraphUnavailable."""
     rec = read(_pins_work, code=code)
@@ -99,6 +120,12 @@ def fetch_dong(code: str) -> dict | None:
 
     없는 동이면 None. 응답 모양은 shape_dong, 브리핑 사실은 brief.collect_facts 가 만든다."""
     return read(_dong_work, code=code)
+
+
+def fetch_region(code: str) -> dict | None:
+    """시군구 채팅 원재료 {region, sido, months, dongs}. 없는 시군구면 None.
+    Neo4j 문제는 GraphUnavailable."""
+    return read(_region_work, code=code)
 
 
 def shape_pins(rec: dict) -> dict:

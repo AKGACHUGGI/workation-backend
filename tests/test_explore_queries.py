@@ -234,3 +234,14 @@ def test_pins_and_facts_pass_type_min(monkeypatch):
     params = {q: p for q, p in tx.calls}
     assert params[queries.PINS]["type_min"] == 40
     assert params[queries.FACTS]["type_min"] == 40
+
+
+def test_fetch_region(monkeypatch):
+    from tests.explore_chat_samples import REGION_RAW
+
+    tx = FakeTx({queries.META: [META_ROW], queries.REGION: [REGION_RAW]})
+    monkeypatch.setattr(queries, "read", fake_read(tx))
+    assert queries.fetch_region("45111") == REGION_RAW
+    assert next(p for q, p in tx.calls if q == queries.REGION) == {"code": "45111"}
+    monkeypatch.setattr(queries, "read", fake_read(FakeTx({queries.META: [META_ROW]})))
+    assert queries.fetch_region("99999") is None

@@ -1,6 +1,9 @@
 """질문 속 동 이름 → 비교 동네 (스펙 §4)."""
 
+import pytest
+
 from explore.chat import resolve as r
+from explore.chat.resolve import resolve_region
 from tests.explore_chat_samples import GYO, HYOJA, NAMES, YEOUI
 
 PANEL = NAMES[0]
@@ -73,3 +76,54 @@ def test_aliases():
     assert r.aliases("효자2동") == {"효자2동", "효자 2동"}
     assert r.aliases("주문진읍") == {"주문진읍", "주문진"}
     assert r.aliases("교동") == {"교동"}
+
+
+JJ = "45111"
+
+
+def test_region_no_name_is_region_answer():
+    assert resolve_region("조용한 동네 어디야?", JJ, [], NAMES, False).dongs == []
+    # 직전 턴이 시군구 답이었으면 후보가 있어도 다시 시군구 답
+    assert resolve_region("저녁엔?", JJ, [HYOJA, YEOUI], NAMES, False).dongs == []
+
+
+def test_region_names_go_to_dong_flow():
+    r = resolve_region("효자2동이랑 여의동 비교해 줘", JJ, [], NAMES, False)
+    assert (r.dongs, r.named) == ([HYOJA, YEOUI], True)
+
+
+def test_region_follow_up_keeps_dongs_unless_finding():
+    assert resolve_region("저녁엔?", JJ, [HYOJA], NAMES, True).dongs == [HYOJA]
+    # '동네'·'어디' 같은 찾기 말이 있으면 동 대화 중이어도 시군구 답
+    assert resolve_region("바다 가까운 동네 어디야?", JJ, [HYOJA], NAMES, True).dongs == []
+
+
+def test_region_together_uses_previous_candidates():
+    r = resolve_region("셋 다 비교해 줘", JJ, [HYOJA, YEOUI, GYO], NAMES, False)
+    assert (r.dongs, r.named) == ([HYOJA, YEOUI, GYO], True)
+
+
+def test_region_other_sigungu_guides():
+    r = resolve_region("경포동은 어때?", JJ, [], NAMES, False)
+    assert r.guide is not None and "전주시에서는" in r.guide
+    r = resolve_region("강릉에서 조용한 데는?", JJ, [], NAMES, False)
+    assert r.guide is not None
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "조용한 곳?",
+        "바다 가까운 곳이 있어?",
+        "조용한 데?",
+        "저녁에 활기 있는 데는?",
+        "한적한 곳 알려 줘",
+    ],
+)
+def test_region_find_words_end_dong_follow(question):
+    assert resolve_region(question, JJ, [HYOJA], NAMES, True).dongs == []
+
+
+@pytest.mark.parametrize("question", ["저녁엔?", "곳곳이 붐벼?", "조용한데 저녁엔?"])
+def test_region_not_find_words_keep_dongs(question):
+    assert resolve_region(question, JJ, [HYOJA], NAMES, True).dongs == [HYOJA]

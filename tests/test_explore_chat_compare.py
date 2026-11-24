@@ -80,14 +80,25 @@ def test_problems_tie_and_duplicate():
     assert "같은 축 중복" in c.problems(GOOD, BY_AXIS, NAMES, {"quiet"})
 
 
+def test_problems_ties_ok_passes_any_tied_top():
+    (evening,) = a.orders([Y, G, H], ["evening"])  # 여의동 = 교1동 > 효자2동
+    by_axis = {"evening": evening}
+    names = ["여의동", "교1동", "효자2동"]
+    for name in ("여의동", "교1동"):
+        s = {"text": f"저녁 활기를 원하면 {name}이 맞아요.", "axis": "evening"}
+        assert c.problems(s, by_axis, names, set(), ties_ok=True) == []
+    low = {"text": "저녁 활기를 원하면 효자2동이 맞아요.", "axis": "evening"}
+    assert c.problems(low, by_axis, names, set(), ties_ok=True)[0].startswith("방향")
+
+
 def test_rule_sentences():
     quiet, coast = ORDERS
-    assert c.rule_sentence(quiet) == "조용함을 원한다면 효자2동이 맞아요."
-    assert c.rule_sentence(coast) == "바다 가까움을 원한다면 여의동이 맞아요."
+    assert c.rule_sentence(quiet) == "조용히 일하고 싶다면 효자2동이 맞아요."
+    assert c.rule_sentence(coast) == "바다 가까이 머물고 싶다면 여의동이 좋아요."
     (evening,) = a.orders([Y, G], ["evening"])
-    assert c.rule_sentence(evening) == "저녁 활기는 여의동·교1동이 같은 등급이에요."
+    assert c.rule_sentence(evening) == "저녁 활기 정도는 여의동·교1동이 같은 등급이에요."
     (inland,) = a.orders([H, G], ["coast"])
-    assert c.rule_sentence(inland) == "바다 가까움은 효자2동·교1동이 비슷해요."
+    assert c.rule_sentence(inland) == "바다 가까운 정도는 효자2동·교1동이 비슷해요."
 
 
 def test_compose_all_pass():
@@ -112,8 +123,8 @@ def test_compose_replaces_wrong_and_fills_missing():
     sentences, source = c.compose(fake(wrong), "u", [H, Y], ORDERS)
     assert source == "rule"
     assert [s["text"] for s in sentences] == [
-        "조용함을 원한다면 효자2동이 맞아요.",
-        "바다 가까움을 원한다면 여의동이 맞아요.",
+        "조용히 일하고 싶다면 효자2동이 맞아요.",
+        "바다 가까이 머물고 싶다면 여의동이 좋아요.",
     ]
     sentences, source = c.compose(fake(COAST), "u", [H, Y], ORDERS)
     assert source == "mixed"
@@ -130,41 +141,6 @@ def test_compose_without_llm_or_on_error():
     assert source == "rule" and len(sentences) == 2
 
 
-def test_hours_sentences_compare_in_one_sentence(monkeypatch):
-    raws = [RAWS[HYOJA], RAWS[YEOUI]]
-    assert c.hours_sentences(raws, "weekday") == [
-        {
-            "text": (
-                "평일엔 효자2동·여의동 모두 12시에 가장 붐비고, 업무시간엔 둘 다 9시가 한산해요."
-            ),
-            "evidence": (
-                "평일 차량 이동 인구 가장 많은 시각: 효자2동 12시 100명 · 여의동 12시 100명"
-            ),
-            "source": "rule",
-        }
-    ]
-    assert c.hours_sentences(raws, "weekend")[0]["text"] == (
-        "주말엔 효자2동·여의동 모두 14시에 차가 가장 많아요."
-    )
-    hours = {HYOJA: (11, 9), YEOUI: (14, 10), GYO: (12, 9)}
-
-    def fake_hours(rec):
-        peak, quiet = hours[rec["dong"]["code"]]
-        return {("PEAK_AT", d): peak for d in ("weekday", "weekend")} | {
-            ("QUIET_AT", "weekday"): quiet
-        }
-
-    monkeypatch.setattr(c.brief, "_hours", fake_hours)
-    three = [RAWS[HYOJA], RAWS[YEOUI], RAWS[GYO]]
-    assert c.hours_sentences(three, "weekend")[0]["text"] == (
-        "주말엔 효자2동이 11시, 여의동이 14시, 교1동이 12시에 차가 가장 많아요."
-    )
-    assert c.hours_sentences(raws, "weekday")[0]["text"] == (
-        "평일엔 효자2동이 11시, 여의동이 14시에 가장 붐비고, "
-        "업무시간엔 효자2동은 9시, 여의동은 10시가 한산해요."
-    )
-
-
 def test_months_similarity_link():
     raws = [RAWS[HYOJA], RAWS[YEOUI]]
     assert c.months_sentences(raws)[0]["text"] == (
@@ -178,7 +154,7 @@ def test_months_similarity_link():
     # 시각별 한산은 빼고, 등급 글자 없이 문장으로
     assert (
         got[1]["text"]
-        == "둘 다 로컬살이형이 가장 잘 맞고, 생활권 성격이 강하고, 저녁 활기 수준이 같아요."
+        == "둘 다 현지 주민처럼 지내기 좋고, 생활권 성격이 강하고, 저녁 활기 정도가 같아요."
     )
     assert c.link_sentence(a.Link("효자2동", "여의동", 2)) == {
         "text": "최근 보신 여의동과 비슷한 쪽은 효자2동이에요.",
@@ -193,8 +169,8 @@ def test_common_sentence():
         ("place:coast", "바닷가"),
         ("grade:quiet:B", "조용함 B"),
     ]
-    assert c.common_sentence(items, 2) == "둘 다 바닷가에 있고, 조용함 수준이 같아요."
-    assert c.common_sentence(items, 3) == "셋 다 바닷가에 있고, 조용함 수준이 같아요."
+    assert c.common_sentence(items, 2) == "둘 다 바닷가에 있고, 조용한 정도가 같아요."
+    assert c.common_sentence(items, 3) == "셋 다 바닷가에 있고, 조용한 정도가 같아요."
     assert c.common_sentence([("quiet:weekend:3", "주말 3시 한산")], 2) is None
 
 
@@ -205,7 +181,7 @@ def test_common_sentence():
         ("바닷가 동네입니다", "바닷가 동네예요."),
         ("차가 많습니다.", "차가 많아요."),
         ("주말엔 한산합니다!", "주말엔 한산해요!"),
-        ("조용함을 원한다면 효자2동이 맞아요", "조용함을 원한다면 효자2동이 맞아요."),
+        ("조용히 일하고 싶다면 효자2동이 맞아요", "조용히 일하고 싶다면 효자2동이 맞아요."),
         ("이미 괜찮아요.", "이미 괜찮아요."),
     ],
 )
@@ -246,3 +222,70 @@ def test_fix_contrast_keeps_connector_only_after_other_dong():
         "또래가 많은 곳은 효자2동이에요.",
         "대신 저녁 활기는 여의동이 나아요.",
     ]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("조용히 일하고 싶다면 효자2동이 맞아요.", []),
+        ("또래가 많은 곳을 찾는다면 효자2동이 좋아요.", []),
+        ("데이터에 따르면 효자2동이 조용해서 좋아요.", ["메타카피"]),
+        ("조용한 곳을 알려드릴게요, 효자2동이 좋아요.", ["메타카피"]),
+        ("분석 결과 효자2동이 조용해서 좋아요.", ["메타카피"]),
+        ("저녁 활기를 원한다면 여의동이 알맞을 수 있어요.", ["완곡"]),
+        ("조용한 곳은 효자2동이 좋아요, 참고용이에요.", ["완곡"]),
+        ("저녁 활기가 필요하다면 여의동을 생각해 보세요.", ["완곡"]),
+        ("또래 친구들이 많은 곳을 원한다면 효자2동이 좋아요.", ["어색"]),
+        ("생활권 분위기가 좋으려면 효자2동이 맞아요.", ["어색"]),
+        ("생활권 분위기가 익숙하게 느껴진다면 효자2동이 맞아요.", ["어색"]),
+        ("또래가 많은 곳을 원한다면 효자2동이 괜찮아요.", ["어색"]),
+        ("또래가 많은 곳은 효자2동이에요.", ["끝"]),
+        ("또래가 많은 곳을 원한다면 효자2동이 있어요.", ["끝"]),
+    ],
+)
+def test_tone(text, expected):
+    got = c.tone(text, NAMES)
+    assert [p.split(":")[0] for p in got] == expected
+
+
+def test_problems_include_tone():
+    s = {**GOOD, "text": "데이터에 따르면 효자2동이 조용해서 맞아요."}
+    assert any(p.startswith("메타카피") for p in c.problems(s, BY_AXIS, NAMES, set()))
+
+
+def test_system_bans_meta_and_hedge():
+    assert "알려드릴게요" in c.SYSTEM and "다를 수 있어요" in c.SYSTEM
+    examples = c.SYSTEM.split("예:")[1].split("\n")[0]
+    assert "이에요'" not in examples  # 문형 예시가 동 이름으로 끝나지 않는다
+
+
+def test_rule_sentences_have_no_banned_tone():
+    """규칙 문장(축 · 달 · 닮음 · 공통점 · 연결)에도 메타카피 · 완곡 · 어색한 말이 없다."""
+    raws = [RAWS[HYOJA], RAWS[YEOUI]]
+    vecs = {HYOJA: ((0.1, 0.1, 0.1, 0.5), False), YEOUI: ((0.2, 0.1, 0.1, 0.5), False)}
+    texts = [c.rule_sentence(o) for o in a.orders([H, Y, G], list(a.AXIS_KO))]
+    texts += [s["text"] for s in c.months_sentences(raws)]
+    sim = c.similarity_sentences(raws, a.common_items(raws), vecs, a.pair_distances(vecs))
+    texts += [s["text"] for s in sim]
+    texts.append(c.link_sentence(a.Link("효자2동", "여의동", 2))["text"])
+    for text in texts:
+        found = [p for p in c.tone(text, NAMES) if not p.startswith("끝")]
+        assert found == [], text
+
+
+def test_want_covers_every_axis_and_passes_tone():
+    """축마다 조건절 표가 있고, 그 규칙 문장은 말투 · 섞임 검사를 통과한다."""
+    from explore.chat import region
+
+    assert set(c.WANT) == set(a.AXIS_KO)
+    for axis in a.AXIS_KO:
+        text = c.want(axis, "효자2동")
+        assert c.tone(text, NAMES) == [], text
+        assert region.mixed(text, axis) == [], text
+        assert a.AXIS_KO[axis] not in text, text  # 축 데이터 이름을 그대로 넣지 않는다
+
+
+def test_both_phrase_reads_naturally():
+    assert c.both_phrase("quiet", "coast") == "조용하면서 바다도 가까운"
+    assert c.both_phrase("coast", "quiet") == "바다가 가까우면서 조용한"
+    assert c.both_phrase("peer", "evening") == "또래가 많으면서 저녁에도 활기 있는"

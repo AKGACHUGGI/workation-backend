@@ -26,6 +26,17 @@ def dong_raw(code: str) -> dict | None:
     return raw
 
 
+def region_raw(code: str) -> dict | None:
+    """fetch_region 원재료 1시간. 없는 시군구(None)는 캐시하지 않는다."""
+    key = f"explore:region:raw:{code}"
+    raw = cache.get(key)
+    if raw is None:
+        raw = queries.fetch_region(code)
+        if raw is not None:
+            cache.set(key, raw, RAW_TTL)
+    return raw
+
+
 def _static(key: str, load):
     hit = cache.get(key)
     if hit is None:

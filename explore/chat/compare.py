@@ -3,7 +3,7 @@
 축별 순서(코드 계산)만 프롬프트에 넣고 LLM 은 상황 고르기와 문장만 맡는다.
 문장마다 방향(문장 속 동 이름이 그 축 단독 1등) · 이름 · 숫자 · 금지어 · 모양을 검사하고,
 걸린 문장은 그 축의 규칙 문장으로 바꾼다. 근거 줄은 코드가 만든다.
-시각 · 달 · 닮음 비교는 상황을 고를 게 없어 규칙 문장만 쓴다.
+달 · 닮음 비교는 상황을 고를 게 없어 규칙 문장만 쓴다(시각은 chat/both.py).
 """
 
 from __future__ import annotations
@@ -25,19 +25,81 @@ logger = logging.getLogger(__name__)
 
 Generate = Callable[[str, str, type[BaseModel]], BaseModel]
 
-PROMPT_VERSION = "c3"  # 프롬프트 · 검사를 고치면 올린다 (캐시 키에 들어간다)
+PROMPT_VERSION = "c5"  # 프롬프트 · 검사 · 규칙 문장을 고치면 올린다 (캐시 키에 들어간다)
 CACHE_TTL = 24 * 60 * 60  # 비교 답 캐시 1일 (스펙 §7-2)
 JARGON = ("지표", "벡터", "거리", "백분위", "노드", "그래프", "데이터")
 NO_CONCLUSION = ("모두", "둘 다", "셋 다")
 QUESTION = {"compare_summary": "어느 동네가 나한테 맞아?"}
+# 답 · 자료를 설명하는 말(메타카피)과 면책 · 완곡(컴플라이언스 문체). 시군구 답도 쓴다
+META = ("알려드", "알려 드", "에 따르면", "분석", "추천", "아래는", "다음은")
+HEDGE = (
+    "참고", "다를 수", "일 수 있", "을 수 있", "수도 있", "개인차", "확인해", "보세요",
+)  # fmt: skip
+# 축 뜻을 넓히는 말('또래' → 친구)과 어색한 조건절 · 끝맺음
+AWKWARD = ("친구", "좋으려면", "느껴진다면", "느껴지면", "괜찮")
+# 동 이름 바로 뒤 끝맺음 ('○○동이에요', '○○동이 있어요')
+NAME_ENDING = ("이에요", "예요", "입니다", "이 있어요", "가 있어요")
+# 유형 이름(몰입형 등)은 문장에 그대로 쓰지 않고 풀어 쓴다
+PLAIN = {
+    "type:immersion": "혼자 집중해서 일하기",
+    "type:networking": "사람들과 어울리며 일하기",
+    "type:local": "현지 주민처럼 지내기",
+}
+# 규칙 문장 표: 축 → (조건절, 끝맺음). 축 데이터 이름('또래 밀도') 대신 LLM 문형 예시와 같은 말투
+WANT = {
+    "quiet": ("조용히 일하고 싶다면", "맞아요"),
+    "peer": ("또래가 많은 곳을 찾는다면", "좋아요"),
+    "evening": ("저녁에도 활기 있는 곳을 원한다면", "나아요"),
+    "coast": ("바다 가까이 머물고 싶다면", "좋아요"),
+    "life": ("현지 생활처럼 지내고 싶다면", "맞아요"),
+    "tourist": ("여행하듯 지내고 싶다면", "맞아요"),
+    "type:immersion": ("혼자 집중해서 일하고 싶다면", "맞아요"),
+    "type:networking": ("사람들과 어울리며 일하고 싶다면", "맞아요"),
+    "type:local": ("현지 주민처럼 지내고 싶다면", "맞아요"),
+}
+# 두 조건을 잇는 말: 축 → (앞 '~하면서', 뒤 '~도 ~한', 홀로 '~한'). '조용하면서 바다도 가까운 곳'
+LINK = {
+    "quiet": ("조용하면서", "조용한", "조용한"),
+    "peer": ("또래가 많으면서", "또래도 많은", "또래가 많은"),
+    "evening": ("저녁에도 활기 있으면서", "저녁에도 활기 있는", "저녁에 활기 있는"),
+    "coast": ("바다가 가까우면서", "바다도 가까운", "바다 가까운"),
+    "life": ("생활권 성격이면서", "생활권 성격인", "생활권 성격인"),
+    "tourist": ("관광지 성격이면서", "관광지 성격인", "관광지 성격인"),
+    "type:immersion": ("혼자 집중하기 좋으면서", "혼자 집중하기도 좋은", "혼자 집중하기 좋은"),
+    "type:networking": (
+        "사람들과 어울리기 좋으면서", "사람들과 어울리기도 좋은", "사람들과 어울리기 좋은",
+    ),
+    "type:local": (
+        "현지 주민처럼 지내기 좋으면서", "현지 주민처럼 지내기도 좋은", "현지 주민처럼 지내기 좋은",
+    ),
+}  # fmt: skip
+# 동점 · 공통점 문장의 주어: '조용한 정도는 A·B가 같은 등급이에요'
+LEVEL = {
+    "quiet": "조용한 정도",
+    "peer": "또래가 많은 정도",
+    "evening": "저녁 활기 정도",
+    "coast": "바다 가까운 정도",
+}
+TONE_RULES = [
+    "- 조건은 '~원한다면', '~찾는다면', '~싶다면'으로 쓴다. "
+    "'~좋으려면', '~느껴진다면'은 쓰지 않는다.",
+    "- 문장 끝은 '맞아요', '좋아요', '나아요'로 맺는다. '괜찮아요'는 쓰지 않는다. "
+    "'○○동이에요', '○○동이 있어요'처럼 동네 이름으로 끝내지 않는다.",
+    "- 또래는 '또래가 많은', '비슷한 나이대가 많은' 뜻으로만 쓴다. '친구들과'로 넓히지 않는다.",
+    "- 답이나 자료를 설명하는 말을 쓰지 않는다. "
+    "예: '알려드릴게요', '데이터에 따르면', '분석 결과', '추천드려요', '아래는'.",
+    "- 면책 · 완곡 표현을 쓰지 않는다. 예: '참고용이에요', '다를 수 있어요', "
+    "'~일 수 있어요', '개인차가 있어요', '확인해 보세요'.",
+]
 
 SYSTEM = "\n".join(
     [
         "너는 워케이션 지도 서비스의 동네 비교 안내자다. 사용자가 준 축별 순서만 근거로 쓴다.",
         "- 문장마다 상황 하나와 그 상황에 맞는 동네 하나를 고른다.",
         "- 문장마다 문형을 다르게 쓴다. 예: '조용히 일하고 싶다면 ○○이 맞아요', "
-        "'저녁에 활기를 찾는다면 ○○ 쪽이 나아요', '또래가 많은 곳은 ○○이에요'. "
+        "'저녁에 활기를 찾는다면 ○○ 쪽이 나아요', '또래가 많은 곳을 찾는다면 ○○이 좋아요'. "
         "예시를 그대로 베끼지 말고 상황에 맞게 바꿔 쓴다.",
+        *TONE_RULES,
         "- 앞 문장과 다른 동네를 고른 문장은 '반면', '대신'으로 시작해도 된다.",
         "- 존댓말 해요체, 문장마다 60자 이내.",
         "- 문장마다 다른 axis 를 쓰고, 그 축 순서의 맨 앞 동네 이름 하나만 문장에 쓴다.",
@@ -98,9 +160,16 @@ def names_in(text: str, names: list[str]) -> list[str]:
     return [name for _, name in sorted(hits)]
 
 
-def problems(s: dict, by_axis: dict[str, Order], names: list[str], seen: set[str]) -> list[str]:
+def tied_top(o: Order) -> list[str]:
+    """그 축 1등 값과 같은 동 이름들, 순서대로."""
+    return [n for n, v in o.ranked if v == o.ranked[0][1]]
+
+
+def problems(
+    s: dict, by_axis: dict[str, Order], names: list[str], seen: set[str], *, ties_ok: bool = False
+) -> list[str]:
     """문제 목록. 비어 있으면 통과 (스펙 §6-2). 문장 속 비교 동 이름이 정확히 하나여야 하고,
-    그 동이 그 축의 단독 1등이어야 한다."""
+    그 동이 그 축의 단독 1등이어야 한다. ties_ok 면 1등 동점 중 아무 동이나 된다(시군구 답)."""
     text, axis = s["text"], s["axis"]
     out = []
     named = list(dict.fromkeys(names_in(text, names)))
@@ -110,7 +179,7 @@ def problems(s: dict, by_axis: dict[str, Order], names: list[str], seen: set[str
         out.append("이름: 문장에 비교 동 이름 없음")
     elif len(named) > 1:
         out.append(f"이름: 동 이름 여러 개 {named}")
-    elif top != named[0]:
+    elif top != named[0] and not (ties_ok and order and named[0] in tied_top(order)):
         out.append(f"방향: {axis} 1등 {top}, 문장 속 동 {named[0]}")
     if axis in seen:
         out.append("같은 축 중복")
@@ -127,6 +196,22 @@ def problems(s: dict, by_axis: dict[str, Order], names: list[str], seen: set[str
         out.append(f"금지어: {banned}")
     if not text.rstrip().rstrip(".!?").endswith("요"):
         out.append("해요체 아님")
+    return out + tone(text, names)
+
+
+def tone(text: str, names: list[str]) -> list[str]:
+    """말투 문제: 메타카피 · 면책 · 완곡 · 넓힌 말 · 어색한 조건절 · 동 이름으로 끝맺기."""
+    out = []
+    for label, words in (("메타카피", META), ("완곡", HEDGE), ("어색", AWKWARD)):
+        hit = [w for w in words if w in text]
+        if hit:
+            out.append(f"{label}: {hit}")
+    plain = text
+    for name in sorted(names, key=len, reverse=True):
+        plain = plain.replace(name, "\0")
+    body = END.sub("", plain.rstrip())
+    if any(body.endswith(f"\0{e}") for e in NAME_ENDING):
+        out.append("끝: 동 이름으로 끝남")
     return out
 
 
@@ -153,13 +238,24 @@ def tidy(text: str) -> str:
     return body + mark
 
 
+def want(axis: str, name: str) -> str:
+    """'조용히 일하고 싶다면 ○○이 맞아요.' (name 은 'A·B' 처럼 여럿일 수 있다)"""
+    clause, end = WANT[axis]
+    return f"{clause} {josa(name, '이/가')} {end}."
+
+
+def both_phrase(first: str, second: str) -> str:
+    """두 조건을 겹친 꾸밈말: '조용하면서 바다도 가까운'."""
+    return f"{LINK[first][0]} {LINK[second][1]}"
+
+
 def rule_sentence(o: Order) -> str:
-    ko = AXIS_KO[o.axis]
     if o.top is None:
-        tied = "·".join(n for n, v in o.ranked if v == o.ranked[0][1])
+        ko = LEVEL.get(o.axis) or PLAIN.get(o.axis) or AXIS_KO[o.axis]
+        tied = "·".join(tied_top(o))
         same = "같은 등급이에요" if o.axis in GRADE_AXES else "비슷해요"
         return f"{josa(ko)} {josa(tied, '이/가')} {same}."
-    return f"{josa(ko, '을/를')} 원한다면 {josa(o.top, '이/가')} 맞아요."
+    return want(o.axis, o.top)
 
 
 def _item(text: str, o: Order, by_name: dict[str, Dong], source: str) -> dict:
@@ -167,9 +263,19 @@ def _item(text: str, o: Order, by_name: dict[str, Dong], source: str) -> dict:
 
 
 def compose(
-    generate: Generate | None, user: str, dongs: list[Dong], orders: list[Order]
+    generate: Generate | None,
+    user: str,
+    dongs: list[Dong],
+    orders: list[Order],
+    extra: Callable[[dict], list[str]] | None = None,
+    *,
+    system: str = SYSTEM,
+    rule: Callable[[Order], str] = rule_sentence,
+    ties_ok: bool = False,
 ) -> tuple[list[dict], str]:
-    """생성 → 검사 → 실패한 문장 · 빠진 축은 규칙 문장. 축 순서대로. (문장들, source)"""
+    """생성 → 검사 → 실패한 문장 · 빠진 축은 규칙 문장. 축 순서대로. (문장들, source)
+    extra(문장 {text, axis}) · system · rule · ties_ok 는 부르는 쪽 전용 검사 · 프롬프트 ·
+    규칙 문장 · 동점 허용. 시군구 답이 쓴다."""
     if not orders:
         return [], "rule"
     by_axis = {o.axis: o for o in orders}
@@ -178,24 +284,25 @@ def compose(
     items: list[dict] = []
     if generate is not None:
         try:
-            reply = generate(SYSTEM, user, answer_model(list(by_axis)))
+            reply = generate(system, user, answer_model(list(by_axis)))
             items = [s.model_dump() for s in reply.sentences]
         except Exception as ex:  # HCX 오류 · 시간 초과 · 스키마 불일치 모두 규칙 문장으로
             logger.warning("비교 답 생성 실패: %s", ex)
     done: dict[str, dict] = {}
     seen: set[str] = set()
     for s in items:
-        found = problems(s, by_axis, names, seen)
+        found = problems(s, by_axis, names, seen, ties_ok=ties_ok)
+        found += extra(s) if extra else []
         seen.add(s["axis"])
         if s["axis"] in done:
             continue
         o = by_axis[s["axis"]]
         if found:
             logger.info("비교 답 문장 교체 %r: %s", s["text"], found)
-            done[o.axis] = _item(rule_sentence(o), o, by_name, "rule")
+            done[o.axis] = _item(rule(o), o, by_name, "rule")
         else:
             done[o.axis] = _item(s["text"], o, by_name, "llm")
-    out = [done.get(o.axis) or _item(rule_sentence(o), o, by_name, "rule") for o in orders]
+    out = [done.get(o.axis) or _item(rule(o), o, by_name, "rule") for o in orders]
     out = _fix_contrast(out, names)
     passed = sum(s["source"] == "llm" for s in out)
     source = "llm" if passed == len(out) else "rule" if passed == 0 else "mixed"
@@ -222,41 +329,6 @@ def _fix_contrast(items: list[dict], names: list[str]) -> list[dict]:
 
 def _rule(text: str, evidence: str | None = None) -> dict:
     return {"text": text, "evidence": evidence, "source": "rule"}
-
-
-def _each(pairs: list[tuple[str, int]], pair: str) -> str:
-    """[(동, 시)] → 'A·B 모두 14시' (모두 같을 때) 또는 'A가 11시, B가 14시'."""
-    if len(pairs) > 1 and len({h for _, h in pairs}) == 1:
-        return f"{'·'.join(n for n, _ in pairs)} 모두 {pairs[0][1]}시"
-    return ", ".join(f"{josa(n, pair)} {h}시" for n, h in pairs)
-
-
-def hours_sentences(raws: list[dict], day: str) -> list[dict]:
-    """동들을 한 문장에 견준다.
-    평일은 붐비는 시각 · 업무시간 한산 시각, 주말은 붐비는 시각만(스펙 §11)."""
-    ko = "평일" if day == "weekday" else "주말"
-    peaks, quiets, shown = [], [], []
-    for r in raws:
-        rec = r["rec"]
-        hours = brief._hours(rec)
-        peak, quiet = hours.get(("PEAK_AT", day)), hours.get(("QUIET_AT", day))
-        if peak is None:
-            continue
-        name = rec["dong"]["name"]
-        peaks.append((name, peak))
-        if quiet is not None:
-            quiets.append((name, quiet))
-        shown.append(f"{name} {peak}시 {rec['dong'][f'driv_{day}'][peak]}명")
-    if not peaks:
-        return [_rule(ask.NO_DATA)]
-    if day == "weekday" and len(quiets) == len(peaks):
-        same = len(quiets) > 1 and len({h for _, h in quiets}) == 1
-        who = ("둘 다" if len(quiets) == 2 else "모두") if same else ""
-        calm = f"{who} {quiets[0][1]}시" if same else _each(quiets, "은/는")
-        text = f"평일엔 {_each(peaks, '이/가')}에 가장 붐비고, 업무시간엔 {calm}가 한산해요."
-    else:
-        text = f"{ko}엔 {_each(peaks, '이/가')}에 차가 가장 많아요."
-    return [_rule(text, f"{ko} 차량 이동 인구 가장 많은 시각: {' · '.join(shown)}")]
 
 
 def months_sentences(raws: list[dict]) -> list[dict]:
@@ -311,13 +383,20 @@ def common_sentence(items: list[tuple[str, str]], count: int) -> str | None:
         elif key.startswith("life:"):
             clauses.append((f"{label} 성격이 강하고", f"{label} 성격이 강해요"))
         elif key.startswith("type:"):
-            name = josa(label.removeprefix("1위 "), "이/가")
-            clauses.append((f"{name} 가장 잘 맞고", f"{name} 가장 잘 맞아요"))
+            ko = label.removeprefix("1위 ")
+            axis = next((a for a, v in AXIS_KO.items() if v == ko), "")
+            plain = PLAIN.get(axis)
+            if plain:
+                clauses.append((f"{plain} 좋고", f"{plain} 좋아요"))
+            else:
+                name = josa(ko, "이/가")
+                clauses.append((f"{name} 잘 맞고", f"{name} 잘 맞아요"))
         elif key.startswith("grade:"):
-            metrics.append(label.rsplit(" ", 1)[0])
+            axis = key.split(":")[1]
+            metrics.append(LEVEL.get(axis) or label.rsplit(" ", 1)[0])
     if metrics:
-        what = "·".join(metrics[:2])
-        clauses.append((f"{what} 수준이 같고", f"{what} 수준이 같아요"))
+        what = josa("·".join(metrics[:2]), "이/가")
+        clauses.append((f"{what} 같고", f"{what} 같아요"))
     clauses = clauses[:3]
     if not clauses:
         return None

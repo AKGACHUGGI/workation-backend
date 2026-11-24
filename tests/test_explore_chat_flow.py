@@ -7,7 +7,7 @@ from redisvl.exceptions import RedisSearchError
 from explore import ask
 from explore.chat import arrange, flow
 from explore.chat.resolve import TOO_MANY
-from tests.explore_chat_samples import GYO, HYOJA, NAMES, RAWS, YEOUI
+from tests.explore_chat_samples import GYO, HYOJA, NAMES, RAWS, REGION_RAW, YEOUI
 
 VECS = {
     HYOJA: ((0.73, 0.56, 0.79, 0.7), False),
@@ -21,6 +21,18 @@ INTENTS = {
     "비교해 줘": ["compare_summary"],
     "여의동, 교1동, 송천1동 다 비교해 줘": ["compare_summary"],
     "둘이 비슷해?": ["similar"],
+}
+REGION_FOUND = {
+    "조용한 동네 어디야?": ["find_quiet"],
+    "몇 월에 가면 한산해?": ["region_months"],
+    "몇 시에 붐벼?": ["weekday_hours"],
+    "맛집 있어?": ["unknown_place"],
+}
+INTENTS["저녁엔?"] = ["evening"]
+INTENTS["효자2동이랑 여의동 비교해 줘"] = ["compare_summary"]
+WALK = {
+    "weekday": {"peakHour": 11, "lowHour": 18, "lowValue": 90},
+    "weekend": {"peakHour": 12, "lowHour": 9, "lowValue": 88},
 }
 
 
@@ -36,20 +48,49 @@ def deps(generate=None, singles=None):
             singles.append((code, intents))
         return ["한 동 답이에요."], "llm"
 
+    def find_intents(q, scope="dong"):
+        table = REGION_FOUND if scope == "region" else INTENTS
+        return table.get(q, ["unknown_other"]), 0.9
+
     return flow.Deps(
         names=lambda: NAMES,
         raw=RAWS.get,
-        find_intents=lambda q: (INTENTS.get(q, ["unknown_other"]), 0.9),
+        find_intents=find_intents,
         single=single,
         generate=generate,
         vecs=lambda: VECS,
         pairs=lambda: arrange.pair_distances(VECS),
+        region_raw={"45111": REGION_RAW}.get,
+        walk_peaks=lambda code, month: WALK,
+        best_months=lambda sgg: [2, 3],
     )
 
 
-def ask_(graph, question, cid=None, panel=HYOJA, criteria=None):
+def ask_(graph, question, cid=None, panel=HYOJA, criteria=None, month=None, walk=False):
     criteria = criteria or arrange.clean_criteria(None)
-    return flow.run(graph, cid, panel, question, criteria)
+    inp = {
+        "surface": "dong",
+        "panel": panel,
+        "sigungu": None,
+        "month": month,
+        "walk": walk,
+        "question": question,
+        "criteria": criteria,
+    }
+    return flow.run(graph, cid, inp)
+
+
+def ask_region(graph, question, cid=None, sgg="45111"):
+    inp = {
+        "surface": "region",
+        "panel": None,
+        "sigungu": sgg,
+        "month": 10,
+        "walk": True,
+        "question": question,
+        "criteria": arrange.clean_criteria(None),
+    }
+    return flow.run(graph, cid, inp)
 
 
 def test_settle_intents():
@@ -89,7 +130,7 @@ def test_three_turns_carry_dongs_and_intent():
     assert s2["intents"] == ["quiet"]
     assert s2["sentences"] == [
         {
-            "text": "조용함을 원한다면 효자2동이 맞아요.",
+            "text": "조용히 일하고 싶다면 효자2동이 맞아요.",
             "evidence": "조용함: 효자2동 S(73점) · 여의동 A(57점)",
             "source": "rule",
         }
@@ -98,7 +139,8 @@ def test_three_turns_carry_dongs_and_intent():
     _, s3 = ask_(graph, "주말엔?", cid)  # 동 이름 없음 → 두 동 이어받기
     assert s3["dongs"] == [HYOJA, YEOUI]
     assert [x["text"] for x in s3["sentences"]] == [
-        "주말엔 효자2동·여의동 모두 14시에 차가 가장 많아요."
+        "효자2동은 주말 차량이 14시에 가장 많아요.",
+        "여의동은 주말 차량이 14시에 가장 많아요.",
     ]
     assert len(s3["turns"]) == 3
 
@@ -193,3 +235,84 @@ def test_respond_shape():
     assert body["guide"] is None
     assert body["examples"] == list(flow.COMPARE_EXAMPLES)
     assert set(body["sentences"][0]) == {"text", "evidence", "source"}
+
+
+def test_dong_hours_both_with_month():
+    graph = flow.build(deps())
+    _, state = ask_(graph, "주말엔?", month=10, walk=True)
+    assert [x["text"] for x in state["sentences"]] == [
+        "효자2동은 주말 차량이 14시에 가장 많고, "
+        "걸어 다니는 사람은 10월 기준 12시에 가장 붐비고 9시에 가장 한산해요."
+    ]
+    assert state["scope"] == "dong"
+
+
+def test_region_find_then_compare_then_follow():
+    graph = flow.build(deps())
+    cid, s1 = ask_region(graph, "조용한 동네 어디야?")
+    assert s1["scope"] == "region"
+    assert s1["dongs"] == [HYOJA, YEOUI, GYO]
+    assert s1["sentences"][0]["text"] == "조용히 일하고 싶다면 효자2동이 맞아요."
+
+    _, s2 = ask_region(graph, "효자2동이랑 여의동 비교해 줘", cid)
+    assert (s2["scope"], s2["dongs"]) == ("dong", [HYOJA, YEOUI])
+    assert s2["intents"] == ["compare_summary"]  # 비교 말투는 직전 의도보다 앞선다
+
+    _, s3 = ask_region(graph, "저녁엔?", cid)  # 동 대화 이어받기
+    assert (s3["scope"], s3["dongs"], s3["intents"]) == ("dong", [HYOJA, YEOUI], ["evening"])
+
+    _, s4 = ask_region(graph, "조용한 동네 어디야?", cid)  # 찾기 말 → 다시 시군구 답
+    assert s4["scope"] == "region"
+
+
+def test_region_months_hours_and_unknown():
+    graph = flow.build(deps())
+    _, state = ask_region(graph, "몇 월에 가면 한산해?")
+    assert state["sentences"][0]["text"] == (
+        "지도 탐색 기준으로는 1·2·8월이 한산하고, 방문 기준 가기 좋은 달은 2·3월이에요."
+    )
+    assert state["dongs"] == []
+    _, state = ask_region(graph, "몇 시에 붐벼?")
+    assert state["guide"] == ask.REGION_HOURS_GUIDE
+    _, state = ask_region(graph, "맛집 있어?")
+    assert state["guide"] == ask.GUIDE["unknown_place"][0]
+
+
+def test_region_respond_examples_and_scope():
+    graph = flow.build(deps())
+    cid, state = ask_region(graph, "조용한 동네 어디야?")
+    body = flow.respond(cid, state, NAMES)
+    assert body["scope"] == "region"
+    assert body["examples"] == [
+        "효자2동은 저녁에 어때?",
+        "효자2동이랑 여의동 비교해 줘",
+        "몇 월에 가면 한산해?",
+    ]
+    _, state = ask_region(graph, "맛집 있어?")
+    assert flow.respond(cid, state, NAMES)["examples"] == ask.REGION_FIRST
+
+
+def test_other_sigungu_starts_new_region_conversation():
+    graph = flow.build(deps())
+    cid, _ = ask_region(graph, "조용한 동네 어디야?")
+    cid2, _ = ask_region(graph, "조용한 동네 어디야?", cid, sgg="51150")
+    assert cid2 != cid
+
+
+def test_region_guide_turn_keeps_scope():
+    graph = flow.build(deps())
+    cid, _ = ask_region(graph, "조용한 동네 어디야?")
+    _, guided = ask_region(graph, "강릉시 경포동은 어때?", cid)
+    assert guided["guide"] is not None
+    assert (guided["scope"], guided["dongs"]) == ("region", [HYOJA, YEOUI, GYO])
+    _, state = ask_region(graph, "저녁엔?", cid)  # 후보 3곳 비교로 가지 않는다
+    assert state["scope"] == "region"
+
+
+def test_region_answer_then_dong_name_carries_intent():
+    singles = []
+    graph = flow.build(deps(singles=singles))
+    cid, _ = ask_region(graph, "조용한 동네 어디야?")
+    _, state = ask_region(graph, "효자2동은?", cid)  # find_quiet → quiet 로 이어받기
+    assert (state["scope"], state["dongs"], state["intents"]) == ("dong", [HYOJA], ["quiet"])
+    assert singles == [(HYOJA, ["quiet"])]

@@ -90,3 +90,45 @@ unknown_other,치안 괜찮아?,false
 unknown_other,와이파이 잘 돼?,false
 unknown_other,물가 비싸?,false
 unknown_other,병원 가까워?,false
+find_quiet,조용한 동네 어디야?,true
+find_quiet,한적한 동네 알려 줘,false
+find_quiet,여기서 제일 조용한 데는?,false
+find_quiet,사람 적은 동네 있어?,false
+find_quiet,북적이지 않는 동네는?,false
+find_peer,또래가 많은 동네는?,true
+find_peer,젊은 사람 많은 동네 어디야?,false
+find_peer,2030 많이 오는 데는?,false
+find_peer,또래 워케이셔너 많은 곳은?,false
+find_peer,젊은 분위기 동네 있어?,false
+find_evening,저녁에 활기 있는 데는?,true
+find_evening,밤에 북적이는 동네는?,false
+find_evening,밤에도 사람 많은 동네는?,false
+find_evening,저녁에 사람 많은 동네 어디야?,false
+find_evening,저녁에 북적이는 데 어디야?,false
+find_type,집중해서 일하기 좋은 동네는?,true
+find_type,네트워킹하기 좋은 동네 어디야?,false
+find_type,로컬살이하기 좋은 동네는?,false
+find_type,혼자 일하기 좋은 동네는?,false
+find_type,몰입형으로 일할 동네 어디야?,false
+find_type,사람들과 교류하며 일할 동네는?,false
+find_coast,바다 가까운 동네 있어?,true
+find_coast,바닷가 동네 어디야?,false
+find_coast,해변 근처 동네 알려 줘,false
+find_coast,바다 보이는 동네는?,false
+find_coast,해안 근처 데는?,false
+find_life,관광지 말고 생활권 동네는?,true
+find_life,주민들 사는 동네 어디야?,false
+find_life,관광지 동네는 어디야?,false
+find_life,현지인 생활권 동네 알려 줘,false
+find_life,관광객 많은 동네는?,false
+region_months,몇 월에 가면 한산해?,true
+region_months,이 지역 비수기는 언제야?,false
+region_months,사람 적은 달은 언제야?,false
+region_months,언제 가면 덜 붐벼?,false
+region_months,한산한 달 알려 줘,false
+region_profile,여긴 어떤 곳이야?,true
+region_profile,이 지역 분위기 어때?,false
+region_profile,어떤 동네들이 있어?,false
+region_profile,이 지역 어떤 느낌이야?,false
+region_profile,여기 소개해 줘,false
+region_profile,어떤 워케이션 유형이 많아?,false

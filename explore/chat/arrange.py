@@ -22,6 +22,7 @@ AXIS_KO = {
     **METRIC_KO,
     "coast": "바다 가까움",
     "life": "생활권 분위기",
+    "tourist": "관광지 분위기",
     **{f"type:{t}": derive.TYPE_KO[t] for t in derive.TYPES},
 }
 # 기준 칩 키 → 축 (스펙 §5-3 칩 목록)
