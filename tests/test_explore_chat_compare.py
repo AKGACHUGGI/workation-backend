@@ -130,41 +130,6 @@ def test_compose_without_llm_or_on_error():
     assert source == "rule" and len(sentences) == 2
 
 
-def test_hours_sentences_compare_in_one_sentence(monkeypatch):
-    raws = [RAWS[HYOJA], RAWS[YEOUI]]
-    assert c.hours_sentences(raws, "weekday") == [
-        {
-            "text": (
-                "평일엔 효자2동·여의동 모두 12시에 가장 붐비고, 업무시간엔 둘 다 9시가 한산해요."
-            ),
-            "evidence": (
-                "평일 차량 이동 인구 가장 많은 시각: 효자2동 12시 100명 · 여의동 12시 100명"
-            ),
-            "source": "rule",
-        }
-    ]
-    assert c.hours_sentences(raws, "weekend")[0]["text"] == (
-        "주말엔 효자2동·여의동 모두 14시에 차가 가장 많아요."
-    )
-    hours = {HYOJA: (11, 9), YEOUI: (14, 10), GYO: (12, 9)}
-
-    def fake_hours(rec):
-        peak, quiet = hours[rec["dong"]["code"]]
-        return {("PEAK_AT", d): peak for d in ("weekday", "weekend")} | {
-            ("QUIET_AT", "weekday"): quiet
-        }
-
-    monkeypatch.setattr(c.brief, "_hours", fake_hours)
-    three = [RAWS[HYOJA], RAWS[YEOUI], RAWS[GYO]]
-    assert c.hours_sentences(three, "weekend")[0]["text"] == (
-        "주말엔 효자2동이 11시, 여의동이 14시, 교1동이 12시에 차가 가장 많아요."
-    )
-    assert c.hours_sentences(raws, "weekday")[0]["text"] == (
-        "평일엔 효자2동이 11시, 여의동이 14시에 가장 붐비고, "
-        "업무시간엔 효자2동은 9시, 여의동은 10시가 한산해요."
-    )
-
-
 def test_months_similarity_link():
     raws = [RAWS[HYOJA], RAWS[YEOUI]]
     assert c.months_sentences(raws)[0]["text"] == (

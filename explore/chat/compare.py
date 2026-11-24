@@ -3,7 +3,7 @@
 축별 순서(코드 계산)만 프롬프트에 넣고 LLM 은 상황 고르기와 문장만 맡는다.
 문장마다 방향(문장 속 동 이름이 그 축 단독 1등) · 이름 · 숫자 · 금지어 · 모양을 검사하고,
 걸린 문장은 그 축의 규칙 문장으로 바꾼다. 근거 줄은 코드가 만든다.
-시각 · 달 · 닮음 비교는 상황을 고를 게 없어 규칙 문장만 쓴다.
+달 · 닮음 비교는 상황을 고를 게 없어 규칙 문장만 쓴다(시각은 chat/both.py).
 """
 
 from __future__ import annotations
@@ -222,41 +222,6 @@ def _fix_contrast(items: list[dict], names: list[str]) -> list[dict]:
 
 def _rule(text: str, evidence: str | None = None) -> dict:
     return {"text": text, "evidence": evidence, "source": "rule"}
-
-
-def _each(pairs: list[tuple[str, int]], pair: str) -> str:
-    """[(동, 시)] → 'A·B 모두 14시' (모두 같을 때) 또는 'A가 11시, B가 14시'."""
-    if len(pairs) > 1 and len({h for _, h in pairs}) == 1:
-        return f"{'·'.join(n for n, _ in pairs)} 모두 {pairs[0][1]}시"
-    return ", ".join(f"{josa(n, pair)} {h}시" for n, h in pairs)
-
-
-def hours_sentences(raws: list[dict], day: str) -> list[dict]:
-    """동들을 한 문장에 견준다.
-    평일은 붐비는 시각 · 업무시간 한산 시각, 주말은 붐비는 시각만(스펙 §11)."""
-    ko = "평일" if day == "weekday" else "주말"
-    peaks, quiets, shown = [], [], []
-    for r in raws:
-        rec = r["rec"]
-        hours = brief._hours(rec)
-        peak, quiet = hours.get(("PEAK_AT", day)), hours.get(("QUIET_AT", day))
-        if peak is None:
-            continue
-        name = rec["dong"]["name"]
-        peaks.append((name, peak))
-        if quiet is not None:
-            quiets.append((name, quiet))
-        shown.append(f"{name} {peak}시 {rec['dong'][f'driv_{day}'][peak]}명")
-    if not peaks:
-        return [_rule(ask.NO_DATA)]
-    if day == "weekday" and len(quiets) == len(peaks):
-        same = len(quiets) > 1 and len({h for _, h in quiets}) == 1
-        who = ("둘 다" if len(quiets) == 2 else "모두") if same else ""
-        calm = f"{who} {quiets[0][1]}시" if same else _each(quiets, "은/는")
-        text = f"평일엔 {_each(peaks, '이/가')}에 가장 붐비고, 업무시간엔 {calm}가 한산해요."
-    else:
-        text = f"{ko}엔 {_each(peaks, '이/가')}에 차가 가장 많아요."
-    return [_rule(text, f"{ko} 차량 이동 인구 가장 많은 시각: {' · '.join(shown)}")]
 
 
 def months_sentences(raws: list[dict]) -> list[dict]:
