@@ -138,10 +138,11 @@ def _strengths(cands: list[Spot], conditions: list[str]) -> list[str]:
 
 
 def plan(spots: list[Spot], conditions: list[str]) -> Plan:
-    if conditions == TYPE_AXES:  # 유형을 안 정한 유형 질문: 유형마다 1위
-        tops = [ranked(spots, a)[:1] for a in TYPE_AXES]
-        cands = list({s.dong.code: s for top in tops for s in top}.values())
-        return Plan(conditions, list(TYPE_AXES), cands)
+    if conditions == TYPE_AXES:  # 유형을 안 정한 유형 질문: 기준을 넘는 동이 있는 유형마다 1위
+        tops = {a: ranked(spots, a)[:1] for a in TYPE_AXES}
+        axes = [a for a in TYPE_AXES if tops[a]]
+        cands = list({s.dong.code: s for a in axes for s in tops[a]}.values())
+        return Plan(conditions, axes, cands)
     if len(conditions) == 1:
         cands = ranked(spots, conditions[0])[:MAX_SPOTS]
         if not cands:
@@ -197,6 +198,8 @@ def _want(axis: str, name: str) -> str:
 
 
 def _none(p: Plan, spots: list[Spot], sgg: str) -> list[dict]:
+    if p.conditions == TYPE_AXES:
+        return [_rule(f"{sgg}에는 유형이 뚜렷한 동네가 없어요.")]
     if len(p.conditions) == 1:
         axis = p.conditions[0]
         what = "바다 가까운 동네" if axis == "coast" else f"{AXIS_KO[axis]} 조건에 맞는 동네"
@@ -212,8 +215,11 @@ def _none(p: Plan, spots: list[Spot], sgg: str) -> list[dict]:
 
 def _one(p: Plan, sgg: str) -> dict:
     s = p.spots[0]
+    if p.conditions == TYPE_AXES:  # 후보가 1위인 유형 축 (plan 이 그런 축만 남긴다)
+        axis = p.axes[0]
+        return _rule(_want(axis, s.dong.name), evidence(axis, p.spots, sgg))
     ev = evidence(p.conditions[0], p.spots, sgg)
-    if len(p.conditions) == 1 or p.conditions == TYPE_AXES:
+    if len(p.conditions) == 1:
         return _rule(_want(p.conditions[0], s.dong.name), ev)
     a, b = p.conditions
     text = (

@@ -178,3 +178,27 @@ def test_answer_profile():
     assert out[0]["evidence"] == (
         "로컬살이형 2곳 · 몰입형 1곳 · 네트워킹형 1곳 · 생활권 3곳 · 관광지 1곳"
     )
+
+
+def with_types(keep=()):
+    """유형 점수를 모두 30(기준 아래)으로, keep = [(동 코드, 유형 이름)] 만 원래 점수."""
+    dongs = [
+        {**d, "types": [[k, n, s if (d["code"], n) in keep else 30] for k, n, s in d["types"]]}
+        for d in REGION_RAW["dongs"]
+    ]
+    return {**REGION_RAW, "dongs": dongs}
+
+
+def test_type_question_uses_only_types_with_a_top():
+    raw = with_types([(YEOUI, "네트워킹형")])
+    p = r.plan(r.spots_of(raw), r.TYPE_AXES)
+    assert (names(p.spots), p.axes) == (["여의동"], ["type:networking"])
+    out, _, codes = r.answer(None, raw, "find_type", "어떤 워케이션 유형이 많아?")
+    assert texts(out) == ["네트워킹형을 원한다면 여의동이 맞아요."]
+    assert out[0]["evidence"] == "네트워킹형: 여의동 65점"
+    assert codes == [YEOUI]
+
+
+def test_type_question_without_any_type():
+    out, _, codes = r.answer(None, with_types(), "find_type", "어떤 워케이션 유형이 많아?")
+    assert (texts(out), codes) == (["전주시에는 유형이 뚜렷한 동네가 없어요."], [])
