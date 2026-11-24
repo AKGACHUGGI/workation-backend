@@ -48,6 +48,33 @@ CANONICAL = {
     "life": "생활권이야, 관광지야?",
     "similar": "비슷한 동네는 어디야?",
 }
+HOURS = ("weekday_hours", "weekend_hours")
+
+# 시군구 상세 채팅 의도 (시군구 채팅 스펙 §5). 시군구 사전에서만 찾는다
+REGION_INTENTS = (
+    "find_quiet", "find_peer", "find_evening", "find_type",
+    "find_coast", "find_life", "region_months", "region_profile",
+)  # fmt: skip
+REGION_CANONICAL = {
+    "find_quiet": "조용한 동네 어디야?",
+    "find_peer": "또래가 많은 동네는?",
+    "find_evening": "저녁에 활기 있는 데는?",
+    "find_type": "집중해서 일하기 좋은 동네는?",
+    "find_coast": "바다 가까운 동네 있어?",
+    "find_life": "관광지 말고 생활권 동네는?",
+    "region_months": "몇 월에 가면 한산해?",
+    "region_profile": "여긴 어떤 곳이야?",
+}
+REGION_FIRST = [
+    REGION_CANONICAL["find_quiet"],
+    REGION_CANONICAL["find_coast"],
+    REGION_CANONICAL["region_months"],
+]
+REGION_HOURS_GUIDE = "시간대는 동네마다 달라요. 동네 이름과 함께 물어봐 주세요."
+
+# 의도 찾기 범위: 동 채팅은 v7 사전, 시군구 채팅은 시군구 의도 + 시간대(안내용) + 모르는 질문
+DONG_VOCAB = (*INTENTS, "compare_summary", *UNKNOWN)
+REGION_VOCAB = (*REGION_INTENTS, *HOURS, *UNKNOWN)
 
 _SEES = "이 지도는 동네의 붐빔과 분위기를 보고 있어서"
 # 답할 수 없는 의도: (안내 문구, 예시 질문 3개). CLOVA 를 부르지 않는다 (스펙 §3-2)

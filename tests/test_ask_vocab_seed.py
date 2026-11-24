@@ -23,6 +23,15 @@ CANONICAL = {
     "life": "생활권이야, 관광지야?",
     "similar": "비슷한 동네는 어디야?",
     "compare_summary": "두 동네를 비교해 줘",
+    # 시군구 채팅 스펙 §5
+    "find_quiet": "조용한 동네 어디야?",
+    "find_peer": "또래가 많은 동네는?",
+    "find_evening": "저녁에 활기 있는 데는?",
+    "find_type": "집중해서 일하기 좋은 동네는?",
+    "find_coast": "바다 가까운 동네 있어?",
+    "find_life": "관광지 말고 생활권 동네는?",
+    "region_months": "몇 월에 가면 한산해?",
+    "region_profile": "여긴 어떤 곳이야?",
 }
 
 

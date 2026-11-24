@@ -137,7 +137,9 @@ def doc(src: Path, prefix: str) -> None:
 
 # 동네에 물어보기 의도. 앞 11개는 대표 질문이 1개 있는 의도(compare_summary 는 v7 채팅), 뒤 4개는 고정 안내
 ASK_ANSWERABLE = ("weekday_hours", "weekend_hours", "months", "quiet", "peer", "evening",
-                  "type", "coast", "life", "similar", "compare_summary")
+                  "type", "coast", "life", "similar", "compare_summary",
+                  "find_quiet", "find_peer", "find_evening", "find_type", "find_coast",
+                  "find_life", "region_months", "region_profile")
 ASK_UNKNOWN = ("unknown_place", "unknown_stay", "unknown_transport", "unknown_other")
 
 
