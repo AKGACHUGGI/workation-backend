@@ -124,3 +124,12 @@ def test_ask_embeds_all_when_model_differs(tool, tmp_path, monkeypatch):
     tool.ask(SEED, out)
 
     assert len(calls) == len(items)
+
+
+def test_committed_json_matches_csv(tool):
+    """CSV 만 고치고 build_embeddings.py ask 를 다시 안 돌리면 여기서 걸린다."""
+    data = json.loads((ROOT / "explore" / "data" / "ask_vocab.json").read_text(encoding="utf-8"))
+    assert data["model"] == tool.MODEL
+    rows = [(r["intent"], r["phrase"], r["canonical"]) for r in data["items"]]
+    assert rows == tool.read_ask(SEED)
+    assert all(len(r["embedding"]) == 1024 for r in data["items"])
