@@ -19,16 +19,11 @@ from explore.chat.arrange import AXIS_KO, GRADE_AXES, INLAND, Order
 
 MAX_SPOTS = 3
 # 시군구 답 전용 검사 · 프롬프트를 고치면 올린다 (캐시 키에 compare.PROMPT_VERSION 과 함께 들어간다)
-PROMPT_VERSION = "r3"
+PROMPT_VERSION = "r4"
 SUPERLATIVE = ("가장", "제일", "1위", "최고")
 TYPE_AXES = [f"type:{t}" for t in derive.TYPES]
 TYPE_BY_KO = {ko: key for key, ko in derive.TYPE_KO.items()}
-# 유형 이름(몰입형 등)은 문장에 그대로 쓰지 않고 풀어 쓴다
-PLAIN = {
-    "type:immersion": "혼자 집중해서 일하기",
-    "type:networking": "사람들과 어울리며 일하기",
-    "type:local": "현지 주민처럼 지내기",
-}
+PLAIN = compare.PLAIN  # 유형 이름 대신 풀어 쓴 말
 STRENGTHS = ("quiet", "evening", "peer", "coast")  # 조건 외 강점 축 (문장 2·3번째)
 OPPOSITE = {"quiet": "evening", "evening": "quiet"}  # 조건과 반대 방향이라 부가 문장으로 안 쓰는 축
 # 생활권 · 관광지는 동의 성격이다. 시설 · 개수로 넓힌 말은 근거가 없다
@@ -283,15 +278,9 @@ def build_prompt(sgg: str, p: Plan, orders: list[Order]) -> str:
     )
 
 
-def _want(axis: str, name: str) -> str:
-    if axis in PLAIN:
-        return f"{PLAIN[axis]}엔 {josa(name, '이/가')} 맞아요."
-    return f"{josa(AXIS_KO[axis], '을/를')} 원한다면 {josa(name, '이/가')} 맞아요."
-
-
 def rule_sentence(o: Order) -> str:
     """규칙 문장. 1등이 동점이면 동점인 동을 모두 쓴다."""
-    return _want(o.axis, "·".join(compare.tied_top(o)))
+    return compare.want(o.axis, "·".join(compare.tied_top(o)))
 
 
 def _none(p: Plan, spots: list[Spot], sgg: str) -> tuple[list[dict], list[str]]:
@@ -299,16 +288,14 @@ def _none(p: Plan, spots: list[Spot], sgg: str) -> tuple[list[dict], list[str]]:
     if p.conditions == TYPE_AXES:
         return [_rule(f"{sgg}에는 유형이 뚜렷한 동네가 없어요.")], []
     if len(p.conditions) == 1:
-        axis = p.conditions[0]
-        what = "바다 가까운 동네" if axis == "coast" else f"{AXIS_KO[axis]} 조건에 맞는 동네"
+        what = f"{compare.LINK[p.conditions[0]][2]} 동네"
         return [_rule(f"{sgg}에는 {josa(what, '이/가')} 없어요.")], []
-    a, b = p.conditions
-    out = [_rule(f"{josa(_ko(a), '과/와')} {josa(_ko(b), '을/를')} 다 갖춘 곳은 없어요.")]
+    out = [_rule(f"{compare.both_phrase(*p.conditions)} 곳은 없어요.")]
     codes: list[str] = []
     for axis in p.conditions:
         top = ranked(spots, axis)[:1]
         if top:
-            out.append(_rule(_want(axis, top[0].dong.name), evidence(axis, top, sgg)))
+            out.append(_rule(compare.want(axis, top[0].dong.name), evidence(axis, top, sgg)))
             codes.append(top[0].dong.code)
     return out, list(dict.fromkeys(codes))
 
@@ -317,16 +304,12 @@ def _one(p: Plan, sgg: str) -> dict:
     s = p.spots[0]
     if p.conditions == TYPE_AXES:  # 후보가 1위인 유형 축 (plan 이 그런 축만 남긴다)
         axis = p.axes[0]
-        return _rule(_want(axis, s.dong.name), evidence(axis, p.spots, sgg))
+        return _rule(compare.want(axis, s.dong.name), evidence(axis, p.spots, sgg))
     ev = evidence(p.conditions[0], p.spots, sgg)
     if len(p.conditions) == 1:
-        return _rule(_want(p.conditions[0], s.dong.name), ev)
-    a, b = p.conditions
-    text = (
-        f"{josa(_ko(a), '과/와')} {josa(_ko(b), '을/를')} 다 원한다면 "
-        f"{josa(s.dong.name, '이/가')} 맞아요."
-    )
-    return _rule(text, ev)
+        return _rule(compare.want(p.conditions[0], s.dong.name), ev)
+    what = compare.both_phrase(*p.conditions)
+    return _rule(f"{what} 곳을 원한다면 {josa(s.dong.name, '이/가')} 맞아요.", ev)
 
 
 def profile(raw: dict, spots: list[Spot]) -> list[dict]:
@@ -341,9 +324,12 @@ def profile(raw: dict, spots: list[Spot]) -> list[dict]:
     tourist = sum(s.life == "관광지" for s in spots)
     coastal = sum(s.dong.values["coast"] > INLAND for s in spots)
     out = []
-    if tops:
-        most = PLAIN[f"type:{TYPE_BY_KO[tops.most_common(1)[0][0]]}"]
-        out.append(f"{josa(sgg)} {most} 좋은 동네가 가장 많아요.")
+    if tops:  # 최상급 대신 실제 개수. 1등 동점이면 함께 쓴다
+        top = tops.most_common(1)[0][1]
+        most = "·".join(PLAIN[f"type:{TYPE_BY_KO[n]}"] for n, c in tops.most_common() if c == top)
+        each = "각 " if "·" in most else ""
+        count = f"{len(raw['dongs'])}곳 중 {each}{top}곳"
+        out.append(f"{josa(sgg)} {most} 좋은 동네가 많아요({count}).")
     if local == tourist:
         mood = "생활권과 관광지 동네가 비슷하게 있고"
     else:

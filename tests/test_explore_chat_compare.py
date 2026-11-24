@@ -93,12 +93,12 @@ def test_problems_ties_ok_passes_any_tied_top():
 
 def test_rule_sentences():
     quiet, coast = ORDERS
-    assert c.rule_sentence(quiet) == "조용함을 원한다면 효자2동이 맞아요."
-    assert c.rule_sentence(coast) == "바다 가까움을 원한다면 여의동이 맞아요."
+    assert c.rule_sentence(quiet) == "조용히 일하고 싶다면 효자2동이 맞아요."
+    assert c.rule_sentence(coast) == "바다 가까이 머물고 싶다면 여의동이 좋아요."
     (evening,) = a.orders([Y, G], ["evening"])
-    assert c.rule_sentence(evening) == "저녁 활기는 여의동·교1동이 같은 등급이에요."
+    assert c.rule_sentence(evening) == "저녁 활기 정도는 여의동·교1동이 같은 등급이에요."
     (inland,) = a.orders([H, G], ["coast"])
-    assert c.rule_sentence(inland) == "바다 가까움은 효자2동·교1동이 비슷해요."
+    assert c.rule_sentence(inland) == "바다 가까운 정도는 효자2동·교1동이 비슷해요."
 
 
 def test_compose_all_pass():
@@ -123,8 +123,8 @@ def test_compose_replaces_wrong_and_fills_missing():
     sentences, source = c.compose(fake(wrong), "u", [H, Y], ORDERS)
     assert source == "rule"
     assert [s["text"] for s in sentences] == [
-        "조용함을 원한다면 효자2동이 맞아요.",
-        "바다 가까움을 원한다면 여의동이 맞아요.",
+        "조용히 일하고 싶다면 효자2동이 맞아요.",
+        "바다 가까이 머물고 싶다면 여의동이 좋아요.",
     ]
     sentences, source = c.compose(fake(COAST), "u", [H, Y], ORDERS)
     assert source == "mixed"
@@ -154,7 +154,7 @@ def test_months_similarity_link():
     # 시각별 한산은 빼고, 등급 글자 없이 문장으로
     assert (
         got[1]["text"]
-        == "둘 다 로컬살이형이 가장 잘 맞고, 생활권 성격이 강하고, 저녁 활기 수준이 같아요."
+        == "둘 다 현지 주민처럼 지내기 좋고, 생활권 성격이 강하고, 저녁 활기 정도가 같아요."
     )
     assert c.link_sentence(a.Link("효자2동", "여의동", 2)) == {
         "text": "최근 보신 여의동과 비슷한 쪽은 효자2동이에요.",
@@ -169,8 +169,8 @@ def test_common_sentence():
         ("place:coast", "바닷가"),
         ("grade:quiet:B", "조용함 B"),
     ]
-    assert c.common_sentence(items, 2) == "둘 다 바닷가에 있고, 조용함 수준이 같아요."
-    assert c.common_sentence(items, 3) == "셋 다 바닷가에 있고, 조용함 수준이 같아요."
+    assert c.common_sentence(items, 2) == "둘 다 바닷가에 있고, 조용한 정도가 같아요."
+    assert c.common_sentence(items, 3) == "셋 다 바닷가에 있고, 조용한 정도가 같아요."
     assert c.common_sentence([("quiet:weekend:3", "주말 3시 한산")], 2) is None
 
 
@@ -181,7 +181,7 @@ def test_common_sentence():
         ("바닷가 동네입니다", "바닷가 동네예요."),
         ("차가 많습니다.", "차가 많아요."),
         ("주말엔 한산합니다!", "주말엔 한산해요!"),
-        ("조용함을 원한다면 효자2동이 맞아요", "조용함을 원한다면 효자2동이 맞아요."),
+        ("조용히 일하고 싶다면 효자2동이 맞아요", "조용히 일하고 싶다면 효자2동이 맞아요."),
         ("이미 괜찮아요.", "이미 괜찮아요."),
     ],
 )
@@ -271,3 +271,21 @@ def test_rule_sentences_have_no_banned_tone():
     for text in texts:
         found = [p for p in c.tone(text, NAMES) if not p.startswith("끝")]
         assert found == [], text
+
+
+def test_want_covers_every_axis_and_passes_tone():
+    """축마다 조건절 표가 있고, 그 규칙 문장은 말투 · 섞임 검사를 통과한다."""
+    from explore.chat import region
+
+    assert set(c.WANT) == set(a.AXIS_KO)
+    for axis in a.AXIS_KO:
+        text = c.want(axis, "효자2동")
+        assert c.tone(text, NAMES) == [], text
+        assert region.mixed(text, axis) == [], text
+        assert a.AXIS_KO[axis] not in text, text  # 축 데이터 이름을 그대로 넣지 않는다
+
+
+def test_both_phrase_reads_naturally():
+    assert c.both_phrase("quiet", "coast") == "조용하면서 바다도 가까운"
+    assert c.both_phrase("coast", "quiet") == "바다가 가까우면서 조용한"
+    assert c.both_phrase("peer", "evening") == "또래가 많으면서 저녁에도 활기 있는"

@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 Generate = Callable[[str, str, type[BaseModel]], BaseModel]
 
-PROMPT_VERSION = "c4"  # 프롬프트 · 검사를 고치면 올린다 (캐시 키에 들어간다)
+PROMPT_VERSION = "c5"  # 프롬프트 · 검사 · 규칙 문장을 고치면 올린다 (캐시 키에 들어간다)
 CACHE_TTL = 24 * 60 * 60  # 비교 답 캐시 1일 (스펙 §7-2)
 JARGON = ("지표", "벡터", "거리", "백분위", "노드", "그래프", "데이터")
 NO_CONCLUSION = ("모두", "둘 다", "셋 다")
@@ -39,6 +39,47 @@ HEDGE = (
 AWKWARD = ("친구", "좋으려면", "느껴진다면", "느껴지면", "괜찮")
 # 동 이름 바로 뒤 끝맺음 ('○○동이에요', '○○동이 있어요')
 NAME_ENDING = ("이에요", "예요", "입니다", "이 있어요", "가 있어요")
+# 유형 이름(몰입형 등)은 문장에 그대로 쓰지 않고 풀어 쓴다
+PLAIN = {
+    "type:immersion": "혼자 집중해서 일하기",
+    "type:networking": "사람들과 어울리며 일하기",
+    "type:local": "현지 주민처럼 지내기",
+}
+# 규칙 문장 표: 축 → (조건절, 끝맺음). 축 데이터 이름('또래 밀도') 대신 LLM 문형 예시와 같은 말투
+WANT = {
+    "quiet": ("조용히 일하고 싶다면", "맞아요"),
+    "peer": ("또래가 많은 곳을 찾는다면", "좋아요"),
+    "evening": ("저녁에도 활기 있는 곳을 원한다면", "나아요"),
+    "coast": ("바다 가까이 머물고 싶다면", "좋아요"),
+    "life": ("현지 생활처럼 지내고 싶다면", "맞아요"),
+    "tourist": ("여행하듯 지내고 싶다면", "맞아요"),
+    "type:immersion": ("혼자 집중해서 일하고 싶다면", "맞아요"),
+    "type:networking": ("사람들과 어울리며 일하고 싶다면", "맞아요"),
+    "type:local": ("현지 주민처럼 지내고 싶다면", "맞아요"),
+}
+# 두 조건을 잇는 말: 축 → (앞 '~하면서', 뒤 '~도 ~한', 홀로 '~한'). '조용하면서 바다도 가까운 곳'
+LINK = {
+    "quiet": ("조용하면서", "조용한", "조용한"),
+    "peer": ("또래가 많으면서", "또래도 많은", "또래가 많은"),
+    "evening": ("저녁에도 활기 있으면서", "저녁에도 활기 있는", "저녁에 활기 있는"),
+    "coast": ("바다가 가까우면서", "바다도 가까운", "바다 가까운"),
+    "life": ("생활권 성격이면서", "생활권 성격인", "생활권 성격인"),
+    "tourist": ("관광지 성격이면서", "관광지 성격인", "관광지 성격인"),
+    "type:immersion": ("혼자 집중하기 좋으면서", "혼자 집중하기도 좋은", "혼자 집중하기 좋은"),
+    "type:networking": (
+        "사람들과 어울리기 좋으면서", "사람들과 어울리기도 좋은", "사람들과 어울리기 좋은",
+    ),
+    "type:local": (
+        "현지 주민처럼 지내기 좋으면서", "현지 주민처럼 지내기도 좋은", "현지 주민처럼 지내기 좋은",
+    ),
+}  # fmt: skip
+# 동점 · 공통점 문장의 주어: '조용한 정도는 A·B가 같은 등급이에요'
+LEVEL = {
+    "quiet": "조용한 정도",
+    "peer": "또래가 많은 정도",
+    "evening": "저녁 활기 정도",
+    "coast": "바다 가까운 정도",
+}
 TONE_RULES = [
     "- 조건은 '~원한다면', '~찾는다면', '~싶다면'으로 쓴다. "
     "'~좋으려면', '~느껴진다면'은 쓰지 않는다.",
@@ -197,13 +238,24 @@ def tidy(text: str) -> str:
     return body + mark
 
 
+def want(axis: str, name: str) -> str:
+    """'조용히 일하고 싶다면 ○○이 맞아요.' (name 은 'A·B' 처럼 여럿일 수 있다)"""
+    clause, end = WANT[axis]
+    return f"{clause} {josa(name, '이/가')} {end}."
+
+
+def both_phrase(first: str, second: str) -> str:
+    """두 조건을 겹친 꾸밈말: '조용하면서 바다도 가까운'."""
+    return f"{LINK[first][0]} {LINK[second][1]}"
+
+
 def rule_sentence(o: Order) -> str:
-    ko = AXIS_KO[o.axis]
     if o.top is None:
+        ko = LEVEL.get(o.axis) or PLAIN.get(o.axis) or AXIS_KO[o.axis]
         tied = "·".join(tied_top(o))
         same = "같은 등급이에요" if o.axis in GRADE_AXES else "비슷해요"
         return f"{josa(ko)} {josa(tied, '이/가')} {same}."
-    return f"{josa(ko, '을/를')} 원한다면 {josa(o.top, '이/가')} 맞아요."
+    return want(o.axis, o.top)
 
 
 def _item(text: str, o: Order, by_name: dict[str, Dong], source: str) -> dict:
@@ -331,13 +383,20 @@ def common_sentence(items: list[tuple[str, str]], count: int) -> str | None:
         elif key.startswith("life:"):
             clauses.append((f"{label} 성격이 강하고", f"{label} 성격이 강해요"))
         elif key.startswith("type:"):
-            name = josa(label.removeprefix("1위 "), "이/가")
-            clauses.append((f"{name} 가장 잘 맞고", f"{name} 가장 잘 맞아요"))
+            ko = label.removeprefix("1위 ")
+            axis = next((a for a, v in AXIS_KO.items() if v == ko), "")
+            plain = PLAIN.get(axis)
+            if plain:
+                clauses.append((f"{plain} 좋고", f"{plain} 좋아요"))
+            else:
+                name = josa(ko, "이/가")
+                clauses.append((f"{name} 잘 맞고", f"{name} 잘 맞아요"))
         elif key.startswith("grade:"):
-            metrics.append(label.rsplit(" ", 1)[0])
+            axis = key.split(":")[1]
+            metrics.append(LEVEL.get(axis) or label.rsplit(" ", 1)[0])
     if metrics:
-        what = "·".join(metrics[:2])
-        clauses.append((f"{what} 수준이 같고", f"{what} 수준이 같아요"))
+        what = josa("·".join(metrics[:2]), "이/가")
+        clauses.append((f"{what} 같고", f"{what} 같아요"))
     clauses = clauses[:3]
     if not clauses:
         return None

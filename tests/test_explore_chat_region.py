@@ -135,8 +135,8 @@ def test_answer_rule_when_no_llm():
     assert source == "rule"
     assert codes == [HYOJA, YEOUI, GYO]
     assert texts(out) == [
-        "조용함을 원한다면 효자2동이 맞아요.",
-        "또래 밀도를 원한다면 교1동이 맞아요.",
+        "조용히 일하고 싶다면 효자2동이 맞아요.",
+        "또래가 많은 곳을 찾는다면 교1동이 좋아요.",
     ]
     assert out[0]["evidence"] == (
         "조용함: 효자2동 S(전주시 1위/4) · 여의동 A(전주시 2위/4) · 교1동 A(전주시 3위/4)"
@@ -162,7 +162,7 @@ def test_answer_uses_llm_and_checks_direction():
     assert source == "mixed"
     assert texts(out) == [
         "조용히 일하고 싶다면 효자2동이 맞아요.",
-        "또래 밀도를 원한다면 교1동이 맞아요.",
+        "또래가 많은 곳을 찾는다면 교1동이 좋아요.",
     ]
     system, user = calls[0]
     assert system == r.SYSTEM
@@ -175,7 +175,7 @@ def test_answer_uses_llm_and_checks_direction():
 def test_answer_single_candidate_and_none():
     out, source, codes = r.answer(None, REGION_RAW, "find_coast", "바다 가까운 동네 있어?")
     assert (texts(out), source, codes) == (
-        ["바다 가까움을 원한다면 교1동이 맞아요."],
+        ["바다 가까이 머물고 싶다면 교1동이 좋아요."],
         "rule",
         [GYO],
     )
@@ -183,12 +183,12 @@ def test_answer_single_candidate_and_none():
     out, _, codes = r.answer(None, REGION_RAW, "find_quiet", "조용하면서 바다 가까운 데")
     assert codes == [HYOJA, GYO]  # 문장에 쓴 조건별 1위 동 (자세히 → · 예시 칩)
     assert texts(out) == [
-        "조용함과 바다 가까움을 다 갖춘 곳은 없어요.",
-        "조용함을 원한다면 효자2동이 맞아요.",
-        "바다 가까움을 원한다면 교1동이 맞아요.",
+        "조용하면서 바다도 가까운 곳은 없어요.",
+        "조용히 일하고 싶다면 효자2동이 맞아요.",
+        "바다 가까이 머물고 싶다면 교1동이 좋아요.",
     ]
     out, _, codes = r.answer(None, REGION_RAW, "find_quiet", "조용한 생활권 동네")
-    assert texts(out) == ["조용함과 생활권 분위기를 다 원한다면 효자2동이 맞아요."]
+    assert texts(out) == ["조용하면서 생활권 성격인 곳을 원한다면 효자2동이 맞아요."]
     assert codes == [HYOJA]
     inland = {**REGION_RAW, "dongs": [{**d, "near": []} for d in REGION_RAW["dongs"]]}
     out, _, codes = r.answer(None, inland, "find_coast", "바다 가까운 동네 있어?")
@@ -199,7 +199,7 @@ def test_answer_profile():
     out, source, codes = r.answer(None, REGION_RAW, "region_profile", "여긴 어떤 곳이야?")
     assert (source, codes) == ("rule", [])
     assert texts(out) == [
-        "전주시는 현지 주민처럼 지내기 좋은 동네가 가장 많아요.",
+        "전주시는 현지 주민처럼 지내기 좋은 동네가 많아요(4곳 중 2곳).",
         "생활권 성격의 동네가 더 많고, 바다 가까운 동네는 1곳이에요.",
     ]
     assert out[0]["evidence"] == (
@@ -221,7 +221,7 @@ def test_type_question_uses_only_types_with_a_top():
     p = r.plan(r.spots_of(raw), r.TYPE_AXES)
     assert (names(p.spots), p.axes) == (["여의동"], ["type:networking"])
     out, _, codes = r.answer(None, raw, "find_type", "어떤 워케이션 유형이 많아?")
-    assert texts(out) == ["사람들과 어울리며 일하기엔 여의동이 맞아요."]
+    assert texts(out) == ["사람들과 어울리며 일하고 싶다면 여의동이 맞아요."]
     assert out[0]["evidence"] == "네트워킹형: 여의동 65점"
     assert codes == [YEOUI]
 
@@ -344,7 +344,7 @@ def test_all_tied_condition_is_rule_and_not_asked():
 
     out, source, _ = r.answer(generate, raw, "find_coast", "바다 가까운 동네 있어?")
     assert texts(out) == [
-        "바다 가까움을 원한다면 교1동·여의동·효자2동이 맞아요.",
+        "바다 가까이 머물고 싶다면 교1동·여의동·효자2동이 좋아요.",
         "조용히 일하고 싶다면 효자2동이 맞아요.",
         "저녁에 활기를 찾는다면 여의동이 나아요.",
     ]
@@ -400,5 +400,30 @@ def test_answer_rejects_sigungu_superlative():
 
     out, source, _ = r.answer(generate, REGION_RAW, "find_quiet", "조용한 동네 어디야?")
     assert [s["source"] for s in out] == ["rule", "llm"]
-    assert out[0]["text"] == "조용함을 원한다면 효자2동이 맞아요."
+    assert out[0]["text"] == "조용히 일하고 싶다면 효자2동이 맞아요."
     assert source == "mixed"
+
+
+def test_rule_sentences_use_condition_phrases():
+    spots = r.spots_of(REGION_RAW)
+    dongs = [s.dong for s in spots]
+    for o in r.arrange.orders(dongs, ["peer", "life", "tourist", *r.TYPE_AXES]):
+        assert r.arrange.AXIS_KO[o.axis] not in r.rule_sentence(o)
+
+
+def test_none_single_axis_uses_plain_words():
+    raw = {**REGION_RAW, "dongs": [{**d, "life": []} for d in REGION_RAW["dongs"]]}
+    out, _, _ = r.answer(None, raw, "find_life", "생활권 동네는?")
+    assert texts(out) == ["전주시에는 생활권 성격인 동네가 없어요."]
+
+
+def test_profile_tied_top_types_name_both():
+    # 유형 1위를 로컬살이형 둘 · 몰입형 둘로 (네트워킹형 동을 몰입형으로)
+    dongs = [
+        {**d, "types": [[k, "몰입형" if n == "네트워킹형" else n, sc] for k, n, sc in d["types"]]}
+        for d in REGION_RAW["dongs"]
+    ]
+    out, _, _ = r.answer(
+        None, {**REGION_RAW, "dongs": dongs}, "region_profile", "여긴 어떤 곳이야?"
+    )
+    assert texts(out)[0].endswith("좋은 동네가 많아요(4곳 중 각 2곳).")

@@ -130,7 +130,7 @@ def test_three_turns_carry_dongs_and_intent():
     assert s2["intents"] == ["quiet"]
     assert s2["sentences"] == [
         {
-            "text": "조용함을 원한다면 효자2동이 맞아요.",
+            "text": "조용히 일하고 싶다면 효자2동이 맞아요.",
             "evidence": "조용함: 효자2동 S(73점) · 여의동 A(57점)",
             "source": "rule",
         }
@@ -252,7 +252,7 @@ def test_region_find_then_compare_then_follow():
     cid, s1 = ask_region(graph, "조용한 동네 어디야?")
     assert s1["scope"] == "region"
     assert s1["dongs"] == [HYOJA, YEOUI, GYO]
-    assert s1["sentences"][0]["text"] == "조용함을 원한다면 효자2동이 맞아요."
+    assert s1["sentences"][0]["text"] == "조용히 일하고 싶다면 효자2동이 맞아요."
 
     _, s2 = ask_region(graph, "효자2동이랑 여의동 비교해 줘", cid)
     assert (s2["scope"], s2["dongs"]) == ("dong", [HYOJA, YEOUI])

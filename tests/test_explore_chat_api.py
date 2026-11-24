@@ -56,7 +56,7 @@ def test_compare_answer(client):
     assert body["dongs"] == [{"id": HYOJA, "name": "효자2동"}, {"id": YEOUI, "name": "여의동"}]
     assert body["intent"] == "compare_summary"
     assert body["sentences"][0] == {
-        "text": "조용함을 원한다면 효자2동이 맞아요.",
+        "text": "조용히 일하고 싶다면 효자2동이 맞아요.",
         "evidence": "조용함: 효자2동 S(73점) · 여의동 A(57점)",
         "source": "rule",
     }
@@ -142,7 +142,7 @@ def test_region_find_answer(client):
     assert body["scope"] == "region"
     assert [d["id"] for d in body["dongs"]] == [HYOJA, YEOUI, GYO]
     assert body["sentences"][0] == {
-        "text": "조용함을 원한다면 효자2동이 맞아요.",
+        "text": "조용히 일하고 싶다면 효자2동이 맞아요.",
         "evidence": (
             "조용함: 효자2동 S(전주시 1위/4) · 여의동 A(전주시 2위/4) · 교1동 A(전주시 3위/4)"
         ),
