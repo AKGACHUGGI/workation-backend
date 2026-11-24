@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import math
-from collections import Counter
 from dataclasses import dataclass
 
 from django.core.cache import cache
@@ -19,8 +18,9 @@ from explore.chat.arrange import AXIS_KO, GRADE_AXES, INLAND, Order
 
 MAX_SPOTS = 3
 # 시군구 답 전용 검사 · 프롬프트를 고치면 올린다 (캐시 키에 compare.PROMPT_VERSION 과 함께 들어간다)
-PROMPT_VERSION = "r4"
+PROMPT_VERSION = "r5"
 SUPERLATIVE = ("가장", "제일", "1위", "최고")
+NAMED_MAX = 3  # 성격 답에서 1위 유형 동을 이름으로 부르는 최대 수 (넘으면 개수로)
 TYPE_AXES = [f"type:{t}" for t in derive.TYPES]
 TYPE_BY_KO = {ko: key for key, ko in derive.TYPE_KO.items()}
 PLAIN = compare.PLAIN  # 유형 이름 대신 풀어 쓴 말
@@ -312,33 +312,44 @@ def _one(p: Plan, sgg: str) -> dict:
     return _rule(f"{what} 곳을 원한다면 {josa(s.dong.name, '이/가')} 맞아요.", ev)
 
 
-def profile(raw: dict, spots: list[Spot]) -> list[dict]:
-    """시군구 성격 (규칙 문장 2개). 수는 근거 줄에."""
+def profile(raw: dict, spots: list[Spot]) -> tuple[list[dict], list[str]]:
+    """시군구 성격 (규칙 문장 2개, 이름을 쓴 동 코드). 수는 근거 줄에."""
     sgg = raw["region"]["name"]
-    tops: Counter[str] = Counter()
+    tops: dict[str, list[tuple[int, str, str]]] = {}  # 1위 유형 → [(점수, 동 이름, 코드)]
     for d in raw["dongs"]:
         first = [(name, score) for rank, name, score in d["types"] if rank == 1]
         if first and first[0][1] >= derive.TYPE_MIN:
-            tops[first[0][0]] += 1
+            tops.setdefault(first[0][0], []).append((first[0][1], d["name"], d["code"]))
     local = sum(s.life == "생활권" for s in spots)
     tourist = sum(s.life == "관광지" for s in spots)
     coastal = sum(s.dong.values["coast"] > INLAND for s in spots)
-    out = []
-    if tops:  # 최상급 대신 실제 개수. 1등 동점이면 함께 쓴다
-        top = tops.most_common(1)[0][1]
-        most = "·".join(PLAIN[f"type:{TYPE_BY_KO[n]}"] for n, c in tops.most_common() if c == top)
-        each = "각 " if "·" in most else ""
-        count = f"{len(raw['dongs'])}곳 중 {each}{top}곳"
-        out.append(f"{josa(sgg)} {most} 좋은 동네가 많아요({count}).")
+    out, codes = [], []
+    if tops:  # 1위 유형 동이 몇 곳 안 되면 이름으로, 많으면 전체 중 몇 곳인지로. 동점이면 이어 쓴다
+        top = max(len(v) for v in tops.values())
+        parts = []
+        for name, found in tops.items():
+            if len(found) != top:
+                continue
+            what = f"{PLAIN[f'type:{TYPE_BY_KO[name]}']} 좋"
+            if top > NAMED_MAX:
+                parts.append((f"{top}곳이", what))
+                continue
+            found.sort(key=lambda f: -f[0])
+            parts.append((josa("·".join(n for _, n, _ in found), "이/가"), what))
+            codes += [c for _, _, c in found]
+        head = f"{sgg} 동네 {len(raw['dongs'])}곳 중" if top > NAMED_MAX else f"{sgg}에서는"
+        body = ", ".join(f"{who} {what}고" for who, what in parts[:-1])
+        last = f"{parts[-1][0]} {parts[-1][1]}아요."
+        out.append(f"{head} {body + ', ' if body else ''}{last}")
     if local == tourist:
         mood = "생활권과 관광지 동네가 비슷하게 있고"
     else:
         mood = f"{'생활권' if local > tourist else '관광지'} 성격의 동네가 더 많고"
     sea = f"바다 가까운 동네는 {coastal}곳이에요." if coastal else "바다와 닿은 동네는 없어요."
     out.append(f"{mood}, {sea}")
-    counts = [f"{name} {n}곳" for name, n in tops.most_common()]
+    counts = [f"{name} {len(v)}곳" for name, v in sorted(tops.items(), key=lambda t: -len(t[1]))]
     ev = " · ".join([*counts, f"생활권 {local}곳", f"관광지 {tourist}곳"])
-    return [_rule(out[0], ev), *(_rule(t) for t in out[1:])]
+    return [_rule(out[0], ev), *(_rule(t) for t in out[1:])], codes
 
 
 def problems(text: str, sgg: str, cands: list[str], every: list[str]) -> list[str]:
@@ -382,7 +393,8 @@ def answer(
     spots = spots_of(raw)
     sgg = raw["region"]["name"]
     if intent == "region_profile":
-        return profile(raw, spots), "rule", []
+        out, codes = profile(raw, spots)
+        return out, "rule", codes
     p = plan(spots, condition_axes(question, intent))
     if not p.spots:
         out, codes = _none(p, spots, sgg)

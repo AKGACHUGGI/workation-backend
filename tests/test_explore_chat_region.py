@@ -197,9 +197,10 @@ def test_answer_single_candidate_and_none():
 
 def test_answer_profile():
     out, source, codes = r.answer(None, REGION_RAW, "region_profile", "여긴 어떤 곳이야?")
-    assert (source, codes) == ("rule", [])
+    # 1위 유형 동이 3곳 이하면 이름으로, 그 유형 점수 높은 순. 이름 쓴 동은 링크가 붙게 codes 에
+    assert (source, codes) == ("rule", [GYO, SONG])
     assert texts(out) == [
-        "전주시는 현지 주민처럼 지내기 좋은 동네가 많아요(4곳 중 2곳).",
+        "전주시에서는 교1동·송천1동이 현지 주민처럼 지내기 좋아요.",
         "생활권 성격의 동네가 더 많고, 바다 가까운 동네는 1곳이에요.",
     ]
     assert out[0]["evidence"] == (
@@ -423,7 +424,43 @@ def test_profile_tied_top_types_name_both():
         {**d, "types": [[k, "몰입형" if n == "네트워킹형" else n, sc] for k, n, sc in d["types"]]}
         for d in REGION_RAW["dongs"]
     ]
-    out, _, _ = r.answer(
+    out, _, codes = r.answer(
         None, {**REGION_RAW, "dongs": dongs}, "region_profile", "여긴 어떤 곳이야?"
     )
-    assert texts(out)[0].endswith("좋은 동네가 많아요(4곳 중 각 2곳).")
+    assert texts(out)[0] == (
+        "전주시에서는 효자2동·여의동이 혼자 집중해서 일하기 좋고, "
+        "교1동·송천1동이 현지 주민처럼 지내기 좋아요."
+    )
+    assert codes == [HYOJA, YEOUI, GYO, SONG]
+
+
+def test_profile_many_top_dongs_counts():
+    # 1위 유형 동이 4곳 이상이면 시군구 전체 동 수 중 몇 곳인지로. 이름 · 링크는 없다
+    local = [[1, "로컬살이형", 60], [2, "몰입형", 30], [3, "네트워킹형", 20]]
+    dongs = [
+        *(
+            {**d, "code": f"{d['code']}{i}", "types": local}
+            for i, d in enumerate(REGION_RAW["dongs"])
+        ),
+        REGION_RAW["dongs"][0],
+    ]
+    out, _, codes = r.answer(
+        None, {**REGION_RAW, "dongs": dongs}, "region_profile", "여긴 어떤 곳이야?"
+    )
+    assert texts(out)[0] == "전주시 동네 5곳 중 4곳이 현지 주민처럼 지내기 좋아요."
+    assert codes == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "고성군에서는 간성읍·거진읍이 현지 주민처럼 지내기 좋아요.",
+        "전주시 동네 5곳 중 4곳이 현지 주민처럼 지내기 좋아요.",
+        "전주시에서는 효자2동이 혼자 집중해서 일하기 좋고, "
+        "여의동이 사람들과 어울리며 일하기 좋아요.",
+    ],
+)
+def test_profile_sentence_passes_tone(text):
+    names = ["간성읍", "거진읍", "효자2동", "여의동"]
+    assert r.compare.tone(text, names) == []
+    assert not any(w in text for w in r.SUPERLATIVE + ("많아요",))
