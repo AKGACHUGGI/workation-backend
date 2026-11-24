@@ -88,6 +88,17 @@ def _parse_key(question: str) -> str:
     return f"nlparse:{_PARSE_VERSION}:{hashlib.sha1(question.encode()).hexdigest()}"
 
 
+def _month(value) -> int | None:
+    """LLM 이 준 달을 1~12 정수로 바꾼다. 10.0·"10.0" 도 받고, 범위 밖·소수·문자는 None."""
+    if isinstance(value, bool):
+        return None
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return None
+    return int(num) if num.is_integer() and 1 <= num <= 12 else None
+
+
 def parse(question: str) -> tuple[dict, str]:
     key = _parse_key(question)
     hit = cache.get(key)
@@ -99,8 +110,7 @@ def parse(question: str) -> tuple[dict, str]:
         data = json.loads(found.group(0)) if found else None
         if not isinstance(data, dict) or not isinstance(data.get("pieces"), list):
             raise ValueError("형식 오류")
-        month = data.get("month")
-        month = int(month) if str(month).isdigit() and 1 <= int(month) <= 12 else None
+        month = _month(data.get("month"))
         pieces = [str(p).strip() for p in data["pieces"] if str(p).strip()]
         parsed = {"month": month, "pieces": pieces}
         cache.set(key, parsed, PARSE_TTL)
