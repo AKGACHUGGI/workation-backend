@@ -439,6 +439,31 @@ def test_parse_caches_llm_result_only(monkeypatch):
     assert engine.parse("가을에 조용한 곳")[1] == "llm"  # 규칙 파서 결과는 캐시하지 않았다
 
 
+@pytest.mark.parametrize(
+    "raw, month",
+    [
+        ("10", 10),
+        ('"10"', 10),
+        ("10.0", 10),
+        ('"10.0"', 10),
+        ("13", None),
+        ("0", None),
+        ("10.5", None),
+        ('"10월"', None),
+        ("true", None),
+        ("null", None),
+    ],
+)
+def test_parse_month_normalizes(monkeypatch, raw, month):
+    from django.core.cache import cache
+
+    from core import clova
+
+    cache.clear()
+    monkeypatch.setattr(clova, "chat", lambda s, u: f'{{"month": {raw}, "pieces": ["바다"]}}')
+    assert engine.parse("질문") == ({"month": month, "pieces": ["바다"]}, "llm")
+
+
 def test_warm_question_off_without_key():
     assert engine.warm_question("질문") is None  # 테스트 설정은 CLOVA 키가 없다
 
