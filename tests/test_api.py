@@ -441,8 +441,18 @@ def test_parse_caches_llm_result_only(monkeypatch):
 
 @pytest.mark.parametrize(
     "raw, month",
-    [("10", 10), ('"10"', 10), ("10.0", 10), ('"10.0"', 10), ("13", None), ("0", None),
-     ("10.5", None), ('"10월"', None), ("true", None), ("null", None)],
+    [
+        ("10", 10),
+        ('"10"', 10),
+        ("10.0", 10),
+        ('"10.0"', 10),
+        ("13", None),
+        ("0", None),
+        ("10.5", None),
+        ('"10월"', None),
+        ("true", None),
+        ("null", None),
+    ],
 )
 def test_parse_month_normalizes(monkeypatch, raw, month):
     from django.core.cache import cache
