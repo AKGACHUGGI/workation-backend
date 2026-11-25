@@ -18,6 +18,7 @@ from accounts.services import (
     get_or_create_user,
 )
 from core.errors import error
+from metrics.scoring import AGE_GROUPS
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ def serialize_me(user: AppUser) -> dict:
         "provider": user.provider,
         "emailMasked": user.email_masked or "",
         "needsOnboarding": user.agreed_at is None,
+        "ageGroup": user.age_group,
         "createdAt": timezone.localtime(user.created_at).isoformat(),
     }
 
@@ -68,7 +70,9 @@ class MeView(LoginAPIView):
         if user is None:
             return unauthorized()
         body = request.data if isinstance(request.data, dict) else {}
-        fields = []
+        # 검사를 모두 끝낸 뒤 한 번에 저장한다. 첫 실패 하나만 돌려주고 어떤 칸도 바꾸지 않는다
+        # (설계 2026-11-23-peer-personalization-design.md 5-4절: ① 닉네임 → ② 연령대 형식 → ③ 필수)
+        updates = {}
         if "nickname" in body:
             nickname = body["nickname"]
             if not isinstance(nickname, str) or not (
@@ -79,14 +83,23 @@ class MeView(LoginAPIView):
                     "INVALID_NICKNAME",
                     f"닉네임은 {NICKNAME_MIN}~{NICKNAME_MAX}자로 입력해 주세요",
                 )
-            user.nickname = nickname.strip()
-            fields.append("nickname")
+            updates["nickname"] = nickname.strip()
+        if "ageGroup" in body:
+            age_group = body["ageGroup"]
+            if not isinstance(age_group, str) or age_group not in AGE_GROUPS:
+                return error(400, "INVALID_AGE_GROUP", "연령대를 선택해 주세요")
+            updates["age_group"] = age_group
         if body.get("agreedAt"):
+            # 온보딩(약관 동의)에는 연령대가 필수다.
+            # 이미 연령대가 있으면 동의 시각만 다시 보내도 된다
+            if not updates.get("age_group") and not user.age_group:
+                return error(400, "AGE_GROUP_REQUIRED", "연령대를 선택해 주세요")
             # 동의 시각은 서버 시각으로 남긴다 (클라이언트 값은 신호로만 쓴다)
-            user.agreed_at = timezone.now()
-            fields.append("agreed_at")
-        if fields:
-            user.save(update_fields=fields)
+            updates["agreed_at"] = timezone.now()
+        for field, value in updates.items():
+            setattr(user, field, value)
+        if updates:
+            user.save(update_fields=list(updates))
         return Response(serialize_me(user))
 
     def delete(self, request):

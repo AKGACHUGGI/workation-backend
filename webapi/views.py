@@ -52,8 +52,9 @@ def tier(request):
     scope = request.query_params.get("scope", "sigungu")
     if scope not in ("sigungu", "dong"):
         return bad_request("scope 는 sigungu 또는 dong 입니다.")
+    basis = viewer_basis(request)
     regions = data.regions_by_id()
-    region_scores = scoring.unit_scores("region", month)
+    region_scores = scoring.unit_scores("region", month, basis)
     if scope == "sigungu":
         photos = data.one_photo_per_unit("region", list(regions), month)
         items = [
@@ -72,7 +73,7 @@ def tier(request):
     else:
         dongs = data.active_dongs()
         merged = scoring.with_region_metrics(
-            scoring.unit_scores("dong", month),
+            scoring.unit_scores("dong", month, basis),
             region_scores,
             {d.dong_id: d.region_id for d in dongs},
         )
@@ -108,7 +109,7 @@ def popular(request):
     except data.BadMonth as ex:
         return bad_request(str(ex))
     regions = data.regions_by_id()
-    scores = scoring.unit_scores("region", month)
+    scores = scoring.unit_scores("region", month, viewer_basis(request))
     photos = data.one_photo_per_unit("region", list(regions), month)
     views = _view_counts()
     favorites = _favorite_counts()
@@ -285,15 +286,18 @@ def region_detail(request, sgg_id: str):
     if region is None:
         return not_found("시군구를 찾을 수 없습니다.")
     rid = region.region_id
-    all_scores = scoring.unit_scores("region", month)
+    basis = viewer_basis(request)
+    all_scores = scoring.unit_scores("region", month, basis)
     mine = all_scores.get(rid, {})
     raw = lambda k: mine.get(k, {}).get("raw")  # noqa: E731
 
-    monthly = data.region_monthly(rid, ("ease", "peer"))
+    # 보는 사람의 구간이 있으면 월별 또래 원값도 그 구간(peer_<구간>)에서 읽는다
+    peer_key = f"peer_{basis}" if basis else "peer"
+    monthly = data.region_monthly(rid, ("ease", peer_key))
     crowd = monthly["ease"]
     months = [{"month": m, "crowd": round(crowd[m])} for m in sorted(crowd)]
     by_crowd = sorted(crowd, key=crowd.get)
-    peer_by_month = {m: v or 0 for m, v in monthly["peer"].items()}
+    peer_by_month = {m: v or 0 for m, v in monthly[peer_key].items()}
     offpeak = sorted(crowd, key=lambda m: -(peer_by_month.get(m, 0) * (100 - crowd[m])))[:2]
 
     quiet_raw = {u: s.get("quiet", {}).get("raw") for u, s in all_scores.items()}
@@ -305,7 +309,7 @@ def region_detail(request, sgg_id: str):
 
     region_dongs = list(Dong.objects.filter(region_id=rid))
     dongs = [d for d in region_dongs if not d.is_excluded and d.adm_code is not None]
-    dong_scores = scoring.unit_scores("dong", month)
+    dong_scores = scoring.unit_scores("dong", month, basis)
     annual = scoring.unit_scores("dong", None) if month else dong_scores
     visits = data.dong_visits([d.dong_id for d in dongs])
     dong_items = []
@@ -371,7 +375,8 @@ def dong_detail(request, dong_id: str):
     if dong is None:
         return not_found("행정동을 찾을 수 없습니다.")
     region = dong.region
-    all_scores = scoring.unit_scores("dong", month)
+    basis = viewer_basis(request)
+    all_scores = scoring.unit_scores("dong", month, basis)
     mine = all_scores.get(dong.dong_id, {})
     raw = lambda k: mine.get(k, {}).get("raw")  # noqa: E731
 
@@ -409,7 +414,7 @@ def dong_detail(request, dong_id: str):
         scoring.unit_scores("dong", None).get(dong.dong_id, {}).get("local_life", {}).get("raw")
         or 0
     )
-    region_scores = scoring.unit_scores("region", month)
+    region_scores = scoring.unit_scores("region", month, basis)
     # 모바일 M-04 지표 카드 · 고정 바: /api/tier?scope=dong 의 같은 동 scores 와 같은 값
     # (crowd · overnight 는 시군구 값). 집계 제외 동은 scores 를 넣지 않는다.
     scores = (
@@ -488,6 +493,19 @@ def viewer_id(request):
     except AuthenticationFailed:
         return None
     return found[0].user_id if found and found[0] else None
+
+
+def viewer_basis(request) -> str | None:
+    """로그인 사용자의 또래 밀도 구간.
+
+    토큰이 없거나 틀리거나 연령대가 없으면 None (읽기는 막지 않는다).
+    """
+    try:
+        found = SupabaseJWTAuthentication().authenticate(request)
+    except AuthenticationFailed:
+        return None
+    user = found[0] if found else None
+    return scoring.peer_basis(user.age_group) if user is not None else None
 
 
 def _notes(request, by: str, target_id: int) -> Response:

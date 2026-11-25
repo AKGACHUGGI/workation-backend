@@ -9,7 +9,7 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
 | --- | --- |
 | `schema.sql` | Supabase(PostgreSQL) 에 실행한 DDL. 컬럼 설명은 `COMMENT ON`, 전 테이블 RLS |
 | `02_postgis.sql` | 읍면동 경계 폴리곤 컬럼 `dong.geom` + GIST 인덱스 (PostGIS 확장). 2026-11-07 적용 |
-| `03_metrics.sql` | 지표 산출. `metric_def` 시드 8행 + `metric` + `dong_hourly` 를 DB 안에서 계산. 재실행 안전 |
+| `03_metrics.sql` | 지표 산출. `metric_def` 시드 14행(핵심 5 + 보조 3 + 또래 구간 6) + `metric` + `dong_hourly` 를 DB 안에서 계산. 재실행 안전 |
 | `04_dong_feature.sql` | 동네 특징 벡터 `dong_feature` 계산 (pgvector). 지표 점수 4개 + 24시간 곡선 48칸. 재실행 안전 |
 | `05_dong_doc.sql` | 동네 소개문 `dong_doc.body` 생성 (연간 지표 등급 · 태그 · 붐비는 시간 · 한산한 달). 바뀐 문장만 임베딩을 비운다. 재실행 안전 |
 | `seed/tag_vocab.csv` | 자연어 표현 사전 원본 (표현 → 태그·지표). 팀이 표현을 더하면 `build_embeddings.py vocab` 다시 실행 |
@@ -33,7 +33,7 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
 - `anon` / `authenticated` 롤의 테이블 권한은 전부 REVOKE 했고 기본 권한도 회수했다. 백엔드는 DB 커넥션(또는 service role) 으로만 접근한다.
 - 접속 문자열은 커밋하지 않는다. 설정 방법은 이슈 #2 참고.
 - PostGIS 3.3.7 (`extensions` 스키마). `dong.geom`·`adm_code`·`area_km2` 203/204 적재. 고성군 수동면은 경계 자료가 없어 비어 있다(이미 집계 제외). `region.sigungu_code` 12/12.
-- `03_metrics.sql` 로 `metric_def` 8 · `metric` 약 8,900 · `dong_hourly` 127,296 행 적재. pandas 로 따로 계산한 값과 원값·점수·곡선 모두 일치 확인.
+- `03_metrics.sql` 로 `metric_def` 14 · `metric` 28,130 (또래 구간 `peer_*` 16,770 포함) · `dong_hourly` 127,296 행 적재 (2026-11-23 재실행). pandas 로 따로 계산한 값과 원값·점수·곡선 모두 일치 확인(2026-11-07). 재실행 전후 기존 지표 11,360행과 `dong_hourly` 는 그대로다.
 
 ### 적용 이력
 
@@ -56,6 +56,8 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
 | `migrations/20261117_drop-dong-answer.sql` | 동네에 물어보기 답 `dong_answer` 삭제 (답은 Redis 7일만) | 2026-11-17 |
 | `migrations/20261117_app-user-auth.sql` | 로그인: `app_user.email_masked` · `agreed_at` 추가 | 2026-11-17 |
 | `migrations/20261120_photo-upload-poll.sql` | 사용자 사진: `user_photo` 새 표(노트 첨부 · 이달의 사진) + RLS, `report.target_type` 에 `upload`. `photo` 는 그대로. 체감 투표: `metric_vote` 삭제 → `poll_vote`(질문 하나에 한 표) + RLS | 2026-11-20 적용 |
+| `migrations/20261123_peer-personalization.sql` | 또래 밀도 개인화: `app_user.age_group`(10s~90s CHECK), provider CHECK 에 `dummy` | 2026-11-23 적용 |
+| `03_metrics.sql` 재실행 (또래 구간 6개) | `metric_def` 14행, `peer_under20`~`peer_60plus` 행 추가. 점검 (가)(나)(다) 0, 기존 지표·`dong_hourly` 전후 불변 | 2026-11-23 적용 |
 
 ## 지표 (명세 v0.3 변경안 3장)
 
@@ -67,6 +69,7 @@ v0.2(2026-10-28, 명세 v0.1 + v0.2 변경안 통합 18테이블)를 **실제 LG
 | `ease` | 시기 여유 | 월 혼잡 지수 = 해당 월 방문 ÷ 연중 최대 월 방문 × 100 | `vist_total`, `dong_year_summary.vist_max` | region | 역백분위 (혼잡 낮을수록 높음) |
 | `quiet` | 동네 조용함 | 낮 유입 지수 = 평일 낮 체류 ÷ 평일 심야 체류 | `stay_weekday_day`, `stay_weekday_night` | dong + region 집계 | 역백분위 |
 | `peer` | 또래 밀도 | 20~40대 방문 비율 (미상 제외) | `vist_2040_share` | dong + region 집계 | 백분위 |
+| `peer_<구간>` (`peer_under20`·`peer_20s`·`peer_30s`·`peer_40s`·`peer_50s`·`peer_60plus`) | 또래 밀도 연령 구간 (개인화용) | 구간 방문 ÷ 성별·연령 확인 방문 | `vist_age_under20`~`vist_age_60plus`, `vist_known` | dong + region 집계 | 백분위 |
 | `overnight` | 숙박 성향 | 숙박 계수 β = 방문객 1명 증가당 심야 체류 증가분. 시군구별 동 고정효과 회귀 `심야 체류 = α(동) + β·방문 + γ·거주` (심야 체류는 주중 5 : 주말 2 가중) | `stay_weekday_night`, `stay_weekend_night`, `vist_total`, `resd_total` | region, 연간(month 0)만 | 백분위 |
 | `evening` | 저녁 활기 | 평일 저녁 보행 ÷ 평일 저녁 체류 | `walk_weekday_evening`, `stay_weekday_evening` | dong + region 집계 | 백분위 |
 | `weekend_gap` | 주중·주말 차이 (보조) | 주말 낮 체류 ÷ 주중 낮 체류. 0.9~1.1 균형형 | `stay_weekend_day`, `stay_weekday_day` | region | 라벨만 |

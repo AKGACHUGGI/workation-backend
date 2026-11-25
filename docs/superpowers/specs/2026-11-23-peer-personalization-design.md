@@ -1,7 +1,7 @@
 # 또래 밀도 연령대 개인화 설계
 
 - 작성일: 2026-11-23
-- 상태: 초안 (검토 중)
+- 상태: 구현 완료 (2026-11-23, 최종 리뷰 G3 통과. 통합 SHA 는 `docs/task-integration-ledger.tsv`)
 - 범위 저장소: workation-backend (이 문서), workation-web
 - 구현 계획: `docs/superpowers/plans/2026-11-23-peer-personalization.md`
 

@@ -19,6 +19,7 @@
 --     β = 방문객 1명 증가당 심야 체류 증가분(1 이면 숙박형, 0 이면 당일형). 거주 R 을 통제해야 학생 이동 같은
 --     거주 변동이 섞이지 않는다(전주시: 통제 전 2.07 → 통제 후 0.62). 월 변동으로 추정하므로 연간(month 0) 한 값.
 --   보조 지표(weekend_gap, peak_share, local_life)는 원값만, 점수·등급은 NULL.
+--   peer_<구간>(peer_under20 … peer_60plus) = 그 연령 구간 방문인구 ÷ vist_known. 연령대 개인화용(2026-11-23). 점수·등급은 peer 와 같은 식.
 
 BEGIN;
 
@@ -31,12 +32,19 @@ INSERT INTO metric_def (metric_key, name_ko, description, higher_is, is_core) VA
   ('evening',     '저녁 활기',     '평일 저녁(17~22시) 평균 보행인구 ÷ 평일 저녁 평균 체류인구. 저녁에 그 동네에 있는 사람 중 밖을 걷는 비율', 'good', true),
   ('weekend_gap', '주중·주말 차이', '주말 낮 체류 ÷ 주중 낮 체류. 0.9~1.1 균형형, 그 이상 주말형, 그 이하 주중형(경계 초안). 라벨용, 점수 없음', 'good', false),
   ('peak_share',  '성수기 집중도', '상위 3개월 방문인구 ÷ 연간 방문인구(%). 연간(month 0)만. 높을수록 성수기 쏠림', 'bad', false),
-  ('local_life',  '생활권 지수',   '(거주 + 근무) ÷ (거주 + 근무 + 방문). 0.7 이상 생활권, 미만 관광지(경계 초안). 태그용, 점수 없음', 'good', false)
+  ('local_life',  '생활권 지수',   '(거주 + 근무) ÷ (거주 + 근무 + 방문). 0.7 이상 생활권, 미만 관광지(경계 초안). 태그용, 점수 없음', 'good', false),
+  ('peer_under20', '또래 밀도(10대)',      '20세 미만 방문인구 ÷ 성별·연령이 확인된 방문인구. 연령대 개인화용',   'good', false),
+  ('peer_20s',     '또래 밀도(20대)',      '20대 방문인구 ÷ 성별·연령이 확인된 방문인구. 연령대 개인화용',       'good', false),
+  ('peer_30s',     '또래 밀도(30대)',      '30대 방문인구 ÷ 성별·연령이 확인된 방문인구. 연령대 개인화용',       'good', false),
+  ('peer_40s',     '또래 밀도(40대)',      '40대 방문인구 ÷ 성별·연령이 확인된 방문인구. 연령대 개인화용',       'good', false),
+  ('peer_50s',     '또래 밀도(50대)',      '50대 방문인구 ÷ 성별·연령이 확인된 방문인구. 연령대 개인화용',       'good', false),
+  ('peer_60plus',  '또래 밀도(60대 이상)', '60세 이상 방문인구 ÷ 성별·연령이 확인된 방문인구. 연령대 개인화용', 'good', false)
 ON CONFLICT (metric_key) DO UPDATE
   SET name_ko = EXCLUDED.name_ko, description = EXCLUDED.description,
       higher_is = EXCLUDED.higher_is, is_core = EXCLUDED.is_core;
 
-DELETE FROM metric WHERE metric_key IN ('ease','quiet','peer','overnight','evening','weekend_gap','peak_share','local_life');
+DELETE FROM metric WHERE metric_key IN ('ease','quiet','peer','overnight','evening','weekend_gap','peak_share','local_life',
+                                        'peer_under20','peer_20s','peer_30s','peer_40s','peer_50s','peer_60plus');
 
 -- 2. 재료: 행정동 × 월(1~12) + 연간(0) ------------------------------------------
 CREATE TEMP TABLE m_base ON COMMIT DROP AS
@@ -45,7 +53,8 @@ WITH monthly AS (
          s.stay_weekday_day, s.stay_weekday_night, s.stay_weekend_day,
          s.stay_weekday_evening, s.stay_weekend_night,
          s.walk_weekday_evening, s.vist_2040, s.vist_known, s.vist_total,
-         s.resd_total, s.wrk_total
+         s.resd_total, s.wrk_total,
+         s.vist_age_under20, s.vist_age_20s, s.vist_age_30s, s.vist_age_40s, s.vist_age_50s, s.vist_age_60plus
     FROM dong_month_summary s JOIN dong d USING (dong_id)
    WHERE s.year = 2025 AND NOT d.is_excluded
 )
@@ -55,7 +64,8 @@ SELECT dong_id, region_id, 0,
        avg(stay_weekday_day), avg(stay_weekday_night), avg(stay_weekend_day),
        avg(stay_weekday_evening), avg(stay_weekend_night),
        avg(walk_weekday_evening), avg(vist_2040), avg(vist_known), avg(vist_total),
-       avg(resd_total), avg(wrk_total)
+       avg(resd_total), avg(wrk_total),
+       avg(vist_age_under20), avg(vist_age_20s), avg(vist_age_30s), avg(vist_age_40s), avg(vist_age_50s), avg(vist_age_60plus)
   FROM monthly GROUP BY dong_id, region_id;
 
 -- 3. 원값 ------------------------------------------------------------------
@@ -69,6 +79,12 @@ SELECT 'dong', dong_id, month, k, v
     ('quiet',      stay_weekday_day     / NULLIF(stay_weekday_night, 0)),
     ('peer',       vist_2040            / NULLIF(vist_known, 0)),
     ('evening',    walk_weekday_evening / NULLIF(stay_weekday_evening, 0)),
+    ('peer_under20', vist_age_under20 / NULLIF(vist_known, 0)),
+    ('peer_20s',     vist_age_20s     / NULLIF(vist_known, 0)),
+    ('peer_30s',     vist_age_30s     / NULLIF(vist_known, 0)),
+    ('peer_40s',     vist_age_40s     / NULLIF(vist_known, 0)),
+    ('peer_50s',     vist_age_50s     / NULLIF(vist_known, 0)),
+    ('peer_60plus',  vist_age_60plus  / NULLIF(vist_known, 0)),
     ('local_life', (resd_total + wrk_total) / NULLIF(resd_total + wrk_total + vist_total, 0))
   ) AS x(k, v);
 
@@ -79,11 +95,19 @@ SELECT 'region', region_id, month, k, v
                sum(stay_weekday_day) day_, sum(stay_weekday_night) night_, sum(stay_weekend_day) wkend_day,
                sum(stay_weekday_evening) eve_stay, sum(walk_weekday_evening) eve,
                sum(vist_2040) v2040, sum(vist_known) vknown
+               , sum(vist_age_under20) au20, sum(vist_age_20s) a20, sum(vist_age_30s) a30,
+               sum(vist_age_40s) a40, sum(vist_age_50s) a50, sum(vist_age_60plus) a60
           FROM m_base GROUP BY region_id, month) r,
   LATERAL (VALUES
     ('quiet',       day_      / NULLIF(night_, 0)),
     ('peer',        v2040     / NULLIF(vknown, 0)),
     ('evening',     eve       / NULLIF(eve_stay, 0)),
+    ('peer_under20', au20 / NULLIF(vknown, 0)),
+    ('peer_20s',     a20  / NULLIF(vknown, 0)),
+    ('peer_30s',     a30  / NULLIF(vknown, 0)),
+    ('peer_40s',     a40  / NULLIF(vknown, 0)),
+    ('peer_50s',     a50  / NULLIF(vknown, 0)),
+    ('peer_60plus',  a60  / NULLIF(vknown, 0)),
     ('weekend_gap', wkend_day / NULLIF(day_, 0))
   ) AS x(k, v);
 
@@ -135,7 +159,9 @@ SELECT scope, unit_id, month, metric_key, raw_value, score,
        CASE WHEN score IS NULL THEN NULL
             WHEN score >= 75 THEN 'S' WHEN score >= 50 THEN 'A' WHEN score >= 25 THEN 'B' ELSE 'C' END
   FROM (SELECT *,
-               CASE WHEN metric_key IN ('ease','quiet','peer','evening','overnight') AND raw_value IS NOT NULL THEN
+               CASE WHEN metric_key IN ('ease','quiet','peer','evening','overnight',
+                                       'peer_under20','peer_20s','peer_30s','peer_40s','peer_50s','peer_60plus')
+                    AND raw_value IS NOT NULL THEN
                  round(100 * percent_rank() OVER (
                    PARTITION BY scope, month, metric_key, (raw_value IS NULL)
                    ORDER BY CASE WHEN metric_key IN ('ease','quiet') THEN -raw_value ELSE raw_value END))::smallint
