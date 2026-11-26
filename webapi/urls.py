@@ -2,7 +2,7 @@
 
 from django.urls import path, re_path
 
-from webapi import me, poll, tips, uploads, views
+from webapi import me, poll, report, tips, uploads, views
 
 
 class RegionNoteCreateView(me.NoteCreateView):
@@ -77,6 +77,9 @@ urlpatterns = [
         read_or_write(tips.replies, tips.ReplyCreateView.as_view()),
         name="web-tip-replies",
     ),
+    # W-06 지자체 진단 리포트
+    path("reports/<str:sgg_id>/pdf", report.report_pdf, name="web-report-pdf"),
+    path("reports/<str:sgg_id>", report.report, name="web-report"),
     path("search/parse", views.search_parse, name="web-search-parse"),
     path("events", views.events, name="web-events"),
     # 마이페이지 · 즐겨찾기 (로그인 필요).

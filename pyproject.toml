@@ -19,6 +19,7 @@ dependencies = [
     "boto3>=1.35",
     "pillow>=11",
     "certifi>=2026.10.23",
+    "reportlab>=4.4",
 ]
 
 [dependency-groups]
